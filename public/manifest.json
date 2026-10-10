@@ -4,12 +4,17 @@
   "version": "0.1.0",
   "description": "自研通用广告过滤器：运行时注入行为检测 + 自学习规则库，不依赖第三方过滤列表。",
   "minimum_chrome_version": "120",
-  "permissions": ["declarativeNetRequest", "storage"],
+  "permissions": ["declarativeNetRequest", "storage", "activeTab"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
+  "action": {
+    "default_title": "AdBlow",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

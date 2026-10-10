@@ -10,7 +10,9 @@ import {
   type Hit,
   type JudgeOptions,
 } from './engine.ts';
-import { promotedSelectors, recordHit, type LearnedMap, type LearnedStore } from './learn.ts';
+import { promotedSelectors, recordHit } from './learn.ts';
+import { isSiteDisabled, writeStats } from './settings.ts';
+import { chromeLocal } from './storage.ts';
 
 /**
  * 内容脚本（ISOLATED world）。
@@ -19,7 +21,7 @@ import { promotedSelectors, recordHit, type LearnedMap, type LearnedStore } from
  *
  * 两个阶段（顺序很重要）：
  *   阶段一 document_start：静态规则就位。精确锚点，安全，无带宽代价。
- *   阶段二 快照回填成功后：启用启发式。需要完整服务端 HTML，见下。
+ *   阶段二 快照回填成功后：启用启发式。理由见 engine.ts 的 makeInjectionTest。
  */
 
 /**
@@ -31,15 +33,7 @@ import { promotedSelectors, recordHit, type LearnedMap, type LearnedStore } from
  */
 const PRISTINE_STRATEGY: 'auto' | 'always' | 'never' = 'auto';
 
-const store: LearnedStore = {
-  async get(key) {
-    const all = (await chrome.storage.local.get(key)) as Record<string, LearnedMap | undefined>;
-    return all[key];
-  },
-  async set(key, value) {
-    await chrome.storage.local.set({ [key]: value });
-  },
-};
+const store = chromeLocal();
 
 async function loadPacks(url: string): Promise<SitePack[]> {
   try {
@@ -74,6 +68,13 @@ function installCosmeticStyle(selectors: string[]): void {
 
 async function boot(): Promise<void> {
   const host = location.hostname;
+
+  // 安全阀：站点被关掉时立刻退出，一个都不碰
+  if (await isSiteDisabled(store, host)) {
+    console.debug(`[adblow] ${host} 已被用户关闭，本次不做任何处理`);
+    return;
+  }
+
   const packs = await loadPacks(location.href);
   const learned = await promotedSelectors(store, host);
   const selectors = selectorsFrom(packs, learned, (r) =>
@@ -111,42 +112,40 @@ async function boot(): Promise<void> {
   const first = sweep(document.documentElement, options);
   learn(first.hits);
 
+  let rule = first.hiddenByRule;
+  let heuristic = first.hiddenByHeuristic;
+  let mode = '仅静态规则';
+
   // 阶段二：回填完整服务端快照，启用启发式
   const wantBackfill =
     PRISTINE_STRATEGY === 'always' || (PRISTINE_STRATEGY === 'auto' && packs.length === 0);
 
-  if (!wantBackfill) {
-    console.debug(
-      `[adblow] 就绪(仅静态规则) host=${host} 规则包=${packs.length} ` +
-        `选择器=${selectors.length} 首屏隐藏=${first.hiddenByRule}`,
-    );
-    return;
+  if (wantBackfill) {
+    const html = await requestPristineHtml(location.href);
+    if (html) {
+      try {
+        const index = buildPristineIndexFromHtml(html, new DOMParser());
+        // 升级为带启发式的判定；已处理过的节点会被下面的全量 sweep 重新覆盖
+        options = { ...options, injected: makeInjectionTest(index, true) };
+
+        const second = sweep(document.documentElement, options);
+        learn(second.hits);
+
+        rule = second.hiddenByRule;
+        heuristic = second.hiddenByHeuristic;
+        mode = '含启发式';
+      } catch (error) {
+        console.warn('[adblow] 解析服务端快照失败，退化为仅静态规则', error);
+      }
+    } else {
+      mode = '仅静态规则（快照回填失败）';
+    }
   }
 
-  const html = await requestPristineHtml(location.href);
-  if (!html) {
-    console.debug(`[adblow] 就绪(仅静态规则，快照回填失败) host=${host}`);
-    return;
-  }
-
-  let index;
-  try {
-    index = buildPristineIndexFromHtml(html, new DOMParser());
-  } catch (error) {
-    console.warn('[adblow] 解析服务端快照失败', error);
-    return;
-  }
-
-  // 升级为带启发式的判定；已经处理过的节点会被下面的全量 sweep 重新覆盖
-  options = { ...options, injected: makeInjectionTest(index, true) };
-
-  const second = sweep(document.documentElement, options);
-  learn(second.hits);
-
+  await writeStats(store, host, { rule, heuristic });
   console.debug(
-    `[adblow] 就绪(含启发式) host=${host} 规则包=${packs.length} ` +
-      `选择器=${selectors.length} 首屏隐藏 rule=${first.hiddenByRule} ` +
-      `启发式 rule=${second.hiddenByRule} heuristic=${second.hiddenByHeuristic}`,
+    `[adblow] 就绪(${mode}) host=${host} 规则包=${packs.length} ` +
+      `选择器=${selectors.length} 隐藏 rule=${rule} heuristic=${heuristic}`,
   );
 }
 

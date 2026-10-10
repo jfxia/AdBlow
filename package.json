@@ -8,6 +8,7 @@
     "test": "node tests/run-all.ts",
     "typecheck": "tsc --noEmit",
     "build": "node tools/build/build.mjs",
+    "verify": "node tools/build/build.mjs && node tests/run-all.ts",
     "recon": "node tools/recon/snapshot.mjs"
   },
   "devDependencies": {

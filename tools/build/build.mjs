@@ -21,7 +21,6 @@ const root = new URL('../../', import.meta.url);
 const p = (rel) => fileURLToPath(new URL(rel, root));
 
 const DIST = p('dist');
-const PUBLIC_DIR = p('public');
 
 /** 自研 TS 转换插件。 */
 const adblowTs = {
@@ -45,13 +44,24 @@ const adblowTs = {
  * 入口清单。
  *
  * - background：MV3 service worker 支持 ESM，用 es。
- * - content / inject：MV3 内容脚本**不支持静态 ESM 导入**，必须打成
- *   单个自包含 IIFE。这正是用 Rollup 而不是 tsc 的原因。
+ * - content / inject / popup / options：MV3 内容脚本**不支持静态 ESM 导入**，
+ *   所以打成单个自包含 IIFE（HTML 用普通 <script src> 引用）。
+ *   这正是用 Rollup 而不是 tsc 的原因。
  */
 const ENTRIES = [
-  { name: 'background', format: 'es' },
-  { name: 'content', format: 'iife' },
-  { name: 'inject', format: 'iife' },
+  { name: 'background', format: 'es', from: 'src/background/index.ts' },
+  { name: 'content', format: 'iife', from: 'src/content/index.ts' },
+  { name: 'inject', format: 'iife', from: 'src/inject/index.ts' },
+  { name: 'popup', format: 'iife', from: 'src/ui/popup.ts' },
+  { name: 'options', format: 'iife', from: 'src/ui/options.ts' },
+];
+
+/** 需要原样拷贝进 dist/ 的静态资源。 */
+const ASSETS = [
+  { from: 'public/manifest.json', to: 'manifest.json' },
+  { from: 'public/cosmetic.css', to: 'cosmetic.css' },
+  { from: 'src/ui/popup.html', to: 'popup.html' },
+  { from: 'src/ui/options.html', to: 'options.html' },
 ];
 
 rmSync(DIST, { recursive: true, force: true });
@@ -61,7 +71,7 @@ const report = [];
 
 for (const entry of ENTRIES) {
   const bundle = await rollup({
-    input: p(`src/${entry.name}/index.ts`),
+    input: p(entry.from),
     plugins: [nodeResolve(), adblowTs],
     onwarn: (warning) => {
       if (warning.code === 'CIRCULAR_DEPENDENCY') return;
@@ -72,7 +82,6 @@ for (const entry of ENTRIES) {
   await bundle.write({
     file: `${DIST}/${entry.name}.js`,
     format: entry.format,
-    // content / inject 用 IIFE，需要确保没有顶层 await（Rollup 会直接报错）
     generatedCode: 'es2015',
   });
   await bundle.close();
@@ -81,11 +90,11 @@ for (const entry of ENTRIES) {
 }
 
 // 组装静态资源
-for (const file of ['manifest.json', 'cosmetic.css']) {
-  const from = `${PUBLIC_DIR}/${file}`;
-  if (!existsSync(from)) throw new Error(`缺少 public/${file}`);
-  copyFileSync(from, `${DIST}/${file}`);
-  report.push([file, statSync(`${DIST}/${file}`).size, 'copy']);
+for (const asset of ASSETS) {
+  const from = p(asset.from);
+  if (!existsSync(from)) throw new Error(`缺少静态资源 ${asset.from}`);
+  copyFileSync(from, `${DIST}/${asset.to}`);
+  report.push([asset.to, statSync(`${DIST}/${asset.to}`).size, 'copy']);
 }
 
 // 自检：manifest 里声明的每个文件都必须真实存在
