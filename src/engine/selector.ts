@@ -30,7 +30,7 @@ function escapeIdent(ident: string): string {
   return ident.replace(/[^\w-]/g, (c) => `\\${c}`);
 }
 
-export function generalizeSelector(el: Element): string {
+export function generalizeSelector(el: Element): string | null {
   for (const attr of SEMANTIC_ATTRS) {
     if (el.hasAttribute(attr)) return `[${attr}]`;
   }
@@ -54,5 +54,30 @@ export function generalizeSelector(el: Element): string {
     return `#${escapeIdent(id)}`;
   }
 
-  return el.tagName.toLowerCase();
+  // ⚠️ 退无可退时**返回 null，而不是裸标签名**。
+  //
+  // 这里必须说清为什么：自学习规则会进入静态规则集，而静态规则命中即隐藏、
+  // 不做任何判定。若在此返回 "a"，一条「隐藏页面上所有链接」的规则就会被
+  // 写入规则库并在后续访问中无条件生效——灾难级误伤。
+  // 没有稳定特征可泛化时，宁可只隐藏当前这一个元素、不产出规则。
+  return null;
+}
+
+/**
+ * 选择器宽度检查：自学习入库前的第二道防误伤闸门。
+ *
+ * 泛化器已经挡住了裸标签名，但「某一类名恰好在全站到处都是」仍然危险
+ * （例如指向跨站推广的通用按钮类）。所以入库前实测命中数量，过宽即弃。
+ */
+export function isSelectorSafe(
+  selector: string,
+  root: ParentNode,
+  maxMatches = 30,
+): boolean {
+  if (!selector || selector.length < 2) return false;
+  try {
+    return root.querySelectorAll(selector).length <= maxMatches;
+  } catch {
+    return false;
+  }
 }

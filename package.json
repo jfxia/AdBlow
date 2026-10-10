@@ -6,7 +6,9 @@
   "description": "自研通用 Edge (MV3) 广告过滤器：行为检测 + 自学习规则，不依赖第三方过滤列表。",
   "scripts": {
     "test": "node tests/run-all.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "node tools/build/build.mjs",
+    "recon": "node tools/recon/snapshot.mjs"
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^16.0.3",

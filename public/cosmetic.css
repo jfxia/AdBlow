@@ -1,0 +1,17 @@
+/*
+ * 由 manifest 声明的静态样式，保证 document_start 就位、无闪白。
+ *
+ * 这里刻意只放**与站点无关也安全**的规则。站点专属的隐藏规则一律由
+ * src/rules/sites/*.ts 提供、经误伤护栏校验后再由内容脚本注入，
+ * 避免把站点专属选择器硬编码到全局样式里。
+ *
+ * 这条规则的作用：拦掉广告 SDK 后，服务端预留的广告位会变成空盒子留在
+ * 列表里形成空洞，必须把空占位符塌陷掉。
+ */
+[data-ssp-slot-node]:empty,
+[data-ssp-slot-root]:empty {
+  display: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}

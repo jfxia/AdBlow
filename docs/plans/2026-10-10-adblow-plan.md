@@ -50,9 +50,39 @@
 | Task 5 规则模型 + DNR | **完成** | `tests/unit/rules.test.ts` 7 用例 |
 | Task 6 状态清理 | **完成** | `tests/unit/scrub.test.ts` 5 用例 |
 | Task 7 fixture + 站点规则包 | **完成** | `tests/unit/pilot-pack.test.ts` 15 用例，含误伤护栏 |
-| Task 8+ 运行时 / UI / E2E | 待办 | — |
+| Task 8 manifest + 构建 | **完成** | `node tools/build/build.mjs` → `dist/` 4 个文件，manifest 声明项自检通过 |
+| Task 9 内容脚本 | **完成** | `tests/integration/content.test.ts` 22 用例 |
+| Task 10 MAIN world 注入对抗 | **完成** | `tests/unit/guards.test.ts` 13 用例 |
+| Task 11 Background（DNR 同步 / 规则分发 / 快照回填） | **完成** | `tests/unit/match.test.ts` 6 用例 |
+| Task 12 popup + options UI | 待办 | — |
+| Task 13 CDP E2E | 待办（需一次性完全权限） | — |
 
-**当前状态：47/47 测试通过，`tsc --noEmit` 干净。** 构建路径已端到端验证：Rollup 产物在 jsdom 中加载并执行，`[data-ssp-slot-root]` 得分 6、正文 `article` 得分 0、跨站推广链接（不出现在词库中）得分 6 —— 最后一项正是「不依赖第三方列表也能通用」的机制证据。
+**当前状态：108/108 测试通过，`tsc --noEmit` 干净，`dist/` 可加载。**
+构建路径已端到端验证：Rollup 产物在 jsdom 中加载并执行，`[data-ssp-slot-root]` 得分 6、
+正文 `article` 得分 0、跨站推广链接（**不出现在词库中**）得分 6 —— 最后一项正是
+「不依赖第三方列表也能通用」的机制证据。
+
+### ⚠️ 实施期间发现并修正的三个设计缺陷（比原计划的对应步骤更重要）
+
+1. **打分器的聚合结构是错的。** 原计划对整棵子树聚合跨站链接，实测导致
+   `<html>`/`<body>` 各得 **20 分**——过阈值即整页消失。已改为「后代信号仅在元素
+   紧凑（后代 ≤ 12 个元素）时计入」，`<html>`/`<body>` 降到 0 分。
+   标定数据见设计文档 §2.5。
+2. **泛化器会产出裸标签名。** 一个没有 class/id 的推广链接会被泛化成 `a`，
+   一旦入库，静态规则将隐藏页面上**所有链接**。已改为返回 `null`（只隐藏、不建规则），
+   并增加入库前的选择器宽度检查 `isSelectorSafe`。
+3. **启发式需要完整的服务端快照才能启用。** 修好聚合后，服务端渲染的
+   `.contact-link` / `footer#footer` / `div.container` 仍得 8 分（跨站社交链接），
+   阈值 6 会误伤它们；抬到 10 又会丢掉「跨站 + 推广参数 = 6」这条核心检测。
+   因此新增了 service worker 回填通道（`get-pristine`），并且**快照不可信时
+   启发式整体关闭**。
+
+### E2E 的补充验收项（Task 13）
+
+除「广告消失 / 正文不变」外，还需验证：
+
+- 回填请求**只对没有匹配到规则包的站点**发起（试点站命中规则包，应当不发）
+- 回填失败时退化为仅静态规则，且**不产生任何假阳性**
 
 ---
 

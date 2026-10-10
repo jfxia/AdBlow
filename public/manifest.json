@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "AdBlow",
+  "version": "0.1.0",
+  "description": "自研通用广告过滤器：运行时注入行为检测 + 自学习规则库，不依赖第三方过滤列表。",
+  "minimum_chrome_version": "120",
+  "permissions": ["declarativeNetRequest", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["cosmetic.css"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ]
+}

@@ -2,11 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { validateSitePack, type SitePack } from '../../src/engine/rules.ts';
-
-const pack = JSON.parse(
-  readFileSync(new URL('../../src/rules/sites/pilot.json', import.meta.url), 'utf8'),
-) as SitePack;
+import { validateSitePack } from '../../src/engine/rules.ts';
+import { pilotPack as pack } from '../../src/rules/sites/pilot.ts';
 
 const fixture = readFileSync(new URL('../fixtures/pilot-category.html', import.meta.url), 'utf8');
 
@@ -106,6 +103,17 @@ describe('规则包作用于真实 fixture 时的行为', () => {
         sdkArtifacts.includes(key),
         `选择器 ${sel} 在服务端 0 命中，特征串 "${key}" 也不在 SDK/ssp.css 中——可能是拼错了`,
       );
+    }
+  });
+
+  it('不得命中正文缩略图（服务端渲染的懒加载图）', () => {
+    const thumbs = Array.from(doc.querySelectorAll('img[data-src*="upload_01"]'));
+    assert.ok(thumbs.length > 0, 'fixture 里应当有正文缩略图');
+    for (const sel of pack.cosmetic) {
+      const hits = Array.from(doc.querySelectorAll(sel));
+      for (const t of thumbs) {
+        if (hits.includes(t)) assert.fail(`选择器 ${sel} 命中了正文缩略图`);
+      }
     }
   });
 });

@@ -1,0 +1,287 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { JSDOM } from 'jsdom';
+import { buildPristineIndexFromHtml } from '../../src/engine/pristine.ts';
+import { validateSitePack, type SitePack } from '../../src/engine/rules.ts';
+import {
+  isHidden,
+  makeInjectionTest,
+  processAdded,
+  recordableSelector,
+  selectorsFrom,
+  sweep,
+  type JudgeOptions,
+} from '../../src/content/engine.ts';
+import { pilotPack } from '../../src/rules/sites/pilot.ts';
+
+/**
+ * 在真实页面的脱敏快照上做端到端回归。
+ *
+ * 这是「广告零残留、内容零误伤」这个验收标准在沙箱内能做到的最强验证：
+ * 真实 DOM 结构 + 真实规则包 + 真实引擎 + 真实服务端快照，唯独没有浏览器。
+ */
+
+const fixture = readFileSync(new URL('../fixtures/pilot-category.html', import.meta.url), 'utf8');
+const HOST = 'afford.gjvrohros.cc';
+const CONTENT = 'article[itemtype*="BlogPosting"]';
+const THUMB = 'img[data-src*="upload_01"]';
+
+function freshDoc(): Document {
+  return new JSDOM(fixture, { url: `https://${HOST}/category/jrxw1/` }).window.document;
+}
+
+/**
+ * 造判定选项。
+ *
+ * reliable=true 时用 fixture 本身当「完整服务端快照」——这正是 background
+ * 回填通道交付的东西。只有在这个前提下启发式才允许启用（见 content/engine.ts）。
+ */
+function optionsFor(doc: Document, reliable = true): JudgeOptions {
+  const index = buildPristineIndexFromHtml(fixture, new DOMParser());
+  return {
+    injected: makeInjectionTest(index, reliable),
+    host: HOST,
+    viewportArea: 1920 * 1080,
+    selectors: selectorsFrom([pilotPack], []),
+  };
+}
+
+/** 造一个脚本注入的元素。 */
+function inject(doc: Document, html: string): Element {
+  const host = doc.createElement('div');
+  host.innerHTML = html;
+  const el = host.firstElementChild!;
+  doc.body.appendChild(el);
+  return el;
+}
+
+describe('集成：真实 fixture 上的首屏清扫', () => {
+  it('10 个广告占位符全部被隐藏', () => {
+    const doc = freshDoc();
+    sweep(doc.documentElement, optionsFor(doc));
+
+    const slots = Array.from(doc.querySelectorAll('[data-ssp-slot-node]'));
+    assert.equal(slots.length, 10);
+    for (const s of slots) assert.ok(isHidden(s), '广告占位符未被隐藏');
+  });
+
+  it('正文 article 一个都没有被隐藏（误伤守卫）', () => {
+    const doc = freshDoc();
+    const articles = Array.from(doc.querySelectorAll(CONTENT));
+    assert.ok(articles.length > 0);
+
+    sweep(doc.documentElement, optionsFor(doc));
+
+    for (const a of articles) assert.ok(!isHidden(a), '正文 article 被误伤');
+  });
+
+  it('ssp-list 容器本身没有被隐藏（否则会连带抹掉正文列表）', () => {
+    const doc = freshDoc();
+    sweep(doc.documentElement, optionsFor(doc));
+
+    const container = doc.querySelector('[data-ssp-container="ssp-list"]');
+    assert.ok(container);
+    assert.ok(!isHidden(container), 'ssp-list 容器被隐藏了 —— 正文列表会一起消失');
+  });
+
+  it('正文缩略图一个都没有被隐藏（误伤守卫）', () => {
+    const doc = freshDoc();
+    const thumbs = Array.from(doc.querySelectorAll(THUMB));
+    assert.ok(thumbs.length > 0, 'fixture 里应当有正文缩略图');
+
+    sweep(doc.documentElement, optionsFor(doc));
+
+    for (const t of thumbs) assert.ok(!isHidden(t), '正文缩略图被误伤');
+  });
+
+  it('服务端渲染的合法外链盒子没有被隐藏（标定发现的高分元素）', () => {
+    // 这三个元素广告度高达 8 分（跨站链接），全靠「服务端快照」把它们
+    // 与脚本注入区分开。这条断言就是那套机制的回归保护。
+    const doc = freshDoc();
+    sweep(doc.documentElement, optionsFor(doc));
+
+    for (const sel of ['.contact-link', 'footer#footer', 'div.container']) {
+      const els = Array.from(doc.querySelectorAll(sel));
+      assert.ok(els.length > 0, `fixture 里应当有 ${sel}`);
+      for (const e of els) assert.ok(!isHidden(e), `${sel} 被误伤（它是服务端渲染的）`);
+    }
+  });
+
+  it('服务端渲染的推荐位被清掉', () => {
+    const doc = freshDoc();
+    sweep(doc.documentElement, optionsFor(doc));
+
+    for (const sel of [
+      '.xqbj-recommand-item-banner',
+      '.xqbj-component-ssp-horizontal-banner-widget',
+    ]) {
+      const els = Array.from(doc.querySelectorAll(sel));
+      assert.ok(els.length > 0, `${sel} 在 fixture 中应当存在`);
+      for (const e of els) assert.ok(isHidden(e), `${sel} 未被隐藏`);
+    }
+  });
+});
+
+describe('集成：脚本注入的动态内容', () => {
+  it('SDK 注入的覆盖层被静态规则拦住', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc);
+    const overlay = inject(doc, '<div data-ssp-sdk-popup-overlay></div>');
+
+    const hits = processAdded(overlay, options);
+    assert.ok(isHidden(overlay), 'SDK 覆盖层未被隐藏');
+    assert.equal(hits.length, 0, '静态规则命中不计入启发式');
+  });
+
+  it('SDK 注入的悬浮球被静态规则拦住', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc);
+    const ball = inject(doc, '<div class="xqbj-component-ssp-float-icon"></div>');
+
+    processAdded(ball, options);
+    assert.ok(isHidden(ball));
+  });
+
+  it('纯启发式路径：跨站推广盒子被隐藏且产出可用规则', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc);
+    const promo = inject(
+      doc,
+      '<div class="tg-promo-float"><a href="https://spam.example.com/x?click_id=1"><img src="/i.png"></a></div>',
+    );
+
+    const hits = processAdded(promo, options);
+    assert.ok(isHidden(promo), '跨站推广位未被隐藏');
+    assert.equal(hits.length, 1, `应产生 1 条命中，实际 ${hits.length}`);
+    assert.equal(hits[0]!.score, 6, JSON.stringify(hits[0]));
+    assert.deepEqual(hits[0]!.selector, '.tg-promo-float');
+    assert.equal(recordableSelector(hits[0]!, doc), '.tg-promo-float');
+  });
+
+  it('隐藏自身后不再深入子树，避免往自学习库灌噪声', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc);
+    const promo = inject(
+      doc,
+      '<div class="tg-promo-float"><a href="https://spam.example.com/x?click_id=1"></a><i></i><b></b></div>',
+    );
+
+    const hits = processAdded(promo, options);
+    assert.equal(hits.length, 1);
+    assert.equal(promo.querySelectorAll('[data-adblow-hidden]').length, 0, '子树不应被逐个标记');
+  });
+
+  it('没有稳定特征的推广链接被隐藏，但绝不产出裸标签名规则', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc);
+    const link = inject(doc, '<a href="https://spam.example.com/x?click_id=1"></a>');
+
+    const hits = processAdded(link, options);
+    assert.ok(isHidden(link), '该链接应当被隐藏');
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0]!.selector, null, '不得泛化出裸标签名');
+    assert.equal(recordableSelector(hits[0]!, doc), null, '不得入库');
+  });
+
+  it('注入的同源正文不被隐藏（误伤守卫）', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc);
+    const article = inject(
+      doc,
+      '<article itemscope itemtype="http://schema.org/BlogPosting"><a href="/archives/999999/"><h2>x</h2></a></article>',
+    );
+
+    const hits = processAdded(article, options);
+    assert.ok(!isHidden(article), '动态加载的同源正文被误伤');
+    assert.equal(hits.length, 0);
+  });
+
+  it('注入的跨站 CDN 正文图不被隐藏（误伤守卫：只有 3 分，不该过阈值）', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc);
+    const img = inject(doc, '<img src="https://pic.wvxrrip.cn/upload_01/xiao/new.jpeg">');
+
+    const hits = processAdded(img, options);
+    assert.ok(!isHidden(img), '跨站 CDN 的正文图被误伤');
+    assert.equal(hits.length, 0);
+  });
+
+  it('注入的纯外链盒子（无推广参数）只有 4 分，不过阈值（误伤守卫）', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc);
+    const box = inject(doc, '<div class="social-links"><a href="https://t.me/somechannel"></a></div>');
+
+    const hits = processAdded(box, options);
+    assert.ok(!isHidden(box), '4 分不应过阈值 —— 否则所有社交链接块都会被误伤');
+    assert.equal(hits.length, 0);
+  });
+});
+
+describe('集成：快照不可信时启发式必须整体关闭', () => {
+  it('reliable=false 时，脚本注入的推广盒子不被隐藏', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc, false);
+    const promo = inject(
+      doc,
+      '<div class="tg-promo-float"><a href="https://spam.example.com/x?click_id=1"></a></div>',
+    );
+
+    const hits = processAdded(promo, options);
+    assert.ok(!isHidden(promo), '快照不可信时不得跑启发式');
+    assert.equal(hits.length, 0);
+  });
+
+  it('reliable=false 时静态规则仍然生效（精确锚点不依赖快照）', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc, false);
+
+    const overlay = inject(doc, '<div data-ssp-sdk-popup-overlay></div>');
+    processAdded(overlay, options);
+    assert.ok(isHidden(overlay), '静态规则必须与快照可靠性无关');
+
+    sweep(doc.documentElement, options);
+    for (const s of Array.from(doc.querySelectorAll('[data-ssp-slot-node]'))) {
+      assert.ok(isHidden(s));
+    }
+  });
+
+  it('reliable=false 时服务端高分元素同样不被隐藏（无假阳性）', () => {
+    const doc = freshDoc();
+    sweep(doc.documentElement, optionsFor(doc, false));
+
+    for (const sel of ['.contact-link', 'footer#footer']) {
+      for (const e of Array.from(doc.querySelectorAll(sel))) {
+        assert.ok(!isHidden(e));
+      }
+    }
+  });
+});
+
+describe('集成：规则包护栏在链路中生效', () => {
+  it('合法规则包被完整采用', () => {
+    const selectors = selectorsFrom([pilotPack], []);
+    assert.equal(selectors.length, pilotPack.cosmetic.length);
+    assert.ok(selectors.includes('[data-ssp-slot-node]'));
+  });
+
+  it('被护栏拒绝的规则包整包丢弃，并回报原因', () => {
+    const bad: SitePack = {
+      ...pilotPack,
+      id: 'bad-pack',
+      cosmetic: [...pilotPack.cosmetic, '[data-ssp-container]'],
+    };
+    const rejected: string[] = [];
+    const selectors = selectorsFrom([bad], [], (r) => rejected.push(r.packId));
+
+    assert.equal(validateSitePack(bad).length > 0, true);
+    assert.deepEqual(rejected, ['bad-pack']);
+    assert.deepEqual(selectors, [], '整包丢弃，连它合法的选择器也不采用');
+  });
+
+  it('自学习选择器与规则包选择器合并去重', () => {
+    const selectors = selectorsFrom([pilotPack], ['[data-ssp-slot-node]', '.learned-ad']);
+    assert.equal(new Set(selectors).size, selectors.length, '不应有重复');
+    assert.ok(selectors.includes('.learned-ad'));
+  });
+});
