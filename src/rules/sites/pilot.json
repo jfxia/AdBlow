@@ -1,0 +1,37 @@
+{
+  "id": "pilot-cgw",
+  "matches": [
+    "*://afford.gjvrohros.cc/*",
+    "*://*.gjvrohros.cc/*",
+    "*://cgw666.com/*",
+    "*://*.cgw666.com/*"
+  ],
+  "network": [
+    { "kind": "path", "value": "/ad-sdk-v", "resourceTypes": ["script"] },
+    { "kind": "domain", "value": "apiad01.cc", "resourceTypes": ["xmlhttprequest"] },
+    { "kind": "domain", "value": "ads.zyudkkup.com", "resourceTypes": ["xmlhttprequest", "ping", "image"] },
+    { "kind": "domain", "value": "api.zzlprxy.cc", "resourceTypes": ["xmlhttprequest"] },
+    { "kind": "domain", "value": "wj-api-abtest.yvyjdhr.com", "resourceTypes": ["xmlhttprequest"] },
+    { "kind": "domain", "value": "mc.yandex.ru", "resourceTypes": ["script", "image", "ping"] },
+    { "kind": "domain", "value": "googletagmanager.com", "resourceTypes": ["script"] }
+  ],
+  "cosmetic": [
+    "[data-ssp-slot-node]",
+    "[id^=\"ssp-card-\"]",
+    "[data-ssp-slot-root]",
+    "[data-ssp-sdk-popup-overlay]",
+    "[data-ssp-sdk-fullscreen]",
+    "[data-ssp-marquee]",
+    "[data-ssp-marquee-viewport]",
+    "[data-ssp-landing]",
+    ".xqbj-component-ssp-float-icon",
+    ".xqbj-component-ssp-float-icon-mix-node",
+    ".xqbj-component-ssp-popup-icon-container",
+    ".xqbj-component-ssp-horizontal-banner-widget",
+    ".xqbj-component-ssp-icon-grid",
+    ".xqbj-component-ssp-text-grid",
+    ".xqbj-component-ssp-list-card",
+    ".xqbj-recommand-item-banner",
+    ".xqbj-recommand-item-banner-mesosphere"
+  ]
+}

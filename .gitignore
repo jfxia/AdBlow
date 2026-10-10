@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+
+# pnpm 把内容寻址存储建在了工程根目录，绝不能入库
+.pnpm-store/
+
+# 侦察临时区：原始页面、日志、浏览器 profile、探针 ext 都放这里，可随时重抓
+_probe/

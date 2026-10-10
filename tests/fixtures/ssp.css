@@ -1,0 +1,704 @@
+
+/** 0818xifeng SSP 自定义样式 start ****************************************/
+/** 支持自定义(结构不变) ****************************************/
+
+/* SPP适配变量 */
+:root {
+    /* --ssp-list-mask-height: calc(10.5rem + (11.0 - 10.5) * 1rem * ((100vw - 0px) / 320px)); */
+    --ssp-list-mask-height: 10.5rem;
+}
+
+@media (min-width: 320px) and (max-width: 640px) {:root {
+    /* --ssp-list-mask-height: calc(11.0rem + (12.0 - 8.0) * 1rem * ((100vw - 320px) / (640px - 320px))); */
+    --ssp-list-mask-height: 10.5rem;
+}}
+
+@media (min-width: 640px) and (max-width: 800px) {:root {
+    /* --ssp-list-mask-height: calc(12.0rem + (13.25 - 8.0) * 1rem * ((100vw - 640px) / (800px - 640px))); */
+    --ssp-list-mask-height: 12.5rem;
+}}
+
+@media (min-width: 800px) and (max-width: 960px) {:root {
+    --ssp-list-mask-height: calc(13.25rem + (14.0 - 13.25) * 1rem * ((100vw - 800px) / (960px - 800px)));
+}}
+
+@media (min-width: 960px) and (max-width: 1200px) {:root {
+    --ssp-list-mask-height: calc(14.0rem + (15.5 - 14.0) * 1rem * ((100vw - 960px) / (1200px - 960px)));
+}}
+
+@media (min-width: 1200px) {:root {
+    --ssp-list-mask-height: 15.5rem;
+}}
+
+/* 全局 */
+[data-ssp-render-root] img {
+  margin: 0;
+}
+
+[data-ssp-slot-root] a {
+  border: 0;
+}
+
+/* == 图标宫格流(自定义 sspIconGrid ) start ============================================== */
+.xqbj-component-ssp-icon-grid {
+    display: grid;
+    grid-template-columns: repeat(5,minmax(0,1fr));
+    gap: .5rem 1rem;
+    padding: 1rem;
+    border: 0.1rem solid #333;
+    border-radius: .5rem;
+    width: 100%;
+}
+
+.xqbj-component-ssp-icon-grid:has([data-ssp-render-root]) {
+    display: block;
+    grid-template-columns: repeat(5,minmax(0,1fr));
+    gap: .5rem 1rem;
+    padding: 1rem;
+    border: 0.1rem solid #333;
+    border-radius: .5rem
+}
+
+.xqbj-component-ssp-icon-grid:has([data-ssp-render-root]) [data-ssp-grid] {
+    grid-template-columns: repeat(5, minmax(0px, 1fr)) !important;
+}
+
+.xqbj-component-ssp-icon-grid:has([data-ssp-render-root]) [data-ssp-grid] a {
+    padding: 0.3rem 0.475rem !important;
+    border: 0 !important;
+    border-radius: 0.625rem !important;
+}
+
+.xqbj-component-ssp-icon-grid:has([data-ssp-render-root]) [data-ssp-title] {
+    margin-top: 6px  !important;
+    font-size: 0.8rem !important;
+    line-height: 0.6rem !important;
+    color: rgb(185, 185, 185) !important;
+    text-align: center !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    display: block !important;
+    width: 100% !important;
+    font-weight: 500 !important;
+    height: 1.8rem !important;
+    font-size: 0.625rem !important;
+}
+
+.xqbj-component-ssp-icon-grid:has([data-ssp-render-root]) [data-ssp-description] {
+    display: none;
+}
+
+.xqbj-component-ssp-icon-grid img {
+    margin: 0;
+    padding: 0;
+}
+
+.xqbj-component-ssp-icon-grid .xqbj-component-ssp-icon-grid-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    border: 0;
+}
+
+.xqbj-component-ssp-icon-grid .xqbj-component-ssp-icon-grid-item .item-temp {
+    width: 100%;
+    overflow: hidden;
+    position: relative;
+    padding-bottom: 100%;
+    height: 0;
+    border-radius: .5rem
+}
+
+.xqbj-component-ssp-icon-grid .xqbj-component-ssp-icon-grid-item .item-temp>img {
+    position: absolute;
+    inset: 0;
+    background-color: #343434
+}
+
+.xqbj-component-ssp-icon-grid .xqbj-component-ssp-icon-grid-item>span {
+    font-size: .75rem;
+    color: #ffffffcc;
+    margin-top: .2rem;
+    width: 4em;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+@media (min-width: 768px) {
+    .xqbj-component-ssp-icon-grid {
+        grid-template-columns:repeat(10,minmax(0,1fr));
+        gap: 1.0rem 2.0rem;
+        padding: 1rem;
+        border: none
+    }
+
+    .xqbj-component-ssp-icon-grid:has([data-ssp-render-root]) [data-ssp-grid] {
+        grid-template-columns: repeat(10, minmax(0px, 1fr)) !important;
+    }
+
+    .xqbj-component-ssp-icon-grid:has([data-ssp-render-root]) [data-ssp-grid] a {
+        padding: 0.3rem 0.71rem !important;
+        border: 0 !important;
+        border-radius: 0.625rem !important;
+    }
+
+    .xqbj-component-ssp-icon-grid:has([data-ssp-render-root]) [data-ssp-title] {
+        color: #bcbcbc !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        text-align: center !important;
+        width: 100% !important;
+        font-size: 0.65rem !important;
+    }
+
+    .xqbj-component-ssp-icon-grid .xqbj-component-ssp-icon-grid-item>span {
+        margin-top: .2rem
+    }
+}
+
+/* == 列表卡片流(自定义 sspList ) start ================================================== */
+.xqbj-component-ssp-list-item .xqbj-component-ssp-list-card {
+    border-radius: .3125rem;
+    overflow: hidden;
+    background: #fff no-repeat center;
+    background-size: cover;
+    position: relative;
+    transition: .3s ease a妇10120119
+    ll
+}
+
+.xqbj-component-ssp-list-item .xqbj-component-ssp-list-card .xqbj-component-ssp-list-background {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-position: center;
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: hidden;
+    opacity: 1;
+    transition: 1s ease opacity
+}
+
+.xqbj-component-ssp-list-item .xqbj-component-ssp-list-card .xqbj-component-ssp-list-background>img {
+    width: 100%;
+    height: 100%;
+    /* object-fit: inherit; */
+    object-fit: cover;
+    display: block
+}
+
+.xqbj-component-ssp-list-item .xqbj-component-ssp-list-card .xqbj-component-ssp-list-background>img.loading, 
+.xqbj-component-ssp-list-item .xqbj-component-ssp-list-card .xqbj-component-ssp-list-background>img:not([src]) {
+    object-fit: cover;
+}
+
+.xqbj-component-ssp-list-item .xqbj-component-ssp-list-card .xqbj-component-ssp-list-post-card-mask {
+    background: rgba(0, 0, 0, .25);
+    position: relative;
+    z-index: 10;
+    display: table;
+    vertical-align: middle;
+    width: 100%;
+    height: var(--ssp-list-mask-height);
+    overflow: hidden
+}
+
+.xqbj-component-ssp-list-item .xqbj-component-ssp-list-card .xqbj-component-ssp-list-post-card-mask>.xqbj-component-ssp-list-post-card-tag {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    padding: 4px 10px;
+    font-size: 12px;
+    line-height: 1.2;
+    color: #fff;
+    background-color: rgba(0, 0, 0, .3);
+    border-top-left-radius: 4px;
+    pointer-events: none;
+    white-space: nowrap
+}
+
+.xqbj-component-ssp-list-item .xqbj-component-ssp-list-card .xqbj-component-ssp-list-post-card-mask>.xqbj-component-ssp-list-post-card-title {
+    padding: 0 1rem;
+    display: table-cell;
+    width: 100%;
+    height: 100%;
+    vertical-align: middle
+}
+
+@media screen and (min-width: 765px) {
+    .xqbj-component-ssp-list-item .xqbj-component-ssp-list-card .xqbj-component-ssp-list-background>img {
+        object-fit: inherit;
+    }
+
+}
+
+/* == 多创意弹窗(自定义 sspPopupIcon ) start ============================================== */
+.xqbj-component-ssp-popup-icon .xqbj-component-ssp-popup-icon-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999
+}
+
+.xqbj-component-ssp-popup-icon .xqbj-component-ssp-popup-icon-container .xqbj-component-ssp-popup-icon-content {
+    max-width: 80vw;
+    /* width: 100%; */
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center
+}
+
+.xqbj-component-ssp-popup-icon .xqbj-component-ssp-popup-icon-container .xqbj-component-ssp-popup-icon-close {
+    width: 2.334rem;
+    height: 2.334rem;
+    margin-bottom: 1.5rem
+}
+
+.xqbj-component-ssp-popup-icon .xqbj-component-ssp-popup-icon-container .xqbj-component-ssp-popup-icon-close img {
+    width: 100%;
+    height: 100%
+}
+
+.xqbj-component-ssp-popup-icon .xqbj-component-ssp-popup-icon-container .xqbj-component-ssp-popup-icon-picture {
+    width: 100%;
+    height: 100%;
+    text-align: center
+}
+
+.xqbj-component-ssp-popup-icon .xqbj-component-ssp-popup-icon-container .xqbj-component-ssp-popup-icon-picture img {
+    max-width: 50vw;
+    max-height: 70vh;
+    object-fit: contain;
+}
+
+@media screen and (max-width: 768px) {
+    .xqbj-component-ssp-popup-icon .xqbj-component-ssp-popup-icon-container .xqbj-component-ssp-popup-icon-picture img {
+        max-width: 80vw;
+        width: 100%
+    }
+}
+
+/* == 悬浮轮播广告(SSP) start ============================================ */
+.xqbj-component-ssp-float-icon {
+    --swiper-pagination-bullet-horizontal-gap: 0.1rem;
+    --xqbj-swiper-width: 6.25rem;
+    --xqbj-swiper-hediht: 6.25rem;
+    --xqbj-close-width: 1.8rem;
+    --xqbj-close-height: 1.8rem;
+    position: fixed;
+    left: auto;
+    right: 1.875rem;
+    bottom: 3.9375rem;
+    z-index: 1000; 
+    display: none;
+}
+
+.xqbj-component-ssp-float-icon .xqbj-component-ssp-float-icon-mix-node {
+    width: var(--xqbj-swiper-width);
+    height: var(--xqbj-swiper-hediht);
+}
+
+.xqbj-component-ssp-float-icon .banner-swiper {
+    margin-left: auto;
+    margin-right: auto;
+    position: relative;
+    overflow: hidden;
+    list-style: none;
+    padding: 0;
+    z-index: 1;
+}
+
+.xqbj-component-ssp-float-icon .banner-swiper .swiper-wrapper {
+    width: var(--xqbj-swiper-width);
+    height: var(--xqbj-swiper-hediht);
+}
+
+.xqbj-component-ssp-float-icon .banner-swiper .swiper-wrapper .swiper-slide {
+    text-align: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.xqbj-component-ssp-float-icon .banner-swiper .swiper-wrapper .swiper-slide > a {
+    width: var(--xqbj-swiper-width);
+    height: var(--xqbj-swiper-hediht);
+    display: block;
+    cursor: pointer;
+}
+
+.xqbj-component-ssp-float-icon .banner-swiper .swiper-pagination {
+    position: initial;
+    height: 0.8rem;
+    display: flex;
+    justify-content: center;
+    margin: 0.3rem 0 0 0;
+}
+
+.xqbj-component-ssp-float-icon .banner-swiper .swiper-pagination .swiper-pagination-bullet {
+    display: inline-block;
+    border-radius: 50%;
+    background: #000;
+    opacity: 1;
+}
+
+.xqbj-component-ssp-float-icon .banner-swiper .swiper-pagination-bullet.swiper-pagination-bullet-active {
+    background: #ffffff;
+}
+
+.xqbj-component-ssp-float-icon .xqbj-icon-close {
+    position: absolute;
+
+    width: var(--xqbj-close-width);
+    height: var(--xqbj-close-height);
+    left: 50%;
+    top: calc(-0.5rem + var(--xqbj-close-height) * -1);
+    transform: translateX(-50%);
+
+    cursor: pointer;
+    z-index: 2;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.xqbj-component-ssp-float-icon .cus-pagination {
+    position: absolute;
+    bottom: -0.7rem;
+    z-index: 1000;
+    white-space: nowrap;
+}
+
+@media (min-width: 960px) {
+    .xqbj-component-ssp-float-icon {
+        --swiper-pagination-bullet-horizontal-gap: 0.1rem;
+        --xqbj-swiper-width: 6.25rem;
+        --xqbj-swiper-hediht: 6.25rem;
+        --xqbj-close-width: 1.8rem;
+        --xqbj-close-height: 1.8rem;
+        position: fixed;
+        right: auto;
+        left: 50%;
+        bottom: 4.4375rem;
+        z-index: 1000;
+    }
+
+    .xqbj-component-ssp-float-icon .xqbj-icon-close {
+        width: var(--xqbj-close-width);
+        height: var(--xqbj-close-height);
+        left: calc(100% - var(--xqbj-close-width) / 2);
+        top: calc(var(--xqbj-close-height) / -2);
+        transform: none;
+    }
+
+}
+
+@media screen and (min-width: 768px) and (max-width: 1301px) {
+    .xqbj-component-ssp-float-icon {
+        transform: translateX(-50%) translateX(1.875rem) translateX(24.25rem);
+    }
+}
+
+@media screen and (min-width: 1302px) and (max-width: 1599px) {
+    .xqbj-component-ssp-float-icon {
+        transform: translateX(-50%) translateX(1.875rem) translateX(30.0rem);
+    }
+}
+
+@media screen and (min-width: 1600px) and (max-width: 1799px) {
+    .xqbj-component-ssp-float-icon {
+        transform: translateX(-50%) translateX(1.875rem) translateX(32.0rem);
+    }
+}
+
+@media screen and (min-width: 1800px) and (max-width: 1999px) {
+    .xqbj-component-ssp-float-icon {
+        transform: translateX(-50%) translateX(1.875rem) translateX(32.0rem);
+    }
+}
+
+@media screen and (min-width: 2000px) and (max-width: 2399px) {
+    .xqbj-component-ssp-float-icon {
+        transform: translateX(-50%) translateX(1.875rem) translateX(32.5rem);
+    }
+}
+
+@media screen and (min-width: 2400px) {
+    .xqbj-component-ssp-float-icon {
+        transform: translateX(-50%) translateX(1.875rem) translateX(32.5rem);
+    }
+}
+
+.xqbj-component-ssp-float-icon-mix .xqbj-component-ssp-float-icon-mix-node {
+    width: var(--xqbj-swiper-width);
+    height: var(--xqbj-swiper-hediht);
+}
+
+/* == 弹窗九宫格(自定义 sspIconPopupGrid ) start ========================================= */
+.xqbj-component-ssp-popup-icon-grid {
+    /* 512 x 512, 小屏按视口收缩(始终保持正方形) */
+    --xqbj-grid-width: min(400px, 90vw, 70vh);
+    --xqbj-grid-height: min(400px, 90vw, 70vh);
+    --xqbj-close-width: 2.334rem;
+    --xqbj-close-height: 2.334rem;
+
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: none;
+}
+
+.xqbj-component-ssp-popup-icon-grid .xqbj-component-ssp-float-icon-mix-node {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: var(--xqbj-grid-width);
+    height: var(--xqbj-grid-height);
+    overflow-y: auto;
+    border-radius: 0 0 0.5rem 0.5rem;
+    background-color: #333;
+}
+
+.xqbj-component-ssp-popup-icon-grid .xqbj-icon-header {
+    position: absolute;
+    left: 50%;
+    bottom: calc(50% + var(--xqbj-grid-height) / 2);
+    transform: translateX(-50%);
+    width: var(--xqbj-grid-width);
+    z-index: 2;
+    pointer-events: none;
+}
+
+.xqbj-component-ssp-popup-icon-grid .xqbj-icon-header img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.xqbj-component-ssp-popup-icon-grid .xqbj-icon-close {
+    position: absolute;
+    left: 50%;
+    top: calc(50% + var(--xqbj-grid-height) / 2 + 1rem);
+    transform: translateX(-50%);
+    width: var(--xqbj-close-width);
+    height: var(--xqbj-close-height);
+    cursor: pointer;
+    z-index: 2;
+}
+
+.xqbj-component-ssp-popup-icon-grid .xqbj-icon-close img {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.xqbj-component-ssp-popup-icon-grid [data-ssp-render-root] {
+    display: block;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: .5rem 1rem;
+    padding: 1rem;
+}
+
+.xqbj-component-ssp-popup-icon-grid [data-ssp-grid] {
+    grid-template-columns: repeat(5, minmax(0px, 1fr)) !important;
+}
+
+.xqbj-component-ssp-popup-icon-grid,
+.xqbj-component-ssp-popup-icon-grid * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+
+.xqbj-component-ssp-popup-icon-grid ::-webkit-scrollbar,
+.xqbj-component-ssp-popup-icon-grid::-webkit-scrollbar {
+    width: 2px;
+    height: 2px;
+}
+
+.xqbj-component-ssp-popup-icon-grid ::-webkit-scrollbar-track,
+.xqbj-component-ssp-popup-icon-grid::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.xqbj-component-ssp-popup-icon-grid ::-webkit-scrollbar-thumb,
+.xqbj-component-ssp-popup-icon-grid::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 2px;
+}
+
+.xqbj-component-ssp-popup-icon-grid [data-ssp-grid] a {
+    padding: 0.3rem 0.475rem !important;
+    border: 0 !important;
+    border-radius: 0.625rem !important;
+}
+
+.xqbj-component-ssp-popup-icon-grid [data-ssp-title] {
+    display: block !important;
+    width: 100% !important;
+    height: 1.4rem !important;
+    margin-top: 0px !important;
+    font-size: 0.625rem !important;
+    line-height: 1.2rem !important;
+    font-weight: 400 !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    color: #fff !important;
+}
+
+.xqbj-component-ssp-popup-icon-grid [data-ssp-description] {
+    display: none;
+}
+
+.xqbj-component-ssp-popup-icon-grid img {
+    margin: 0;
+    padding: 0;
+}
+
+/* == 横幅列表图(自定义 sspBanner ) start ============================================== */
+.xqbj-component-ssp-horizontal-banner {
+    display: flex;
+    flex-direction: column;
+    padding: 0.5rem 0;
+}
+
+.xqbj-component-ssp-horizontal-banner a {
+    flex: 1;
+    margin-bottom: 0.2rem;
+    /* aspect-ratio: 787 / 121; */
+    overflow: hidden;
+}
+
+.xqbj-component-ssp-horizontal-banner a:last-child {
+    margin-bottom: 0;
+}
+
+.xqbj-component-ssp-horizontal-banner img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
+.xqbj-component-ssp-horizontal-banner img.loading, 
+.xqbj-component-ssp-horizontal-banner img:not([src]) {
+    content: url(/usr/themes/Mirages/images/banner.png);
+}
+
+@media (min-width: 765px) {
+    .xqbj-component-ssp-horizontal-banner a {
+        margin-bottom: 0.5rem;
+        /* aspect-ratio: 812 / 400; */
+    }
+}
+
+/* == 文字九宫格(自定义 sspTextGrid ) start ================================================ */
+
+.xqbj-component-ssp-text-grid {
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 1rem;
+    margin-bottom: 1rem;
+    justify-content: flex-start;
+}
+
+.xqbj-component-ssp-text-grid[data-ssp-slot-key] {
+    display: block;
+}
+
+.xqbj-component-ssp-text-grid a {
+    box-sizing: border-box;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    vertical-align: top;
+    white-space: nowrap;
+    margin-left: 0;
+    width: calc(25% - 0.6rem);
+    min-width: 0;
+    margin-right: 0.75rem;
+    color: #bcbcbc;
+    border: 1px solid #5e5c5c;
+    border-radius: 4px;
+    padding: 0;
+}
+
+.xqbj-component-ssp-text-grid a[data-ssp-grid-text] {
+    text-overflow: ellipsis !important;
+    vertical-align: top !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    color: #bcbcbc !important;
+    border: 1px solid #5e5c5c !important;
+    border-radius: 4px !important;
+}
+
+.xqbj-component-ssp-text-grid a span {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0.2rem 0.3rem;
+}
+
+.xqbj-component-ssp-text-grid a:nth-child(4n) {
+    margin-right: 0;
+}
+
+.xqbj-component-ssp-text-grid a:hover {
+    color: #1abc9c;
+    border-color: #1abc9c;
+    border-bottom-color: #1abc9c;
+}
+
+@media (min-width: 765px) {
+    .xqbj-component-ssp-text-grid a {
+        font-size: 0.9rem;
+    }
+
+    .xqbj-component-ssp-text-grid a[data-ssp-grid-text] {
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+        text-align: center !important;
+        text-overflow: ellipsis !important;
+        vertical-align: top !important;
+        white-space: nowrap !important;
+        margin-left: 0 !important;
+        min-width: 0 !important;
+        margin-right: 0.75rem !important;
+        color: #bcbcbc !important;
+        border: 1px solid #5e5c5c !important;
+        border-radius: 4px !important;
+        padding: 0 !important;
+        font-size: 1.0rem !important;
+        height: 2.6rem !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+}
+/** SPP 样式补充 end ****************************************/
