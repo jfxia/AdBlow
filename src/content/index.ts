@@ -100,20 +100,45 @@ async function boot(): Promise<void> {
     selectors,
   };
 
+  let rule = 0;
+  let heuristic = 0;
+
   // 单一观察器 + 可变 options：阶段二升级时不必重建观察器，也不会重复处理
   new MutationObserver((records) => {
     for (const record of records) {
       for (const node of Array.from(record.addedNodes)) {
-        if (node.nodeType === 1) learn(processAdded(node as Element, options));
+        if (node.nodeType !== 1) continue;
+        const added = processAdded(node as Element, options);
+        rule += added.rule;
+        heuristic += added.hits.length;
+        learn(added.hits);
       }
     }
   }).observe(document.documentElement, { childList: true, subtree: true });
 
-  const first = sweep(document.documentElement, options);
-  learn(first.hits);
+  // sweep 会跳过已隐藏的元素，因此多次累加不会重复计数
+  const sweepNow = (): number => {
+    const r = sweep(document.documentElement, options);
+    learn(r.hits);
+    rule += r.hiddenByRule;
+    heuristic += r.hiddenByHeuristic;
+    return r.hiddenByRule;
+  };
 
-  let rule = first.hiddenByRule;
-  let heuristic = first.hiddenByHeuristic;
+  // 首屏：此刻能扫到的部分。注意 document_start 时正文还没解析出来，
+  // 这一趟通常只覆盖到 <head>，真正的清扫靠下一趟。
+  sweepNow();
+
+  // 关键：DOM 解析完成后必须再扫一次。
+  // 只依赖 MutationObserver 也能补上，但显式扫一遍更可靠（观察器可能丢事件），
+  // 实测第一版就因为只扫了 document_start 那一趟而统计到 隐藏 rule=0。
+  if (document.readyState === 'loading') {
+    await new Promise<void>((resolve) => {
+      document.addEventListener('DOMContentLoaded', () => resolve(), { once: true });
+    });
+    sweepNow();
+  }
+
   let mode = '仅静态规则';
 
   // 阶段二：回填完整服务端快照，启用启发式
@@ -127,12 +152,7 @@ async function boot(): Promise<void> {
         const index = buildPristineIndexFromHtml(html, new DOMParser());
         // 升级为带启发式的判定；已处理过的节点会被下面的全量 sweep 重新覆盖
         options = { ...options, injected: makeInjectionTest(index, true) };
-
-        const second = sweep(document.documentElement, options);
-        learn(second.hits);
-
-        rule = second.hiddenByRule;
-        heuristic = second.hiddenByHeuristic;
+        sweepNow();
         mode = '含启发式';
       } catch (error) {
         console.warn('[adblow] 解析服务端快照失败，退化为仅静态规则', error);

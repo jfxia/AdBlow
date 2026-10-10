@@ -50,19 +50,38 @@
 | Task 5 规则模型 + DNR | **完成** | `tests/unit/rules.test.ts` 7 用例 |
 | Task 6 状态清理 | **完成** | `tests/unit/scrub.test.ts` 5 用例 |
 | Task 7 fixture + 站点规则包 | **完成** | `tests/unit/pilot-pack.test.ts` 15 用例，含误伤护栏 |
-| Task 8 manifest + 构建 | **完成** | `node tools/build/build.mjs` → `dist/` 4 个文件，manifest 声明项自检通过 |
-| Task 9 内容脚本 | **完成** | `tests/integration/content.test.ts` 22 用例 |
+| Task 8 manifest + 构建 | **完成** | `tools/build/build.mjs` → `dist/` 8 个文件，manifest 声明项自检通过 |
+| Task 9 内容脚本 | **完成** | `tests/integration/content.test.ts` 24 用例 |
 | Task 10 MAIN world 注入对抗 | **完成** | `tests/unit/guards.test.ts` 13 用例 |
 | Task 11 Background（DNR 同步 / 规则分发 / 快照回填） | **完成** | `tests/unit/match.test.ts` 6 用例 |
-| Task 12 popup + options UI | 待办 | — |
-| Task 13 CDP E2E | 待办（需一次性完全权限） | — |
+| Task 12 popup + options UI | **完成** | `tests/unit/settings.test.ts` 8 用例 + 构建产物冒烟测试 |
+| Task 13 CDP E2E | **完成** | `tools/e2e/run.mjs`，在真实站点上 **10/10 断言通过** |
 
-**当前状态：108/108 测试通过，`tsc --noEmit` 干净，`dist/` 可加载。**
-构建路径已端到端验证：Rollup 产物在 jsdom 中加载并执行，`[data-ssp-slot-root]` 得分 6、
-正文 `article` 得分 0、跨站推广链接（**不出现在词库中**）得分 6 —— 最后一项正是
-「不依赖第三方列表也能通用」的机制证据。
+**当前状态：129/129 测试通过（0 跳过），`tsc --noEmit` 干净，`dist/` 可加载，
+真实 Edge + 试点站 E2E 全部通过。**
 
-### ⚠️ 实施期间发现并修正的三个设计缺陷（比原计划的对应步骤更重要）
+### 真实浏览器 E2E 结果（2026-10-10，Edge 155，headless）
+
+```
+                     基线（无扩展）        加载 AdBlow 后
+正文可见             20/20                20/20          ← 零误伤
+广告位有内容         10/10                0/10           ← 10/10 被隐藏
+广告请求成功          4                    0（发起 3，拦截 3）
+正文缩略图            10                   10             ← 零误伤
+注入式覆盖层可见      0                    0
+弹窗                  0                    0
+DNR 动态规则          —                    7 条
+```
+
+站点自己的代码侧证拦截生效（页面控制台）：
+
+```
+[tjssp] 加载失败 TypeError: Failed to fetch dynamically imported module: .../ad-sdk-v0.0.4.10.js
+[tjssp] 场景挂载失败 sspBannerWidget / sspListMix
+[tjtag] 接口上报失败 TypeError: Failed to fetch
+```
+
+### ⚠️ 实施期间发现并修正的四个设计缺陷（比原计划的对应步骤更重要）
 
 1. **打分器的聚合结构是错的。** 原计划对整棵子树聚合跨站链接，实测导致
    `<html>`/`<body>` 各得 **20 分**——过阈值即整页消失。已改为「后代信号仅在元素
@@ -76,13 +95,20 @@
    阈值 6 会误伤它们；抬到 10 又会丢掉「跨站 + 推广参数 = 6」这条核心检测。
    因此新增了 service worker 回填通道（`get-pristine`），并且**快照不可信时
    启发式整体关闭**。
+4. **首屏 sweep 跑得太早，统计口径也是错的。** `document_start` 时正文尚未解析，
+   只扫这一趟等于没扫；而占位符实际是被 MutationObserver 在解析过程中拦掉的，
+   原统计只累加 sweep 结果，会显示「规则拦截 0」而实际隐藏了 10 个元素。
+   已补 DOMContentLoaded 补扫，并让 `processAdded` 回报规则命中数。
 
-### E2E 的补充验收项（Task 13）
+### E2E 执行时踩到的两个测量坑（写给后续维护者）
 
-除「广告消失 / 正文不变」外，还需验证：
-
-- 回填请求**只对没有匹配到规则包的站点**发起（试点站命中规则包，应当不发）
-- 回填失败时退化为仅静态规则，且**不产生任何假阳性**
+1. **`Network.requestWillBeSent` 在拦截前就触发**，所以「广告请求数」永远不为 0。
+   必须断言「**成功拿到响应**的广告请求数 = 0」（发起数 − `loadingFailed` 中
+   `blockedReason` 非空的数）。第一版 E2E 就因此误报为失败。
+2. **不能按「type === 'service_worker' 且 chrome-extension:// 前缀」找扩展 SW**：
+   Edge 自身有一批内置扩展 SW（实测先命中的是 `edgeCopilot*` / `edgeAuthPrivate`
+   那一批），连上去读 `declarativeNetRequest` 只会得到 `undefined`。
+   要按我们 manifest 声明的 `background.js` 作为判别锚点。
 
 ---
 

@@ -11,6 +11,7 @@ import {
   recordableSelector,
   selectorsFrom,
   sweep,
+  type Hit,
   type JudgeOptions,
 } from '../../src/content/engine.ts';
 import { pilotPack } from '../../src/rules/sites/pilot.ts';
@@ -45,6 +46,11 @@ function optionsFor(doc: Document, reliable = true): JudgeOptions {
     viewportArea: 1920 * 1080,
     selectors: selectorsFrom([pilotPack], []),
   };
+}
+
+/** processAdded 现返回 {rule, hits} 统计对象，这里只取命中，保持用例可读。 */
+function addHits(el: Element, options: JudgeOptions): Hit[] {
+  return processAdded(el, options).hits;
 }
 
 /** 造一个脚本注入的元素。 */
@@ -129,9 +135,35 @@ describe('集成：脚本注入的动态内容', () => {
     const options = optionsFor(doc);
     const overlay = inject(doc, '<div data-ssp-sdk-popup-overlay></div>');
 
-    const hits = processAdded(overlay, options);
+    const hits = addHits(overlay, options);
     assert.ok(isHidden(overlay), 'SDK 覆盖层未被隐藏');
     assert.equal(hits.length, 0, '静态规则命中不计入启发式');
+  });
+
+  it('processAdded 回报静态规则命中数（统计用，实测踩过计 0 的坑）', () => {
+    // 占位符在解析过程中就会被 MutationObserver 拦掉，此时 DOMContentLoaded
+    // 那一趟 sweep 看到的是已隐藏状态而跳过。统计必须把观察器这次的命中算上，
+    // 否则 Popup 会显示「规则拦截 0」而实际隐藏了 10 个元素。
+    const doc = freshDoc();
+    const options = optionsFor(doc);
+    const overlay = inject(doc, '<div data-ssp-sdk-popup-overlay></div>');
+
+    const result = processAdded(overlay, options);
+    assert.equal(result.rule, 1, '静态规则命中数应为 1');
+    assert.deepEqual(result.hits, []);
+  });
+
+  it('processAdded 回报启发式命中，且不重复计入规则数', () => {
+    const doc = freshDoc();
+    const options = optionsFor(doc);
+    const promo = inject(
+      doc,
+      '<div class="tg-promo-float"><a href="https://spam.example.com/x?click_id=1"></a></div>',
+    );
+
+    const result = processAdded(promo, options);
+    assert.equal(result.rule, 0);
+    assert.equal(result.hits.length, 1);
   });
 
   it('SDK 注入的悬浮球被静态规则拦住', () => {
@@ -139,7 +171,7 @@ describe('集成：脚本注入的动态内容', () => {
     const options = optionsFor(doc);
     const ball = inject(doc, '<div class="xqbj-component-ssp-float-icon"></div>');
 
-    processAdded(ball, options);
+    addHits(ball, options);
     assert.ok(isHidden(ball));
   });
 
@@ -151,7 +183,7 @@ describe('集成：脚本注入的动态内容', () => {
       '<div class="tg-promo-float"><a href="https://spam.example.com/x?click_id=1"><img src="/i.png"></a></div>',
     );
 
-    const hits = processAdded(promo, options);
+    const hits = addHits(promo, options);
     assert.ok(isHidden(promo), '跨站推广位未被隐藏');
     assert.equal(hits.length, 1, `应产生 1 条命中，实际 ${hits.length}`);
     assert.equal(hits[0]!.score, 6, JSON.stringify(hits[0]));
@@ -167,7 +199,7 @@ describe('集成：脚本注入的动态内容', () => {
       '<div class="tg-promo-float"><a href="https://spam.example.com/x?click_id=1"></a><i></i><b></b></div>',
     );
 
-    const hits = processAdded(promo, options);
+    const hits = addHits(promo, options);
     assert.equal(hits.length, 1);
     assert.equal(promo.querySelectorAll('[data-adblow-hidden]').length, 0, '子树不应被逐个标记');
   });
@@ -177,7 +209,7 @@ describe('集成：脚本注入的动态内容', () => {
     const options = optionsFor(doc);
     const link = inject(doc, '<a href="https://spam.example.com/x?click_id=1"></a>');
 
-    const hits = processAdded(link, options);
+    const hits = addHits(link, options);
     assert.ok(isHidden(link), '该链接应当被隐藏');
     assert.equal(hits.length, 1);
     assert.equal(hits[0]!.selector, null, '不得泛化出裸标签名');
@@ -192,7 +224,7 @@ describe('集成：脚本注入的动态内容', () => {
       '<article itemscope itemtype="http://schema.org/BlogPosting"><a href="/archives/999999/"><h2>x</h2></a></article>',
     );
 
-    const hits = processAdded(article, options);
+    const hits = addHits(article, options);
     assert.ok(!isHidden(article), '动态加载的同源正文被误伤');
     assert.equal(hits.length, 0);
   });
@@ -202,7 +234,7 @@ describe('集成：脚本注入的动态内容', () => {
     const options = optionsFor(doc);
     const img = inject(doc, '<img src="https://pic.wvxrrip.cn/upload_01/xiao/new.jpeg">');
 
-    const hits = processAdded(img, options);
+    const hits = addHits(img, options);
     assert.ok(!isHidden(img), '跨站 CDN 的正文图被误伤');
     assert.equal(hits.length, 0);
   });
@@ -212,7 +244,7 @@ describe('集成：脚本注入的动态内容', () => {
     const options = optionsFor(doc);
     const box = inject(doc, '<div class="social-links"><a href="https://t.me/somechannel"></a></div>');
 
-    const hits = processAdded(box, options);
+    const hits = addHits(box, options);
     assert.ok(!isHidden(box), '4 分不应过阈值 —— 否则所有社交链接块都会被误伤');
     assert.equal(hits.length, 0);
   });
@@ -227,7 +259,7 @@ describe('集成：快照不可信时启发式必须整体关闭', () => {
       '<div class="tg-promo-float"><a href="https://spam.example.com/x?click_id=1"></a></div>',
     );
 
-    const hits = processAdded(promo, options);
+    const hits = addHits(promo, options);
     assert.ok(!isHidden(promo), '快照不可信时不得跑启发式');
     assert.equal(hits.length, 0);
   });
@@ -237,7 +269,7 @@ describe('集成：快照不可信时启发式必须整体关闭', () => {
     const options = optionsFor(doc, false);
 
     const overlay = inject(doc, '<div data-ssp-sdk-popup-overlay></div>');
-    processAdded(overlay, options);
+    addHits(overlay, options);
     assert.ok(isHidden(overlay), '静态规则必须与快照可靠性无关');
 
     sweep(doc.documentElement, options);

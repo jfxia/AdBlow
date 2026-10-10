@@ -219,13 +219,18 @@ export function sweep(root: ParentNode, options: JudgeOptions): SweepResult {
   return result;
 }
 
-/** 处理一个新增节点：先判自身，再扫子树。返回自学习应记录的启发式命中。 */
-export function processAdded(el: Element, options: JudgeOptions): Hit[] {
+export type AddedResult = { rule: number; hits: Hit[] };
+
+/** 处理一个新增节点：先判自身，再扫子树。返回统计与自学习应记录的命中。 */
+export function processAdded(el: Element, options: JudgeOptions): AddedResult {
   const self = applyVerdict(el, judgeElement(el, options));
   if (self) {
     // 自身已被隐藏 → 整棵子树已经不可见，不必再逐个判定。
     // 否则既做无用功，又会把广告内部一堆节点的泛化选择器灌进自学习库当噪声。
-    return self.kind === 'heuristic' ? [self.hit] : [];
+    return self.kind === 'heuristic'
+      ? { rule: 0, hits: [self.hit] }
+      : { rule: 1, hits: [] };
   }
-  return sweep(el, options).hits;
+  const swept = sweep(el, options);
+  return { rule: swept.hiddenByRule, hits: swept.hits };
 }
