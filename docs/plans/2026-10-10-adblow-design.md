@@ -214,7 +214,7 @@ MV3 已无阻塞式 `webRequest`，网络拦截只能走 DNR。规则两类：
 | 过滤列表 | **完全自研**（用户决定） | 无订阅依赖；代价是普通站点初期覆盖弱，靠 L3 自学习补齐 |
 | 隐藏样式来源 | `insertCSS` + `origin:'USER'` | 天然压制作者样式，避免 `!important` 拉锯 |
 | 注入世界 | ISOLATED 做检测，MAIN 做对抗 | 检测逻辑需要隔离保护；对抗 `window.open` 必须在 MAIN |
-| 框架 | Vite + TypeScript，UI 用原生 TS | 引擎是重点，UI 保持轻；避免 `@crxjs` 等框架的 MV3 兼容坑 |
+| 框架 | Rollup + 自研 15 行 TS 转换插件，UI 用原生 TS | Vite/Vitest 在本沙箱不可用（见 §5）；`@rollup/plugin-typescript` 会按 tsconfig 的 `include` 过滤，也踩坑。自研插件不经过 tsc 的 emit 校验，因而允许 `.ts` 后缀导入 |
 | 交付形态 | 先开发者模式加载未打包 | 立即可用；代码结构保持上架 Edge 商店的合规性 |
 
 **非目标（v1 不做）：** 第三方列表语法兼容、CNAME 反伪装、移动端、云同步规则、多浏览器（Firefox）适配。
@@ -226,6 +226,18 @@ MV3 已无阻塞式 `webRequest`，网络拦截只能走 DNR。规则两类：
 实测：当前沙箱**禁止命名管道**，Chromium 的 Mojo IPC 起不来，启动 Edge 直接
 `FATAL: mojo/public/cpp/platform/platform_channel.cc: Check failed: 拒绝访问 (0x5)`。
 因此浏览器 E2E 在本会话受限模式下**不可能**运行。
+
+同一个限制还干掉了两个看似无害的工具（实测，勿再尝试）：
+
+- **Vite / Vitest 完全不可用。** Vite 在 Windows 上会调 `exec('net use')` 探测网络驱动器
+  （`optimizeSafeRealPathSync`），该 `exec` 因管道受限抛 `spawn EPERM`，
+  且发生在**配置加载阶段**——所以 `vite build` 和 `vitest run` 都跑不起来。
+  它先尝试的 `fs.realpathSync.native` 在正常目录上不会抛特定错误，因此无法绕过。
+- **`node --test` 也不可用**，因为它会为每个测试文件 spawn 子进程。
+  替代方案是**直接 `node tests/run-all.ts`**（进程内执行，零 spawn）。
+
+注意边界：受限的是**子进程管道**，不是原生插件加载。所以 Rollup（纯 JS + 原生 addon）
+可用——这一点已实测验证。
 
 据此分三层，把绝大部分验证压进沙箱内：
 

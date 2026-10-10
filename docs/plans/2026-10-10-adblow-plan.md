@@ -6,9 +6,9 @@
 
 **目标：** 交付 AdBlow —— 一个完全自研、不依赖第三方过滤列表的 Edge (MV3) 广告过滤器，在试点站 `https://afford.gjvrohros.cc/category/jrxw1/` 上做到广告零残留、内容零误伤。
 
-**架构：** 四层引擎。L1 DNR 网络拦截、L2 USER 源 CSS 精准隐藏、L3 服务端快照 diff + 广告度打分 + 选择器泛化 + 自学习、L4 MAIN world 注入对抗弹窗与反屏蔽。纯逻辑全部下沉到 `src/engine/`，零浏览器依赖，因此可在当前受限沙箱内以 Vitest 充分测试。
+**架构：** 四层引擎。L1 DNR 网络拦截、L2 USER 源 CSS 精准隐藏、L3 服务端快照 diff + 广告度打分 + 选择器泛化 + 自学习、L4 MAIN world 注入对抗弹窗与反屏蔽。纯逻辑全部下沉到 `src/engine/`，零浏览器依赖，因此可在当前受限沙箱内充分单测。
 
-**技术栈：** TypeScript · Vite · Vitest · jsdom · Edge 155 (MV3) · 零依赖 CDP 做 E2E
+**技术栈（已按实测修订）：** TypeScript · **Rollup + 自研 15 行 TS 转换插件** · **`node:test` + jsdom** · Edge 155 (MV3) · 零依赖 CDP 做 E2E
 
 **环境事实（已实测，不要质疑）：**
 - 工作区 `D:\test\ad-blow`；Node v24.15.0；pnpm 10.33.0
@@ -18,12 +18,52 @@
 
 ---
 
+## ⚠️ 工具链修订（已生效，优先级高于下文 Task 0 的原始写法）
+
+实测发现受限沙箱禁止**子进程管道**，直接推翻了原计划的工具链。执行者请以本节为准：
+
+| 原计划 | 实际采用 | 原因（实测） |
+|---|---|---|
+| Vitest | `node tests/run-all.ts`（进程内） | Vite 在 Windows 下调 `exec('net use')` 探测网络驱动器，管道受限抛 `spawn EPERM`，且发生在**配置加载阶段**，`vitest run` 与 `vite build` 均无法启动，无法绕过 |
+| `node --test` | 同上 | `node --test` 会为每个测试文件 spawn 子进程，同样 `EPERM` |
+| Vite 构建 | Rollup + 自研 `transpileModule` 插件 | Rollup 是纯 JS + 原生 addon，**受限的是管道而非原生加载**，已实测可用 |
+| `@rollup/plugin-typescript` | 自研插件 | 该插件按 tsconfig 的 `include` 过滤文件，会静默跳过未包含的文件，rollup 随后把 TS 当 JS 解析报 `Expected '{', got ':'` |
+| pnpm 默认符号链接布局 | `.npmrc` 加 `node-linker=hoisted` | 符号链接农场被文件锁打断：`ERR_PNPM_EBUSY on native bindings` |
+| 三方列表转换器 | 不适用 | 用户决定完全自研 |
+
+**两条影响全部代码示例的约定：**
+1. 源码导入一律写显式 `.ts` 后缀（Node ESM 要求显式扩展名），tsconfig 已开 `allowImportingTsExtensions`。
+2. 下文所有 `import { describe, it, expect } from 'vitest'` 与 `expect(...)` 断言，一律改写成
+   `import { describe, it } from 'node:test'` + `import assert from 'node:assert/strict'`
+   （`toBe`→`assert.equal`，`toEqual`→`assert.deepEqual`，`toBeGreaterThan`→`assert.ok(a>b)`，
+   `toMatch`→`assert.match`，`not.toThrow`→`assert.doesNotThrow`，`not.toContain`→`assert.ok(!s.includes(x))`）。
+
+## ✅ 进度（截至 2026-10-10）
+
+| 任务 | 状态 | 证据 |
+|---|---|---|
+| Task 0 脚手架 | **完成** | `pnpm typecheck` 通过 |
+| Task 1 广告词库 | **完成** | `tests/unit/lexicon.test.ts` 6 用例 |
+| Task 2 快照 diff | **完成** | `tests/unit/pristine.test.ts` 3 用例 |
+| Task 3 广告度打分 | **完成** | `tests/unit/score.test.ts` 6 用例 |
+| Task 4 选择器泛化 | **完成** | `tests/unit/selector.test.ts` 5 用例 |
+| Task 5 规则模型 + DNR | **完成** | `tests/unit/rules.test.ts` 7 用例 |
+| Task 6 状态清理 | **完成** | `tests/unit/scrub.test.ts` 5 用例 |
+| Task 7 fixture + 站点规则包 | **完成** | `tests/unit/pilot-pack.test.ts` 15 用例，含误伤护栏 |
+| Task 8+ 运行时 / UI / E2E | 待办 | — |
+
+**当前状态：47/47 测试通过，`tsc --noEmit` 干净。** 构建路径已端到端验证：Rollup 产物在 jsdom 中加载并执行，`[data-ssp-slot-root]` 得分 6、正文 `article` 得分 0、跨站推广链接（不出现在词库中）得分 6 —— 最后一项正是「不依赖第三方列表也能通用」的机制证据。
+
+---
+
 ## 阶段 0：脚手架
 
-### Task 0：初始化工程与测试环境
+### Task 0：初始化工程与测试环境 ✅ 已完成
+
+> 原始写法（Vitest/Vite）已被上文「工具链修订」推翻，下面已是实际采用的版本。
 
 **Files:**
-- Create: `package.json`, `tsconfig.json`, `vitest.config.ts`, `.gitignore`, `.npmrc`
+- Create: `package.json`, `tsconfig.json`, `.gitignore`, `.npmrc`, `tests/setup.ts`, `tests/run-all.ts`
 
 **Step 1: 初始化 git 与包管理**
 
@@ -31,10 +71,14 @@
 git init
 ```
 
-**Step 2: 写 `.npmrc`（用镜像，实测快 3 倍）**
+**Step 2: 写 `.npmrc`（镜像加速 + 扁平布局）**
 
 ```ini
 registry=https://registry.npmmirror.com
+
+# 沙箱环境下 pnpm 的符号链接农场会被文件锁打断（EBUSY on native bindings），
+# 改用扁平布局，代价是 node_modules 稍大。
+node-linker=hoisted
 ```
 
 **Step 3: 写 `package.json`**
@@ -45,18 +89,20 @@ registry=https://registry.npmmirror.com
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "description": "自研通用 Edge (MV3) 广告过滤器：行为检测 + 自学习规则，不依赖第三方过滤列表。",
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "build": "vite build",
+    "test": "node tests/run-all.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/chrome": "^0.0.287",
-    "jsdom": "^25.0.1",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.5",
-    "vitest": "^2.1.8"
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@types/chrome": "^0.3.5",
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^22.10.2",
+    "jsdom": "^30.1.2",
+    "rollup": "^4.64.4",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3"
   }
 }
 ```
@@ -74,24 +120,53 @@ registry=https://registry.npmmirror.com
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["chrome", "vitest/globals"]
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "types": ["node", "chrome"]
   },
   "include": ["src", "tests", "tools"]
 }
 ```
 
-**Step 5: 写 `vitest.config.ts`（单元测试跑在 jsdom 环境）**
+> `allowImportingTsExtensions` 要求 `noEmit`，所以 `tsc` 只做类型检查、不产物；
+> 打包交给 Rollup（见修订表）。
+
+**Step 5: 写 `tests/setup.ts`（把 jsdom 的 DOM 挂到 Node 全局）**
 
 ```ts
-import { defineConfig } from 'vitest/config';
+import { JSDOM } from 'jsdom';
 
-export default defineConfig({
-  test: {
-    environment: 'jsdom',
-    include: ['tests/**/*.test.ts'],
-    globals: true,
-  },
+const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+  url: 'https://afford.gjvrohros.cc/',
+  pretendToBeVisual: true,
 });
+
+const target = globalThis as unknown as Record<string, unknown>;
+const source = dom.window as unknown as Record<string, unknown>;
+
+for (const key of ['window', 'document', 'Element', 'HTMLElement', 'Node', 'NodeList',
+  'MutationObserver', 'DOMParser', 'CSS', 'getComputedStyle', 'location', 'navigator']) {
+  const value = source[key];
+  if (value === undefined) continue;
+  try {
+    target[key] = value;
+  } catch {
+    // Node 24 的 navigator/location 是只读 getter，跳过即可
+  }
+}
+```
+
+**Step 5b: 写 `tests/run-all.ts`（单进程测试入口，零 spawn）**
+
+```ts
+import './setup.ts';          // 静态导入保证 setup 先于测试求值
+import { readdirSync } from 'node:fs';
+
+const dir = new URL('./unit/', import.meta.url);
+const files = readdirSync(dir).filter((f) => f.endsWith('.test.ts')).sort();
+if (files.length === 0) { console.error('没有发现任何测试文件'); process.exit(1); }
+for (const f of files) await import(new URL(f, dir).href);
 ```
 
 **Step 6: 写 `.gitignore`**
@@ -99,26 +174,28 @@ export default defineConfig({
 ```gitignore
 node_modules/
 dist/
-_probe/edge-profile*/
-_probe/*.txt
-_probe/page.html
 coverage/
+.pnpm-store/     # pnpm 把内容寻址存储建在了工程根目录，绝不能入库
+_probe/          # 侦察临时区：原始页面、日志、浏览器 profile
 ```
 
 **Step 7: 安装并验证**
 
 Run: `pnpm install`
 Run: `pnpm typecheck`
-Expected: 无错误（此时还没有源文件，`tsc` 应有 "No inputs were found" —— 先建一个占位 `src/engine/index.ts` 导出空对象再跑）
+Expected: 无错误
 
 Run: `pnpm test`
-Expected: `No test files found`（正常，下一步才写第一个测试）
+Expected: 此时应为 `没有发现任何测试文件` 且退出码 1（正常，下一步才写第一个测试）
 
 **Step 8: 提交**
 
 ```powershell
-git add -A; git commit -m "chore: scaffold AdBlow with vite + vitest + jsdom"
+git add -A; git commit -m "chore: scaffold AdBlow with rollup + node:test + jsdom"
 ```
+
+> **踩坑记录：** `git add -A` 会把 `.pnpm-store/`（3183 个文件）一起暂存。
+> 先确认 `.gitignore` 生效：`git add -A --dry-run | Select-String pnpm-store` 应为空。
 
 ---
 
