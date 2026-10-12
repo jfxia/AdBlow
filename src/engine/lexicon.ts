@@ -63,6 +63,14 @@ const STRONG_TOKENS = new Set([
   'preroll',
   'interstitial',
   'ssp',
+  // 视频广告的行业通用术语（2026-10-10 验收实测补入）：
+  // outstream/instream 是页外流与内嵌流的标准叫法，vast/vmap/vpaid 是
+  // IAB 的广告投放协议名，正常页面内容不会用这些词命名。
+  'outstream',
+  'instream',
+  'vast',
+  'vmap',
+  'vpaid',
 ]);
 
 /** 连写/无分隔符形式：整词切不出来，只能子串匹配。 */
@@ -94,7 +102,20 @@ const WEAK_TOKENS = new Set([
   'pop',
   'float',
   'gg',
+  // 粘性横幅（底部/顶部固定条）。在正常 UI 里 `sticky` 也用于粘性页头，
+  // 所以只作为弱词：必须另有跨站链接/素材等旁证才成立。
+  'sticky',
 ]);
+
+/**
+ * 刻意**不**收录的词（记录取舍，避免以后有人"顺手加上"）：
+ *
+ * - `overlay`：`.overlay` / `.modal-overlay` 是合法对话框的通用类名
+ *   （Bootstrap 等大量框架在用），而这类对话框常含跨站链接（分享、支付），
+ *   收进来会把正常对话框一起隐藏。视频叠加广告改用**几何判据**解决
+ *   （见 content/engine.ts 的「播放器内覆盖」分支）。
+ * - `video`：任何视频播放器都会命中，收进来等于隐藏全站视频。
+ */
 
 /** 否定前缀：`no-banner-image` 里的 banner 不算信号。 */
 const NEGATIONS = new Set(['no', 'not', 'non', 'without']);

@@ -303,8 +303,51 @@ export function isOverlay(el: Element, ctx: OverlayContext): boolean {
   const rect = (ctx.rectOf ?? defaultRectOf)(el);
   if (!rect || ctx.viewportArea <= 0) return false;
 
-  return (rect.width * rect.height) / ctx.viewportArea >= OVERLAY_AREA_RATIO;
+  const areaRatio = (rect.width * rect.height) / ctx.viewportArea;
+  if (areaRatio >= OVERLAY_AREA_RATIO) return true;
+
+  // ② 播放器内叠加（2026-10-10 验收实测补入）
+  //
+  // 视频叠加广告只盖住播放器，占视口往往不到 40%，按视口算会被漏掉。
+  // 判据要求「几乎完全盖住祖先 + 该祖先里有 <video>」，因此它只匹配
+  // **播放器内叠加层**，不会波及轮播图、卡片图这类"绝对定位盖住父元素"的正常布局。
+  return coversVideoAncestor(el, rect, ctx);
 }
+
+/** 元素是否几乎完全盖住某个「内部含 `<video>`」的祖先（播放器内叠加层形态）。 */
+function coversVideoAncestor(
+  el: Element,
+  rect: { width: number; height: number },
+  ctx: OverlayContext,
+): boolean {
+  const rectOf = ctx.rectOf ?? defaultRectOf;
+  const ownArea = rect.width * rect.height;
+  if (ownArea <= 0) return false;
+
+  let parent = el.parentElement;
+  for (let i = 0; i < 3 && parent; i++) {
+    const hasVideo = parent.querySelector('video') !== null;
+    if (hasVideo) {
+      const pr = rectOf(parent);
+      if (pr) {
+        const parentArea = pr.width * pr.height;
+        const parentRatio = parentArea / Math.max(ctx.viewportArea, 1);
+        const coverage = ownArea / Math.max(parentArea, 1);
+        if (coverage >= OVERLAY_CONTAINER_COVERAGE && parentRatio >= OVERLAY_CONTAINER_MIN_RATIO) {
+          return true;
+        }
+      }
+      return false;
+    }
+    parent = parent.parentElement;
+  }
+  return false;
+}
+
+/** 播放器内叠加层：至少要盖住所在容器的这个比例。 */
+export const OVERLAY_CONTAINER_COVERAGE = 0.8;
+/** 所在容器至少要占视口这个比例，避免为角落里的小控件触发。 */
+export const OVERLAY_CONTAINER_MIN_RATIO = 0.08;
 
 /** 找出页面上的覆盖层候选（覆盖大块视口的固定/绝对定位盒子）。 */
 export function findOverlays(root: ParentNode, ctx: OverlayContext): Element[] {
@@ -364,6 +407,177 @@ export function findOverlayAds(
  * 只看会**加载资源**的标签；不看 `<a href>`（那是点击目标，不算"使用"）。
  */
 export const RESOURCE_TAGS = 'img,script,link,iframe,video,source,embed,object';
+
+// ── 几何突增重判（随动伸缩 / 悬浮展开 / 自动放大）────────────────────
+
+/** 几何突增作为旁证时额外计入的分值。 */
+export const GROWTH_BONUS = 4;
+
+/**
+ * 判定一个「面积刚刚突然撑大」的元素。
+ *
+ * 与常规三档判定的区别：**不再要求"必须证明是脚本注入"**。
+ * 几何突增本身就是证据 —— 一个原本不起眼的盒子突然撑到占视口 15% 以上，
+ * 同时带弱命名或跨站链接/素材，这就足够说明它是展开型广告。
+ *
+ * ⚠️ 产出的 hit 刻意**不带 selector**：几何是**瞬时证据**，
+ * 一个正常组件偶然撑大不该被固化成永久规则。隐藏当下这一次即可。
+ */
+export function judgeGrownElement(el: Element, options: JudgeOptions): Verdict | null {
+  if (isHidden(el)) return null;
+  if (holdsRealContent(el)) return null;
+
+  const naming = namingSignal(el).strength;
+  const { score, behavior, reasons } = scoreNode(el, {
+    pageHost: options.host,
+    viewportArea: options.viewportArea,
+  });
+
+  if (naming < NAMING_WEAK && behavior < OVERLAY_CORROBORATION) return null;
+
+  return {
+    kind: 'heuristic',
+    hit: {
+      selector: null,
+      score: score + GROWTH_BONUS,
+      reasons: [...reasons, 'geometry-growth'],
+    },
+  };
+}
+
+// ── 假关闭按钮（伪装成关闭的跨站链接）──────────────────────────────
+
+/**
+ * 「看起来是关闭控件」的线索。
+ *
+ * 用属性选择器做廉价预筛，再用 looksLikeCloseControl 精确判断。
+ */
+export const CLOSE_HINT_SELECTOR = [
+  '[class*="close"]',
+  '[class*="Close"]',
+  '[id*="close"]',
+  '[id*="Close"]',
+  '[class*="dismiss"]',
+  '[class*="Dismiss"]',
+  '[aria-label*="close"]',
+  '[aria-label*="Close"]',
+  '[aria-label*="关闭"]',
+  '[title*="close"]',
+  '[title*="Close"]',
+  '[title*="关闭"]',
+].join(',');
+
+/** 常见的关闭符号/文字。 */
+const CLOSE_TEXTS = new Set(['×', '✕', '✖', '╳', 'x', 'X', '关', '关闭', 'close', 'Close', 'CLOSE']);
+
+/** 元素是否"看起来用于关闭"。 */
+export function looksLikeCloseControl(el: Element): boolean {
+  const hay = [
+    el.getAttribute('class') ?? '',
+    el.getAttribute('id') ?? '',
+    el.getAttribute('aria-label') ?? '',
+    el.getAttribute('title') ?? '',
+    el.getAttribute('role') ?? '',
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  if (/close|dismiss|关闭/.test(hay)) return true;
+
+  const text = (el.textContent ?? '').trim();
+  return CLOSE_TEXTS.has(text);
+}
+
+/** 跨站链接判断（按可注册域名）。 */
+function isCrossSiteLink(href: string, pageHost: string): boolean {
+  if (!href || href.startsWith('#') || href.startsWith('javascript:')) return false;
+  try {
+    const parsed = new URL(href, `https://${pageHost}`);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    return registrableDomain(parsed.hostname) !== registrableDomain(pageHost);
+  } catch {
+    return false;
+  }
+}
+
+/** 假关闭按钮：向上找它的广告容器，最多追这么多层。 */
+export const FAKE_CLOSE_MAX_DEPTH = 6;
+
+/**
+ * 找「假关闭按钮」并给出应当隐藏的广告容器。
+ *
+ * 手法：广告浮窗上的 "×" 其实是个跨站链接，点了不是关闭而是跳转。
+ * 常规判据抓不到它 —— 小浮窗（占视口不到 40%）过不了覆盖层阈值，
+ * 又常常没有任何广告命名。但"**关闭控件却是跨站链接**"这件事本身极可疑：
+ * 正常站点的关闭按钮不会把人带到别的域名去。
+ *
+ * 处理方式不是拦点击（那样广告还在），而是**把外层广告容器整体隐藏**。
+ */
+export function findFakeCloseAds(
+  root: ParentNode,
+  opts: { host: string; maxDepth?: number },
+): OverlayAd[] {
+  const maxDepth = opts.maxDepth ?? FAKE_CLOSE_MAX_DEPTH;
+  const out: OverlayAd[] = [];
+  const seen = new Set<Element>();
+
+  for (const el of Array.from(root.querySelectorAll(CLOSE_HINT_SELECTOR))) {
+    if (isInsideHidden(el)) continue;
+    if (!looksLikeCloseControl(el)) continue;
+
+    const anchor = el.closest('a[href]');
+    if (!anchor) continue;
+    if (!isCrossSiteLink(anchor.getAttribute('href') ?? '', opts.host)) continue;
+
+    // 从链接向上找"看起来像广告浮层"的容器。
+    //
+    // ⚠️ 必须**优先取定位祖先**（2026-10-10 单元测试抓到的真 bug）：
+    // 早先的实现取"最外层匹配的祖先"，而任意一层含图片的通用包裹 div 都算匹配，
+    // 结果会选到一个离广告浮窗很远的容器 —— 隐藏范围过大。广告浮窗一定是
+    // 固定/绝对定位的，所以定位祖先才是正确目标。
+    let positioned: Element | null = null;
+    let mediaFallback: Element | null = null;
+    let node: Element | null = anchor.parentElement;
+    for (let i = 0; i < maxDepth && node; i++) {
+      if (node === document.body || node === document.documentElement) break;
+      // 一旦碰上装着正文的祖先就停手 —— 宁可漏，不可误伤内容
+      if (holdsRealContent(node)) break;
+
+      let isPositioned = false;
+      try {
+        const pos = getComputedStyle(node).position;
+        isPositioned = pos === 'fixed' || pos === 'absolute';
+      } catch {
+        isPositioned = false;
+      }
+
+      if (isPositioned) {
+        // 持续向上覆盖：定位链上最外层的那个才是整个浮窗
+        positioned = node;
+      } else if (positioned === null && mediaFallback === null) {
+        // 只有完全找不到定位祖先时，才退而求其次用一个含媒体的近层容器
+        if (node.querySelector('img,video,iframe,canvas') !== null) mediaFallback = node;
+      }
+
+      node = node.parentElement;
+    }
+
+    const container = positioned ?? mediaFallback;
+    if (!container || seen.has(container)) continue;
+    seen.add(container);
+
+    out.push({
+      element: container,
+      hit: {
+        selector: generalizeSelector(container),
+        score: 0,
+        reasons: ['fake-close-cross-site'],
+      },
+    });
+  }
+
+  return out;
+}
 
 /**
  * 站点自有基础设施的声明位置（canonical / og / 图标）。

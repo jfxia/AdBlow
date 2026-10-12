@@ -1,11 +1,15 @@
 import { buildPristineIndexFromHtml } from '../engine/pristine.ts';
 import { withTimeout } from '../engine/async.ts';
 import { findInvisibleClickLayers } from '../engine/clickLayer.ts';
+import { collectGrownElements, createGrowthTracker } from '../engine/geometry.ts';
 import type { SitePack } from '../engine/rules.ts';
 import {
+  applyVerdict,
   cosmeticCss,
+  findFakeCloseAds,
   findOverlayAds,
   hideElement,
+  judgeGrownElement,
   learnableAdDomains,
   makeInjectionTest,
   processAdded,
@@ -19,6 +23,19 @@ import { promotedSelectors, recordHit } from './learn.ts';
 import { recordDomains } from './domainLearn.ts';
 import { isSiteDisabled, writeStats } from './settings.ts';
 import { chromeLocal } from './storage.ts';
+
+/**
+ * 几何巡检的防抖间隔。
+ *
+ * 展开型广告是**鼠标移入 / 滚动**触发的，所以按需巡检即可，不必常驻轮询 ——
+ * 常驻 2 秒定时器在真实站点上是持续的 CPU 开销（一次巡检 = 一次
+ * querySelectorAll + 最多 600 次尺寸读取）。
+ *
+ * ⚠️ 但**基线必须在展开之前记下**，否则第一次巡检时元素已经撑大了，
+ * 面积记为"本来就大"，后续永远检测不出增长。因此 upkeep 每轮也会跑一次
+ * 几何巡检来建立/更新基线，早于任何用户交互。
+ */
+const GEOMETRY_DEBOUNCE_MS = 600;
 
 /**
  * 内容脚本（ISOLATED world）。
@@ -135,6 +152,9 @@ async function boot(): Promise<void> {
   let rule = 0;
   let heuristic = 0;
 
+  /** 几何面积快照：用于发现「靠 CSS 撑大」的展开型广告。 */
+  const tracker = createGrowthTracker();
+
   // 单一观察器 + 可变 options：阶段二升级时不必重建观察器，也不会重复处理
   new MutationObserver((records) => {
     for (const record of records) {
@@ -155,6 +175,48 @@ async function boot(): Promise<void> {
     rule += r.hiddenByRule;
     heuristic += r.hiddenByHeuristic;
     return r.hiddenByRule;
+  };
+
+  /**
+   * 几何突增重判（随动伸缩 / 悬浮展开 / 自动放大）—— 独立一趟。
+   *
+   * 这类广告靠**纯 CSS 变化**工作：元素一直在页面上、只是又小又不起眼，
+   * 鼠标移上去之后被撑成大图。不产生任何节点增删，因此 MutationObserver
+   * 永远不触发 —— 验收实测里 8/18/21 三条全挂在这里。
+   * 几何突增本身就是证据，所以这一趟不再要求"必须证明是脚本注入"。
+   */
+  const recheckGrown = (): number => {
+    const grown = collectGrownElements(document, tracker, {
+      viewportArea: innerWidth * innerHeight,
+    });
+    let n = 0;
+    for (const el of grown) {
+      const verdict = judgeGrownElement(el, options);
+      if (verdict) {
+        applyVerdict(el, verdict);
+        heuristic += 1;
+        n += 1;
+      }
+    }
+    if (n) console.debug(`[adblow] 几何突增重判隐藏 ${n} 个元素`);
+    return n;
+  };
+
+  /**
+   * 假关闭按钮（伪装成关闭的跨站链接）—— 独立一趟。
+   *
+   * 小浮窗过不了覆盖层面积阈值，又常常没有任何广告命名，常规判据抓不到。
+   * 但「关闭控件却是跨站链接」本身极可疑：正常站点的关闭按钮不会把人带去别的域名。
+   */
+  const hideFakeClose = (): number => {
+    const ads = findFakeCloseAds(document, { host });
+    for (const { element, hit } of ads) {
+      hideElement(element);
+      heuristic += 1;
+      learn([hit]);
+    }
+    if (ads.length) console.debug(`[adblow] 假关闭按钮：隐藏 ${ads.length} 个广告浮窗`);
+    return ads.length;
   };
 
   /**
@@ -207,6 +269,9 @@ async function boot(): Promise<void> {
    * 自学习一个域名都没记」。而这些工作**本来就不依赖回填**。
    */
   const upkeep = (label: string): void => {
+    // 先跑几何巡检：第一轮建立面积基线，后续轮次才能发现"被撑大"
+    recheckGrown();
+    const fakeClose = hideFakeClose();
     const layers = hideClickLayers();
     const overlays = hideOverlays();
     learnAdDomains();
@@ -214,9 +279,30 @@ async function boot(): Promise<void> {
     console.debug(
       `[adblow] ${label} host=${host} 规则包=${packs.length} ` +
         `选择器=${selectorSet.curated.length}包+${selectorSet.learned.length}学 ` +
-        `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays} 点击层=${layers}`,
+        `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays} 点击层=${layers} 假关闭=${fakeClose}`,
     );
   };
+
+  /**
+   * 按需几何巡检：只在鼠标移入 / 滚动之后跑，而不是常驻轮询。
+   *
+   * 展开型广告的触发条件就是"鼠标移进来"或"滚动到视野"，因此这两个时机
+   * 之后再查一次既够用，又没有常驻定时器的开销。
+   * （同样地：常驻定时器还会让"把构建产物跑起来的测试"无法退出进程。）
+   */
+  let geometryTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleGeometryPass = (): void => {
+    if (document.hidden || geometryTimer !== null) return;
+    geometryTimer = setTimeout(() => {
+      geometryTimer = null;
+      recheckGrown();
+      hideFakeClose();
+    }, GEOMETRY_DEBOUNCE_MS);
+  };
+
+  for (const type of ['mouseover', 'pointerover', 'scroll', 'wheel'] as const) {
+    document.addEventListener(type, scheduleGeometryPass, { capture: true, passive: true });
+  }
 
   // 关键：DOM 解析完成后必须再扫一次。
   // 只依赖 MutationObserver 也能补上，但显式扫一遍更可靠（观察器可能丢事件），
