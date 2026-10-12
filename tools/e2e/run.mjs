@@ -271,7 +271,19 @@ async function inspectServiceWorker(port) {
   return info;
 }
 
-async function measure({ port }) {
+/**
+ * 从 URL 取「可注册域名」（取末两段，够用于本项目的判定）。
+ */
+function regDomain(url) {
+  try {
+    const host = new URL(url).hostname;
+    return host.split('.').slice(-2).join('.');
+  } catch {
+    return '';
+  }
+}
+
+async function measure({ port, contentDomains = null }) {
   const created = await fetch(
     `http://127.0.0.1:${port}/json/new?${encodeURIComponent('about:blank')}`,
     { method: 'PUT' },
@@ -442,11 +454,62 @@ async function measure({ port }) {
   /**
    * 被拦掉的图片请求数。
    *
-   * 这是「整站图片不显示」这类事故的直接度量：它不该发生 ——
-   * 自学习来的网络规则刻意不含 image/media 类型。
+   * ⚠️ 语义在集成过滤列表之后变了（2026-10-11）：以前这个数字必须为 0
+   * （因为自学习规则刻意不拦 image/media）；现在 EasyList 系列表进了网络层，
+   * **拦第三方广告图是它的本职**，所以这里只作为信息展示。
+   * 真正要守的是下面那条：**站点自有域名**的请求一个都不能被拦。
    */
   const imageSent = sent.filter((e) => (e.type ?? '').toLowerCase() === 'image');
   const imageBlocked = imageSent.filter((e) => blockedIds.has(e.requestId));
+
+  /**
+   * 站点自有域名（同可注册域）的请求 —— **一个都不能被拦**。
+   *
+   * 这是"整站图片/脚本消失"这类事故最直接的度量，也是列表规则最容易踩的坑：
+   * 列表是按域名拉黑的，而站点自己的资源域名一旦被某条规则覆盖，整站就废了。
+   */
+  const siteReg = (() => {
+    try {
+      const parts = String(new URL(URL_UNDER_TEST).hostname).split('.');
+      return parts.slice(-2).join('.');
+    } catch {
+      return '';
+    }
+  })();
+  const isSiteOwned = (url) => {
+    try {
+      return String(new URL(url).hostname).endsWith(siteReg);
+    } catch {
+      return false;
+    }
+  };
+  const siteOwnedSent = sent.filter((e) => isSiteOwned(e.request.url));
+  const siteOwnedBlocked = siteOwnedSent.filter((e) => blockedIds.has(e.requestId));
+
+  /**
+   * 基线里**成功加载过图片**的域名上，净化后不能有任何**图片**请求被拦。
+   *
+   * 这是数据驱动的"内容 CDN"守卫：站点自有域名往往只占少数（实测试点站只有 1 个），
+   * 真正的风险在第三方内容 CDN —— 例如 `pic.wvxrrip.cn` 同时承载广告素材与
+   * 正文缩略图（风险 A）。列表是按域名拉黑的，一旦覆盖到内容 CDN，
+   * 表现就是前两轮那种"整站图片不显示"。
+   *
+   * ⚠️ 只统计**图片**请求：这些域名上常常同时有脚本（广告 SDK、统计），
+   * 而拦那些脚本是**预期行为** —— 早期版本按"该域名的任何被拦请求"统计，
+   * 结果把我们自己规则包拦 `ad-sdk-v` 与 yandex 统计脚本误报成内容误伤。
+   */
+  const responses = cdp.events['Network.responseReceived'] ?? [];
+  const loadedImageDomains = new Set(
+    responses
+      .filter((e) => (e.type ?? '').toLowerCase() === 'image' && (e.response?.status ?? 200) < 400)
+      .map((e) => regDomain(e.response?.url ?? ''))
+      .filter(Boolean),
+  );
+  const contentCdnBlocked = contentDomains
+    ? [...new Set(imageBlocked.map((e) => e.request.url))].filter((u) =>
+        contentDomains.has(regDomain(u)),
+      )
+    : [];
 
   const popups = (cdp.events['Target.targetCreated'] ?? []).filter(
     (e) => e.targetInfo?.type === 'page' && e.targetInfo?.url && e.targetInfo.url !== 'about:blank',
@@ -483,6 +546,12 @@ async function measure({ port }) {
     imageSent: imageSent.length,
     imageBlocked: imageBlocked.length,
     imageBlockedSamples: [...new Set(imageBlocked.map((e) => e.request.url))].slice(0, 5),
+    siteOwnedSent: siteOwnedSent.length,
+    siteOwnedBlocked: siteOwnedBlocked.length,
+    siteOwnedBlockedSamples: [...new Set(siteOwnedBlocked.map((e) => e.request.url))].slice(0, 5),
+    loadedImageDomains: [...loadedImageDomains],
+    contentCdnBlocked: contentCdnBlocked.length,
+    contentCdnBlockedSamples: contentCdnBlocked.slice(0, 5),
     blockedTotal: blockedIds.size,
     popups,
     pageConsole,
@@ -540,7 +609,11 @@ try {
     if (swInfo.exceptions.length) console.log(`  SW 异常：${swInfo.exceptions.join(' | ')}`);
   }
 
-  const filtered = await measure({ port: 9502 });
+  // 把基线里"成功加载过图片"的域名传进去，用于检查净化后有没有被列表规则拦掉
+  const filtered = await measure({
+    port: 9502,
+    contentDomains: new Set(baseline.loadedImageDomains ?? []),
+  });
   filt.child.kill();
   await sleep(800);
 
@@ -629,10 +702,24 @@ try {
       `（比加载率而非绝对数：站点每次渲染的条目数会波动）`,
   );
   check(
-    '❗误伤守卫：没有任何图片请求被拦（自学习规则刻意不含 image 类型）',
-    filtered.imageBlocked === 0,
-    `图片请求 ${filtered.imageSent} 个，被拦 ${filtered.imageBlocked} 个` +
-      (filtered.imageBlocked ? ` —— ${filtered.imageBlockedSamples.join(', ')}` : ''),
+    '❗误伤守卫：站点自有域名的请求一个都没被拦（防「整站资源消失」）',
+    filtered.siteOwnedBlocked === 0,
+    `站点自有域名请求 ${filtered.siteOwnedSent} 个，被拦 ${filtered.siteOwnedBlocked} 个` +
+      (filtered.siteOwnedBlocked
+        ? ` —— ${filtered.siteOwnedBlockedSamples.join(', ')}`
+        : ''),
+  );
+  check(
+    '❗误伤守卫：基线里加载成功的图片域名上，没有图片被拦（数据驱动的内容 CDN 守卫）',
+    filtered.contentCdnBlocked === 0,
+    `基线图片域名 ${(baseline.loadedImageDomains ?? []).length} 个（${(baseline.loadedImageDomains ?? []).join(', ')}），` +
+      `净化后被拦的图片 ${filtered.contentCdnBlocked} 个` +
+      (filtered.contentCdnBlocked ? ` —— ${filtered.contentCdnBlockedSamples.join(', ')}` : ''),
+  );
+  check(
+    '图片请求情况（集成列表后，拦第三方广告图属正常，仅作记录）',
+    true,
+    `图片请求 ${filtered.imageSent} 个，被拦 ${filtered.imageBlocked} 个`,
   );
 
   check(

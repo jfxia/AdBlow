@@ -190,14 +190,22 @@ logo 与正文缩略图在上面）、`/css/inner-ads.css`（拦 CSS 会让广�
 
 ## 每次改动后的验收清单
 
-1. `pnpm verify` —— 构建 + 类型检查 + 全量测试（当前 344 条）
+1. `pnpm verify` —— 构建 + 类型检查 + 全量测试（当前 424 条）
 2. `node tools/e2e/acceptance.mjs` —— 21 类命中率必须仍是 **21/21**
 3. `node tools/e2e/clickjack.mjs` —— 基线 3/3 复现、装扩展 3/3 拦住
 4. `node tools/e2e/run.mjs <试点站 URL>` —— 真实站点无误伤、广告内容全隐藏
 5. `node _probe/run-one.ts tests/integration/second-site.test.ts` —— 第二站点离线回归
+6. **改了过滤列表相关代码时额外做**：
+   `pnpm filters && pnpm rulesets`（重编译并**必须通过构建期自检**）→ `pnpm build`
+   → 再跑第 2、4 条。列表规则会拦 image/media，所以第 4 条里的
+   **「站点自有域名零拦截」与「内容 CDN 守卫」是本期的关键防线**。
 
 > ⚠️ 改了源码后**必须重新构建**再跑浏览器测试 —— 测的是 `dist/`。
 > 曾经因为只跑 typecheck 没重建，白排查了很久一个"进程不退出"的问题。
+>
+> ⚠️ 规则集里**只要有一条规则非法，浏览器就拒绝加载整个扩展**
+> （实测两次）。所以 `pnpm rulesets` 的自检失败时**绝不要跳过** ——
+> 那是唯一能在本地拦住这类问题的关卡。
 
 ## 测试映射
 
