@@ -16,12 +16,76 @@ import { runScriptlets, type Invocation } from './scriptlets.ts';
 
 export type ScriptletTable = Record<string, Invocation[]>;
 
+/** 解码单个条目体（`名字下标 \x01 参数… \x02 …`）。 */
+export function decodeEntry(names: string[], body: string): Invocation[] {
+  const invocations: Invocation[] = [];
+  for (const raw of body.split('\x02')) {
+    if (!raw) continue;
+    const parts = raw.split('\x01');
+    const canonical = names[Number(parts[0])];
+    if (!canonical) continue;
+    invocations.push({ canonical, args: parts.slice(1) });
+  }
+  return invocations;
+}
+
+/** 全量解码（测试与可读性用；运行期走 runPacked 的惰性路径）。 */
+export function decodePacked(namesJoined: string, data: string): Map<string, Invocation[]> {
+  const map = new Map<string, Invocation[]>();
+  if (!data) return map;
+  const names = namesJoined ? namesJoined.split('\x01') : [];
+  for (const entry of data.split('\x04')) {
+    if (!entry) continue;
+    const sep = entry.indexOf('\x03');
+    if (sep < 0) continue;
+    const invocations = decodeEntry(names, entry.slice(sep + 1));
+    if (invocations.length) map.set(entry.slice(0, sep), invocations);
+  }
+  return map;
+}
+
 /**
- * 按主机名从规则表里取出要执行的调用并执行。
+ * 纯查表：按主机名从紧凑表里选出调用（不做任何执行）。
  *
- * 语义与 cosmetic 层一致：沿各级父域向上收集（`a.b.com` → `a.b.com`、`b.com`、`com`），
- * 并支持通配 TLD 键（`ticketmaster.*`）。
+ * 单独抽出来是为了**可测**：执行部分要用到 `window`，而查表逻辑
+ * （尤其是边界字符防误命中）是这套编码里最容易出错的地方。
  */
+export function selectPacked(namesJoined: string, data: string, host: string): Invocation[] {
+  const names = namesJoined ? namesJoined.split('\x01') : [];
+  const invocations: Invocation[] = [];
+
+  for (const key of domainKeysForHost(host)) {
+    const start = data.indexOf(`\x04${key}\x03`);
+    if (start < 0) continue;
+    const bodyStart = start + key.length + 2;
+    const end = data.indexOf('\x04', bodyStart);
+    invocations.push(
+      ...decodeEntry(names, data.slice(bodyStart, end < 0 ? data.length : end)),
+    );
+  }
+
+  return invocations;
+}
+
+/**
+ * 按主机名从紧凑表里取调用并执行；返回实际执行的条数。
+ *
+ * ## 为什么是"惰性查表"而不是先建 Map
+ *
+ * 数据表 277 KB。如果每个页面（而且是每个 iframe）都先全量解码成 Map，
+ * 就要建 2,800 多个字符串与对象 —— 广告重的页面有十几个 iframe 时，
+ * 这个开销会从"加载扩展时卡死一次"变成"每个页面都卡一下"，
+ * 只是把问题搬了个地方。
+ *
+ * 所以：用原生 `indexOf` 带**边界字符**在字符串里定位（几十微秒），
+ * 只有真的命中该主机名时才解码那一条。
+ * 边界字符（`\x04` 前导、`\x03` 收尾）保证 `a.com` 不会命中 `b.a.com`。
+ */
+export function runPacked(namesJoined: string, data: string, host: string): number {
+  return execute(selectPacked(namesJoined, data, host));
+}
+
+/** 按主机名从规则表里取出要执行的调用并执行。 */
 export function runTable(table: ScriptletTable, host: string): number {
   const invocations: Invocation[] = [];
   for (const key of domainKeysForHost(host)) {
@@ -29,6 +93,10 @@ export function runTable(table: ScriptletTable, host: string): number {
     if (!list) continue;
     for (const inv of list) invocations.push(inv);
   }
+  return execute(invocations);
+}
+
+function execute(invocations: Invocation[]): number {
   if (invocations.length === 0) return 0;
 
   const result = runScriptlets(invocations, window as unknown as Record<string, unknown>);
@@ -49,4 +117,7 @@ export function runTable(table: ScriptletTable, host: string): number {
 }
 
 // 暴露给构建期生成的 bundle 文件调用
-(window as unknown as Record<string, unknown>).__adblowScriptlets = { run: runTable };
+(window as unknown as Record<string, unknown>).__adblowScriptlets = {
+  run: runTable,
+  runPacked,
+};

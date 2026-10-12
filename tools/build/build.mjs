@@ -133,22 +133,22 @@ if (existsSync(rulesetPatch)) {
   m.declarative_net_request = { rule_resources: resources };
 
   /**
-   * 脚本注入（第三期）：manifest 里为引擎声明 <all_urls>、为每个 bundle
-   * 声明它负责的那批域名。
+   * 脚本注入（第三期）：**两个** content_scripts 条目 —— 引擎 + 数据表，
+   * 都是 `<all_urls>`。
    *
-   * 为什么必须走 manifest：脚本要在 `document_start`、**页面脚本之前**执行完。
-   * 靠内容脚本向 SW 取数据再执行会与页面脚本竞态（SW 消息是异步的）。
-   * 由浏览器按 matches 直接注入就没有竞态 —— uBOL 用的同一套机制。
+   * ⚠️ 这里经过一次实测驱动的返工。最初按 uBOL 的做法为每个域名组声明
+   * 匹配域名，实测 2,500 个 match pattern 会让浏览器**加载扩展时卡死 2.4 秒**
+   * （完整 dist 3093ms vs 单条目 <all_urls> 801ms vs 无扩展 496ms；
+   * 且代价是按 pattern 数而非条目数 —— 合并成 1 个条目同样是 3114ms）。
+   *
+   * 改成 `<all_urls>` 后由脚本自查 `location.hostname`。数据内联在文件里，
+   * 因此仍然在 document_start、页面脚本之前执行完，时序保证没有损失。
    */
   const scriptletManifestPath = p('filters/generated/scriptlet-manifest.json');
   if (existsSync(scriptletManifestPath)) {
     const sm = JSON.parse(readFileSync(scriptletManifestPath, 'utf8'));
     mkdirSync(`${DIST}/scriptlets`, { recursive: true });
-    let sb = 0;
-    for (const b of sm.bundles) {
-      copyFileSync(`${p('filters/generated')}/${b.file}`, `${DIST}/scriptlets/${b.file}`);
-      sb += statSync(`${p('filters/generated')}/${b.file}`).size;
-    }
+    copyFileSync(`${p('filters/generated')}/${sm.file}`, `${DIST}/scriptlets/${sm.file}`);
 
     const scriptletScripts = [
       {
@@ -158,20 +158,19 @@ if (existsSync(rulesetPatch)) {
         all_frames: true,
         world: 'MAIN',
       },
-      ...sm.bundles.map((b) => ({
-        matches: b.matches,
-        js: [`scriptlets/${b.file}`],
+      {
+        matches: ['<all_urls>'],
+        js: [`scriptlets/${sm.file}`],
         run_at: 'document_start',
         all_frames: true,
         world: 'MAIN',
-      })),
+      },
     ];
     m.content_scripts = [...(m.content_scripts ?? []), ...scriptletScripts];
-    // 引擎必须**先于**规则表注入（manifest 顺序即注入顺序）
-    report.push([`scriptlets/ (${sm.bundles.length} bundles)`, sb, 'ruleset']);
+    report.push([`scriptlets/ (data table)`, sm.bytes, 'ruleset']);
     console.log(
-      `脚本注入：引擎 1 个 + 规则表 ${sm.bundles.length} 个 bundle（${(sb / 1024).toFixed(0)} KB）、` +
-        `manifest 新增 ${scriptletScripts.length} 个 content_scripts 条目`,
+      `脚本注入：引擎 1 个 + 数据表 1 个（${(sm.bytes / 1024).toFixed(0)} KB，` +
+        `${sm.entries} 个域名）、manifest 新增 ${scriptletScripts.length} 个条目（均为 <all_urls>，共 2 个 pattern）`,
     );
   }
 

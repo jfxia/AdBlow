@@ -257,47 +257,64 @@ console.log(
 
 // ── 脚本注入（第三期）────────────────────────────────────────────
 //
-// 投递方式与 cosmetic 不同：脚本要在 document_start、**页面脚本之前**跑完，
-// 靠 SW 消息取数据会有竞态。因此按 uBOL 的做法：构建期把规则按域名分组，
-// manifest 为每组声明匹配域名，由浏览器保证注入时机。
+// ⚠️ 投递方式经过一次**实测驱动的返工**：
+//
+// 最初按 uBOL 的做法，构建期把域名分组、manifest 为每组声明匹配域名。
+// 但实测发现**按域名的 match pattern 极贵**——2,500 个 pattern 让浏览器
+// 加载扩展时多花 2.4 秒（真实 UI 上就是"卡死"）：
+//
+//   完整 dist（60 条目 / 2500 pattern）  3093 ms
+//   合并成 1 条目（2500 pattern）        3114 ms   ← 代价按 pattern 数，不按条目数
+//   单条目 <all_urls>（1 pattern）        801 ms
+//   对照（不加载扩展）                     496 ms
+//
+// 因此改成：**一个 `<all_urls>` 的内容脚本 + 紧凑内联数据表**。
+// 数据必须内联（不能跨 world 取数据，否则会失去 `document_start`
+// 抢在页面脚本之前的时序保证），所以用控制字符分隔的紧凑编码压体积。
+//
+// 附带好处：之前因为"无法表达成 match pattern"而跳过的通配 TLD 域名
+// （`ticketmaster.*`）现在可以收回来 —— 运行期查表用的是 `domainKeysForHost`，
+// 它本来就支持通配键。
 
 const scriptletIndex = buildScriptletIndex(allScriptlets);
-const BUNDLE_DOMAINS = 48;
-const scriptletDomains = [...scriptletIndex.byDomain.keys()].sort();
-const scriptletBundles: { file: string; matches: string[]; domains: number }[] = [];
+const usedNames = [
+  ...new Set([...scriptletIndex.byDomain.values()].flatMap((list) => list.map((i) => i.canonical))),
+].sort();
+const nameIndex = new Map(usedNames.map((n, i) => [n, i]));
 
-for (let i = 0; i < scriptletDomains.length; i += BUNDLE_DOMAINS) {
-  const group = scriptletDomains.slice(i, i + BUNDLE_DOMAINS);
-  const table: Record<string, { canonical: string; args: string[] }[]> = {};
-  const matches: string[] = [];
-  for (const d of group) {
-    // 通配 TLD 键（`ticketmaster.*`）无法表达成 match pattern，跳过并计数
-    if (d.includes('*')) continue;
-    table[d] = scriptletIndex.byDomain.get(d)!;
-    matches.push(`*://*.${d}/*`);
-  }
-  if (Object.keys(table).length === 0) continue;
+/** 控制字符会破坏分隔，构建期替换掉。 */
+const clean = (s: string): string => s.replace(/[\u0000-\u001f]/g, ' ');
 
-  const index = scriptletBundles.length + 1;
-  const file = `scriptlet-bundle-${index}.js`;
-  writeFileSync(
-    `${OUT_DIR}${file}`,
-    `// AdBlow 生成的脚本注入规则表（第 ${index} 组，${Object.keys(table).length} 个域名）\n` +
-      `(function(){var t=${JSON.stringify(table)};` +
-      `var e=window.__adblowScriptlets;if(e)e.run(t,location.hostname);})();\n`,
-    'utf8',
-  );
-  scriptletBundles.push({ file, matches, domains: Object.keys(table).length });
+const entries: string[] = [];
+for (const domain of [...scriptletIndex.byDomain.keys()].sort()) {
+  const list = scriptletIndex.byDomain.get(domain)!;
+  const body = list
+    .map((inv) => [nameIndex.get(inv.canonical), ...inv.args.map(clean)].join('\u0001'))
+    .join('\u0002');
+  entries.push(`${domain}\u0003${body}`);
 }
+
+const namesJoined = usedNames.join('\u0001');
+// 每条前面都加 `\u0004`，运行期就能用 `indexOf('\u0004域名\u0003')` 唯一定位，
+// 且 `a.com` 不会命中 `b.a.com`（带边界字符）
+const packedData = entries.map((e) => `\u0004${e}`).join('');
+const dataFile = 'scriptlet-data.js';
+const dataSource =
+  `// AdBlow 生成的脚本注入数据表（${entries.length} 个域名，${usedNames.length} 个规范名）\n` +
+  `// 格式见 src/inject/scriptletsGlobal.ts 的 runPacked/decodeEntry 注释\n` +
+  `(function(){var n=${JSON.stringify(namesJoined)};var d=${JSON.stringify(packedData)};` +
+  `var e=window.__adblowScriptlets;if(e)e.runPacked(n,d,location.hostname);})();\n`;
+writeFileSync(`${OUT_DIR}${dataFile}`, dataSource, 'utf8');
 
 writeFileSync(
   `${OUT_DIR}scriptlet-manifest.json`,
   JSON.stringify(
     {
-      bundles: scriptletBundles,
+      file: dataFile,
+      bytes: dataSource.length,
+      entries: entries.length,
+      names: usedNames,
       stats: scriptletIndex.stats,
-      bundlesCount: scriptletBundles.length,
-      droppedWildcardDomains: scriptletDomains.filter((d) => d.includes('*')).length,
     },
     null,
     2,
@@ -308,14 +325,14 @@ writeFileSync(
 console.log('\n脚本注入（第三期）：');
 console.log(`  解析                ${scriptletIndex.stats.parsed} 条`);
 console.log(
-  `  ✦ 支持并已生成      ${scriptletIndex.stats.supported} 条 → ${scriptletBundles.length} 个 bundle，` +
-    `覆盖 ${scriptletIndex.stats.domains} 个域名`,
+  `  ✦ 支持并已生成      ${scriptletIndex.stats.supported} 条 → ${entries.length} 个域名，` +
+    `${usedNames.length} 个规范名`,
 );
 console.log(`  名字未支持          ${scriptletIndex.stats.unsupportedName} 条`);
-console.log(
-  `  通配 TLD 域名跳过   ${scriptletDomains.filter((d) => d.includes('*')).length} 个（无法表达成 match pattern）`,
-);
 console.log(`  ~ 排除型跳过        ${scriptletIndex.stats.skippedExcluded} 条`);
+console.log(
+  `  数据表              ${(dataSource.length / 1024).toFixed(0)} KB（紧凑编码，原 JSON 形式约 422 KB）`,
+);
 console.log('  未支持的名字（按条数，决定下一步做什么）：');
 for (const [name, n] of Object.entries(scriptletIndex.stats.unsupportedByCanonical)
   .sort((a, b) => b[1] - a[1])
