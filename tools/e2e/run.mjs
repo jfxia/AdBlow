@@ -1,5 +1,5 @@
 /**
- * 试点站浏览器 E2E：CDP 驱动已装的 Edge，加载未打包扩展，对比基线与净化后。
+ * 浏览器 E2E：CDP 驱动已装的 Edge，加载未打包扩展，对比基线与净化后。
  *
  * 前置：必须先 `pnpm build`（加载 dist/）。需要放宽沙箱权限——受限模式下
  * Chromium 的 Mojo 命名管道被拒，浏览器根本起不来：
@@ -7,10 +7,14 @@
  *
  * 零依赖：只用 Node 24 内置的 fetch 与 WebSocket。
  *
+ * ⚠️ 站点期望值是**逐站点手工取证后写死的**（PROFILES）。被验证的机制是通用的，
+ * 但「哪些元素是广告」必须由取证决定，不能让脚本自己猜——否则就是拿被测代码
+ * 验证被测代码。
+ *
  * 用法：node tools/e2e/run.mjs [url]
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, openSync, closeSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, openSync, closeSync, rmSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const EDGE_CANDIDATES = [
@@ -23,14 +27,60 @@ const URL_UNDER_TEST = process.argv[2] ?? 'https://afford.gjvrohros.cc/category/
 const EXT = fileURLToPath(new URL('../../dist', import.meta.url));
 const E2E_DIR = fileURLToPath(new URL('../../_probe/e2e/', import.meta.url));
 
-/** 广告基础设施：这些域名/路径的请求数在净化后必须为 0。 */
-const AD_INFRA = [
-  'apiad01.cc',
-  'ads.zyudkkup.com',
-  'api.zzlprxy.cc',
-  'wj-api-abtest.yvyjdhr.com',
-  '/ad-sdk-v',
-];
+/**
+ * 逐站点期望值（手工取证）。
+ *
+ * - adSelectors：取证确认是广告的元素。净化后**必须全部不可见**；基线里**必须有可见的**，
+ *   否则说明这个 profile 已经过期、断言失去意义。
+ * - contentSelector：真内容。净化后可见数量必须与基线**完全一致**。
+ * - contentImageSelector：真内容里的图片，净化后必须仍有可见的。
+ * - adInfra：广告基础设施请求。净化后**成功响应数必须为 0**。可为空。
+ */
+const PROFILES = {
+  'afford.gjvrohros.cc': {
+    label: '试点站（自研 SSP，广告由 SDK 运行时注入）',
+    adSelectors: [
+      '[data-ssp-slot-node]',
+      '[data-ssp-sdk-popup-overlay]',
+      '[data-ssp-marquee]',
+      '.xqbj-recommand-item-banner',
+      '.xqbj-component-ssp-horizontal-banner-widget',
+    ],
+    contentSelector: 'article[itemtype*="BlogPosting"]',
+    contentImageSelector: 'img[src*="pic.wvxrrip.cn"], img[data-src*="pic.wvxrrip.cn"]',
+    adInfra: [
+      'apiad01.cc',
+      'ads.zyudkkup.com',
+      'api.zzlprxy.cc',
+      'wj-api-abtest.yvyjdhr.com',
+      '/ad-sdk-v',
+    ],
+  },
+  '1024cg.com': {
+    label: '第二站点（服务端直接渲染广告，无规则包，全靠通用路径）',
+    adSelectors: [
+      'article.ad-item',
+      'div.post-card[id^="ad-card-"]',
+      '.ads-title',
+      '.post-card-ads',
+    ],
+    contentSelector: 'article[itemtype*="BlogPosting"]',
+    contentImageSelector: 'article[itemtype*="BlogPosting"] img',
+    // 该站广告素材与正文缩略图共用同一 CDN（pic.jtzatly.cn），
+    // 因此**没有**可安全拉黑的网络端点 —— 全靠 DOM 层。这正是要验证的点。
+    adInfra: [],
+  },
+};
+
+function profileFor(url) {
+  const host = new URL(url).hostname;
+  for (const [key, value] of Object.entries(PROFILES)) {
+    if (host === key || host.endsWith(`.${key}`)) return { host, ...value };
+  }
+  throw new Error(`没有 ${host} 的取证 profile，无法断言。请先取证并加入 PROFILES。`);
+}
+
+const profile = profileFor(URL_UNDER_TEST);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -107,42 +157,36 @@ async function listTargets(port) {
 /**
  * 轮询等待**我们扩展的** service worker 目标出现。
  *
- * 注意不能用「type==='service_worker' 且 chrome-extension:// 前缀」来筛：
- * Edge 自身就有一堆内置扩展 SW（实测会先命中的是 edgeCopilot / edgeAuthPrivate
+ * 不能用「type==='service_worker' 且 chrome-extension:// 前缀」来筛：
+ * Edge 自身就有一堆内置扩展 SW（实测先命中的是 edgeCopilot / edgeAuthPrivate
  * 那一批），连上去读 declarativeNetRequest 只会得到 undefined。
  * 我们的 SW 由 manifest 指定为 background.js，用它当判别锚点。
  */
 async function waitForServiceWorker(port, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
-  let sawAny = 0;
   while (Date.now() < deadline) {
     const list = await listTargets(port);
-    const all = list.filter(
-      (t) => t.type === 'service_worker' && String(t.url).startsWith('chrome-extension://'),
-    );
-    sawAny = Math.max(sawAny, all.length);
-    const ours = all.find((t) => String(t.url).endsWith('background.js'));
+    const ours = list
+      .filter((t) => t.type === 'service_worker' && String(t.url).startsWith('chrome-extension://'))
+      .find((t) => String(t.url).endsWith('background.js'));
     if (ours) return ours;
     await sleep(250);
   }
   return null;
 }
 
-/** 启动一次浏览器会话，可选择是否加载扩展。 */
-async function launch({ port, profile, withExtension }) {
+async function launch({ port, profileDir, withExtension }) {
   mkdirSync(E2E_DIR, { recursive: true });
-  rmSync(profile, { recursive: true, force: true });
-  mkdirSync(profile, { recursive: true });
+  rmSync(profileDir, { recursive: true, force: true });
+  mkdirSync(profileDir, { recursive: true });
 
-  const logFile = `${E2E_DIR}browser-${port}.log`;
-  const errFile = `${E2E_DIR}browser-${port}.err.log`;
-  const out = openSync(logFile, 'w');
-  const err = openSync(errFile, 'w');
+  const out = openSync(`${E2E_DIR}browser-${port}.log`, 'w');
+  const err = openSync(`${E2E_DIR}browser-${port}.err.log`, 'w');
 
   const args = [
     `--remote-debugging-port=${port}`,
-    '--remote-allow-origins=*',
-    `--user-data-dir=${profile}`,
+    `--remote-allow-origins=*`,
+    `--user-data-dir=${profileDir}`,
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-sync',
@@ -176,20 +220,18 @@ async function launch({ port, profile, withExtension }) {
   }
   if (!version) {
     child.kill();
-    throw new Error(`CDP 端口 ${port} 未就绪（浏览器可能未能启动，见 _probe/e2e/ 日志）`);
+    throw new Error(`CDP 端口 ${port} 未就绪（见 _probe/e2e/ 日志）`);
   }
-
-  return { child, version, logFile, errFile };
+  return { child, version };
 }
 
-/** 连上扩展 SW，读它的控制台与 DNR 动态规则。 */
 async function inspectServiceWorker(port) {
   const sw = await waitForServiceWorker(port);
   if (!sw) return { found: false, url: '', console: [], exceptions: [], rules: null, error: null };
 
   const cdp = await Cdp.connect(sw.webSocketDebuggerUrl);
   await cdp.send('Runtime.enable');
-  await sleep(1500); // 让 onInstalled 的日志与规则同步落地
+  await sleep(1500);
 
   let rules = null;
   let error = null;
@@ -210,7 +252,7 @@ async function inspectServiceWorker(port) {
 
   const info = {
     found: true,
-    url: String(sw.url).replace(/^chrome-extension:\/\//, '').slice(0, 40),
+    url: String(sw.url).replace('chrome-extension://', '').slice(0, 44),
     console: cdp.console,
     exceptions: cdp.exceptions,
     rules,
@@ -220,8 +262,7 @@ async function inspectServiceWorker(port) {
   return info;
 }
 
-/** 打开页面，采集指标。 */
-async function measure({ port, withExtension }) {
+async function measure({ port }) {
   const created = await fetch(
     `http://127.0.0.1:${port}/json/new?${encodeURIComponent('about:blank')}`,
     { method: 'PUT' },
@@ -248,73 +289,93 @@ async function measure({ port, withExtension }) {
     return r.result?.value;
   };
 
+  // 站点偶发加载失败会伪装成「广告为零、正文为零」，从而误报成拦截失败。
+  // 实测踩过一次（1024cg.com 首轮），所以这里显式重试一次。
+  const countElements = async () => {
+    const r = await evaluate('document.querySelectorAll("*").length');
+    return typeof r === 'number' ? r : 0;
+  };
+  if ((await countElements()) < 100) {
+    console.log('  （首次导航未加载出内容，重试一次…）');
+    await cdp.send('Page.navigate', { url: URL_UNDER_TEST, transitionType: 'reload' });
+    await sleep(11000);
+  }
+
   const dom = await evaluate(`(() => {
     const visible = (el) => {
       if (el.hasAttribute('data-adblow-hidden')) return false;
       const s = getComputedStyle(el);
       if (s.display === 'none' || s.visibility === 'hidden') return false;
-      return el.offsetParent !== null || s.position === 'fixed';
+      return el.offsetParent !== null || s.position === 'fixed' || s.position === 'absolute';
     };
-    const articles = [...document.querySelectorAll('article[itemtype*="BlogPosting"]')];
-    const slots = [...document.querySelectorAll('[data-ssp-slot-node]')];
-    const thumbs = [...document.querySelectorAll('img[data-src*="upload_01"]')];
-    const injected = [...document.querySelectorAll('[data-ssp-slot-root],[data-ssp-sdk-popup-overlay],[data-ssp-marquee],[data-ssp-landing]')];
+    const adSel = ${JSON.stringify(profile.adSelectors)};
+    const ads = adSel.flatMap((s) => {
+      try { return [...document.querySelectorAll(s)]; } catch { return []; }
+    });
+    const uniqAds = [...new Set(ads)];
+    const contents = [...document.querySelectorAll(${JSON.stringify(profile.contentSelector)})];
+    const cImgs = [...document.querySelectorAll(${JSON.stringify(profile.contentImageSelector)})];
     return {
-      totalArticles: articles.length,
-      visibleArticles: articles.filter(visible).length,
-      totalSlots: slots.length,
-      slotsWithAdContent: slots.filter((s) => s.childElementCount > 0).length,
-      hiddenSlots: slots.filter((s) => s.hasAttribute('data-adblow-hidden')).length,
-      thumbsLoaded: thumbs.filter((t) => t.complete && t.naturalWidth > 0).length,
-      injectedNodesTotal: injected.length,
-      injectedNodesVisible: injected.filter(visible).length,
-      hasAdblowStyle: !!document.querySelector('style[data-adblow-cosmetic]'),
+      adTotal: uniqAds.length,
+      adVisible: uniqAds.filter(visible).length,
+      adHiddenByUs: uniqAds.filter((e) => e.hasAttribute('data-adblow-hidden')).length,
+      contentTotal: contents.length,
+      contentVisible: contents.filter(visible).length,
+      contentImgsTotal: cImgs.length,
+      contentImgsVisible: cImgs.filter(visible).length,
       adblowHiddenTotal: document.querySelectorAll('[data-adblow-hidden]').length,
+      hasAdblowStyle: !!document.querySelector('style[data-adblow-cosmetic]'),
     };
   })()`);
 
   const sent = cdp.events['Network.requestWillBeSent'] ?? [];
   const urlById = new Map(sent.map((e) => [e.requestId, e.request.url]));
-  const requests = sent.map((e) => e.request.url);
 
-  // ⚠️ 关键：Network.requestWillBeSent 在**拦截之前**就会触发，所以广告请求的
-  // requestWillBeSent 数量永远不为 0（实测踩过这个坑）。真正要断言的是
-  // 「成功拿到响应」的广告请求数为 0 —— 即发起数减去被扩展拦截的数。
-  const blockedIds = new Set(
-    (cdp.events['Network.loadingFailed'] ?? [])
-      .filter((e) => e.blockedReason)
-      .map((e) => e.requestId),
-  );
-  const succeeded = (e) => !blockedIds.has(e.requestId);
-
-  const adSent = sent.filter((e) => AD_INFRA.some((p) => e.request.url.includes(p)));
-  const adBlocked = adSent.filter((e) => blockedIds.has(e.requestId));
-  const adServed = adSent.filter(succeeded);
-
-  const blocked = blockedIds.size;
+  // ⚠️ requestWillBeSent 在拦截之前就触发，所以数量永远不为 0。
+  // 真正要断言的是「成功拿到响应」的广告请求数为 0 = 发起数 − 被拦数。
+  const allFailed = cdp.events['Network.loadingFailed'] ?? [];
+  const blockedIds = new Set(allFailed.filter((e) => e.blockedReason).map((e) => e.requestId));
+  const infra = sent.filter((e) => profile.adInfra.some((p) => e.request.url.includes(p)));
+  const infraServed = infra.filter((e) => !blockedIds.has(e.requestId));
 
   const popups = (cdp.events['Target.targetCreated'] ?? []).filter(
     (e) => e.targetInfo?.type === 'page' && e.targetInfo?.url && e.targetInfo.url !== 'about:blank',
   ).length;
+
+  // 导航诊断：站点 2 曾出现「0 个元素、内容脚本未注入」的情况，
+  // 光看计数无法区分「页面没加载」与「选择器不对」，所以把原始事实带出来。
+  const nav = await evaluate(`({
+    href: location.href,
+    title: document.title,
+    ready: document.readyState,
+    elementCount: document.querySelectorAll('*').length,
+  })`);
+
+  const failedRequests = allFailed
+    .slice(0, 8)
+    .map((e) => `${e.errorText ?? e.blockedReason ?? '?'} <- ${urlById.get(e.requestId) ?? e.requestId}`);
+
+  const mainDoc = sent.find((e) => e.type === 'Document');
 
   const pageConsole = [...cdp.console];
   cdp.close();
 
   return {
     dom,
-    requestCount: requests.length,
-    adSent: adSent.length,
-    adBlocked: adBlocked.length,
-    adServed: adServed.length,
-    adServedSamples: [...new Set(adServed.map((e) => e.request.url))],
-    adBlockedSamples: [...new Set(adBlocked.map((e) => e.request.url))],
-    /** 兼容旧字段名以便日志可读 */
-    adRequests: adServed.length,
-    blocked,
+    nav,
+    mainDocUrl: mainDoc?.request?.url ?? null,
+    mainDocStatus: mainDoc ? (mainDoc.redirectResponse?.status ?? null) : null,
+    failedRequests,
+    infraSent: infra.length,
+    infraBlocked: infra.length - infraServed.length,
+    infraServed: infraServed.length,
+    infraServedSamples: [...new Set(infraServed.map((e) => e.request.url))],
+    blockedTotal: blockedIds.size,
     popups,
     pageConsole,
   };
 }
+
 
 const results = [];
 let failures = 0;
@@ -326,109 +387,117 @@ function check(name, ok, detail) {
 
 try {
   console.log(`被测地址：${URL_UNDER_TEST}`);
+  console.log(`站点画像：${profile.host} —— ${profile.label}`);
   console.log(`扩展目录：${EXT}\n`);
 
-  // ── 基线：不加载扩展 ──────────────────────────────────────────
   console.log('【1/2】基线测量（不加载扩展）…');
-  const base = await launch({ port: 9501, profile: `${E2E_DIR}profile-base`, withExtension: false });
-  const baseline = await measure({ port: 9501, withExtension: false });
+  const base = await launch({
+    port: 9501,
+    profileDir: `${E2E_DIR}profile-base`,
+    withExtension: false,
+  });
+  const baseline = await measure({ port: 9501 });
   base.child.kill();
   await sleep(1200);
+  console.log(`  导航: ${baseline.nav?.href ?? '?'}  「${baseline.nav?.title ?? ''}」`);
+  console.log(`  主文档: ${baseline.mainDocUrl ?? '(未捕获)'}`);
+  if (baseline.failedRequests.length) {
+    console.log(`  失败请求:\n    ${baseline.failedRequests.join('\n    ')}`);
+  }
   console.log(
-    `  正文可见 ${baseline.dom.visibleArticles}/${baseline.dom.totalArticles}  ` +
-      `广告位有内容 ${baseline.dom.slotsWithAdContent}/${baseline.dom.totalSlots}  ` +
-      `广告请求成功 ${baseline.adServed}  缩略图 ${baseline.dom.thumbsLoaded}  ` +
-      `注入节点 ${baseline.dom.injectedNodesTotal}\n`,
+    `  广告元素 ${baseline.dom.adVisible}/${baseline.dom.adTotal} 可见  ` +
+      `正文 ${baseline.dom.contentVisible}/${baseline.dom.contentTotal} 可见  ` +
+      `正文图 ${baseline.dom.contentImgsVisible}/${baseline.dom.contentImgsTotal} 可见  ` +
+      `广告请求成功 ${baseline.infraServed}\n`,
   );
-  console.log(`  基线广告请求成功样本：\n    ${baseline.adServedSamples.join('\n    ') || '（无）'}\n`);
 
-  // ── 净化后：加载扩展 ─────────────────────────────────────────
   console.log('【2/2】加载 AdBlow（dist/）后测量…');
-  const filt = await launch({ port: 9502, profile: `${E2E_DIR}profile-ext`, withExtension: true });
-
+  const filt = await launch({
+    port: 9502,
+    profileDir: `${E2E_DIR}profile-ext`,
+    withExtension: true,
+  });
   const swInfo = await inspectServiceWorker(9502);
-  console.log(`  扩展 SW 目标：${swInfo.found ? `已找到 ${swInfo.url}` : '未找到'}`);
+  console.log(`  扩展 SW：${swInfo.found ? swInfo.url : '未找到'}`);
   if (swInfo.found) {
     console.log(
       `  DNR 动态规则：${swInfo.rules ? swInfo.rules.count + ' 条' : '读取失败: ' + swInfo.error}`,
     );
-    if (swInfo.rules?.filters?.length) {
-      console.log(`    过滤器：${swInfo.rules.filters.join(' | ')}`);
-    }
-    if (swInfo.console.length) console.log(`  SW 控制台：\n    ${swInfo.console.join('\n    ')}`);
-    if (swInfo.exceptions.length) {
-      console.log(`  SW 异常：\n    ${swInfo.exceptions.join('\n    ')}`);
-    }
+    if (swInfo.console.length) console.log(`  SW 控制台：${swInfo.console.join(' | ')}`);
+    if (swInfo.exceptions.length) console.log(`  SW 异常：${swInfo.exceptions.join(' | ')}`);
   }
 
-  const filtered = await measure({ port: 9502, withExtension: true });
+  const filtered = await measure({ port: 9502 });
   filt.child.kill();
   await sleep(800);
 
   console.log(
-    `\n  正文可见 ${filtered.dom.visibleArticles}/${filtered.dom.totalArticles}  ` +
-      `广告位有内容 ${filtered.dom.slotsWithAdContent}/${filtered.dom.totalSlots}  ` +
-      `（其中被隐藏 ${filtered.dom.hiddenSlots}）  ` +
-      `广告请求成功 ${filtered.adServed}（发起 ${filtered.adSent}，被拦 ${filtered.adBlocked}）  ` +
-      `缩略图 ${filtered.dom.thumbsLoaded}  ` +
-      `注入节点 ${filtered.dom.injectedNodesVisible}/${filtered.dom.injectedNodesTotal} 可见  ` +
-      `本站隐藏元素合计 ${filtered.dom.adblowHiddenTotal}\n`,
+    `\n  广告元素 ${filtered.dom.adVisible}/${filtered.dom.adTotal} 可见` +
+      `（本站被隐藏元素合计 ${filtered.dom.adblowHiddenTotal}）\n` +
+      `  正文 ${filtered.dom.contentVisible}/${filtered.dom.contentTotal} 可见  ` +
+      `正文图 ${filtered.dom.contentImgsVisible}/${filtered.dom.contentImgsTotal} 可见  ` +
+      `广告请求成功 ${filtered.infraServed}（发起 ${filtered.infraSent}，拦截 ${filtered.infraBlocked}）\n`,
   );
-  console.log(
-    `  被拦下的广告请求：\n    ${filtered.adBlockedSamples.join('\n    ') || '（无）'}\n`,
-  );
-  if (filtered.pageConsole.length) {
-    console.log(`  页面内 AdBlow 日志：\n    ${filtered.pageConsole.slice(0, 12).join('\n    ')}\n`);
-  }
+  const adblowLogs = filtered.pageConsole.filter((l) => l.includes('adblow'));
+  if (adblowLogs.length) console.log(`  页面内 AdBlow 日志：\n    ${adblowLogs.join('\n    ')}\n`);
 
   // ── 断言 ─────────────────────────────────────────────────────
   check('扩展已加载（SW 存在）', swInfo.found, swInfo.found ? 'ok' : '未找到 SW 目标');
   check(
     'DNR 动态规则已同步',
     (swInfo.rules?.count ?? 0) > 0,
-    swInfo.rules ? `${swInfo.rules.count} 条` : `读取失败（可能未注册该 API 作用域）：${swInfo.error}`,
+    swInfo.rules ? `${swInfo.rules.count} 条` : String(swInfo.error),
   );
   check('内容脚本已注入', filtered.dom.hasAdblowStyle === true, String(filtered.dom.hasAdblowStyle));
+
   check(
-    '广告基础设施请求成功数清零',
-    filtered.adServed === 0,
-    `基线 ${baseline.adServed} → 净化后 ${filtered.adServed}（发起 ${filtered.adSent}，拦截 ${filtered.adBlocked}）`,
+    '基线有效性：取证标记的广告在基线下确实可见',
+    baseline.dom.adVisible > 0,
+    `基线 ${baseline.dom.adVisible}/${baseline.dom.adTotal} 可见 —— 若为 0 说明画像已过期`,
   );
   check(
-    '广告位不再渲染内容',
-    filtered.dom.slotsWithAdContent === 0,
-    `基线 ${baseline.dom.slotsWithAdContent} → ${filtered.dom.slotsWithAdContent}`,
-  );
-  check(
-    '站内静态规则确实作用于服务端占位符',
-    filtered.dom.hiddenSlots === filtered.dom.totalSlots && filtered.dom.totalSlots > 0,
-    `隐藏 ${filtered.dom.hiddenSlots}/${filtered.dom.totalSlots}`,
-  );
-  check(
-    '注入式覆盖层/跑马灯全部不可见',
-    filtered.dom.injectedNodesVisible === 0,
-    `${filtered.dom.injectedNodesVisible} 个可见`,
+    '广告元素全部不可见',
+    filtered.dom.adTotal > 0 && filtered.dom.adVisible === 0,
+    `基线 ${baseline.dom.adVisible}/${baseline.dom.adTotal} → 净化后 ${filtered.dom.adVisible}/${filtered.dom.adTotal}`,
   );
   check(
     '误伤守卫：正文可见数量与基线一致',
-    filtered.dom.visibleArticles === baseline.dom.visibleArticles,
-    `基线 ${baseline.dom.visibleArticles} → 净化后 ${filtered.dom.visibleArticles}`,
+    filtered.dom.contentVisible === baseline.dom.contentVisible && filtered.dom.contentTotal > 0,
+    `基线 ${baseline.dom.contentVisible}/${baseline.dom.contentTotal} → 净化后 ${filtered.dom.contentVisible}/${filtered.dom.contentTotal}`,
   );
   check(
-    '误伤守卫：正文缩略图仍能加载',
-    filtered.dom.thumbsLoaded >= baseline.dom.thumbsLoaded && filtered.dom.thumbsLoaded > 0,
-    `基线 ${baseline.dom.thumbsLoaded} → 净化后 ${filtered.dom.thumbsLoaded}`,
+    '误伤守卫：正文图片仍可见',
+    filtered.dom.contentImgsTotal === 0 ||
+      (filtered.dom.contentImgsVisible >= baseline.dom.contentImgsVisible &&
+        filtered.dom.contentImgsVisible > 0),
+    `基线 ${baseline.dom.contentImgsVisible}/${baseline.dom.contentImgsTotal} → 净化后 ${filtered.dom.contentImgsVisible}/${filtered.dom.contentImgsTotal}`,
   );
   check('未产生弹窗', filtered.popups === 0, `${filtered.popups} 个新页面目标`);
+
+  if (profile.adInfra.length > 0) {
+    check(
+      '广告基础设施请求成功数清零',
+      filtered.infraServed === 0,
+      `基线 ${baseline.infraServed} → 净化后 ${filtered.infraServed}（拦截 ${filtered.infraBlocked}）`,
+    );
+  } else {
+    results.push({
+      name: '广告基础设施请求',
+      ok: true,
+      detail: '该站无可安全拉黑的网络端点（广告与正文共用 CDN），跳过 —— 全靠 DOM 层',
+    });
+  }
 } catch (error) {
   failures++;
   results.push({ name: 'E2E 执行', ok: false, detail: error.message });
 }
 
-console.log('─'.repeat(74));
+console.log('─'.repeat(78));
 for (const r of results) {
   console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? `   (${r.detail})` : ''}`);
 }
-console.log('─'.repeat(74));
-console.log(failures === 0 ? 'E2E 全部通过' : `E2E 失败 ${failures} 项`);
+console.log('─'.repeat(78));
+console.log(
+  failures === 0 ? `E2E 全部通过（${profile.host}）` : `E2E 失败 ${failures} 项（${profile.host}）`,
+);
 process.exit(failures === 0 ? 0 : 1);

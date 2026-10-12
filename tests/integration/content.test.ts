@@ -26,7 +26,12 @@ import { pilotPack } from '../../src/rules/sites/pilot.ts';
 const fixture = readFileSync(new URL('../fixtures/pilot-category.html', import.meta.url), 'utf8');
 const HOST = 'afford.gjvrohros.cc';
 const CONTENT = 'article[itemtype*="BlogPosting"]';
-const THUMB = 'img[data-src*="upload_01"]';
+/**
+ * 服务端渲染的推荐位图片。
+ * ⚠️ 它们**不是正文缩略图**：这 10 张全部属于「推荐位广告块」，隐藏是正确行为。
+ * 正文缩略图由内联脚本从 pic.wvxrrip.cn 动态加载，见下面的专项用例。
+ */
+const RECOMMEND_IMG = 'img[data-src*="upload_01"]';
 
 function freshDoc(): Document {
   return new JSDOM(fixture, { url: `https://${HOST}/category/jrxw1/` }).window.document;
@@ -91,14 +96,49 @@ describe('集成：真实 fixture 上的首屏清扫', () => {
     assert.ok(!isHidden(container), 'ssp-list 容器被隐藏了 —— 正文列表会一起消失');
   });
 
-  it('正文缩略图一个都没有被隐藏（误伤守卫）', () => {
+  it('跨站 CDN 的正文缩略图不被隐藏（误伤守卫，风险 A）', () => {
+    // ⚠️ 注意别搞错：fixture 里 `img[data-src*="upload_01"]` 那 10 张**全部属于
+    // 「服务端推荐位」**，隐藏它们是正确的（下面单独断言）。真正要守的是正文缩略图，
+    // 而试点站的正文缩略图由内联脚本 loadBannerDirect 从 pic.wvxrrip.cn 动态加载
+    // （那段内联脚本在脱敏时被抹掉了），所以这里手工构造一张放进正文 article。
     const doc = freshDoc();
-    const thumbs = Array.from(doc.querySelectorAll(THUMB));
-    assert.ok(thumbs.length > 0, 'fixture 里应当有正文缩略图');
+    const article = doc.querySelector(CONTENT)!;
+    const img = doc.createElement('img');
+    img.setAttribute('src', '/usr/themes/Mirages/images/logo-thumb@3x.png');
+    img.setAttribute('data-src', 'https://pic.wvxrrip.cn/upload_01/xiao/a.jpeg');
+    article.appendChild(img);
 
     sweep(doc.documentElement, optionsFor(doc));
 
-    for (const t of thumbs) assert.ok(!isHidden(t), '正文缩略图被误伤');
+    assert.ok(!isHidden(img), 'pic.wvxrrip.cn 的正文缩略图被误伤 —— 这是风险 A');
+    assert.ok(!isHidden(article), '正文 article 被误伤');
+  });
+
+  it('服务端渲染的推荐位图片被隐藏（它们是广告位，不是正文）', () => {
+    const doc = freshDoc();
+    const imgs = Array.from(doc.querySelectorAll(RECOMMEND_IMG));
+    assert.ok(imgs.length > 0, 'fixture 里应当有推荐位图片');
+
+    sweep(doc.documentElement, optionsFor(doc));
+
+    for (const i of imgs) assert.ok(isHidden(i), '推荐位图片未被隐藏');
+  });
+
+  it('内容守卫：装着正文的容器绝不因命名被隐藏（事故回归保护）', () => {
+    // 这是加命名档时自己踩出来的事故：`<div data-ssp-container="ssp-list">`
+    // 的属性名含 `data-ssp-`，被判成强命名，于是整个正文列表被隐藏。
+    // 命名证据再强也不能推翻「这里面装着正文」这个事实。
+    const doc = freshDoc();
+    const container = doc.querySelector('[data-ssp-container="ssp-list"]')!;
+    assert.ok(container, '未找到 ssp-list 容器');
+
+    sweep(doc.documentElement, optionsFor(doc));
+
+    assert.ok(!isHidden(container), '装着正文的容器被命名档隐藏了 —— 正文列表会一起消失');
+    assert.ok(
+      container.querySelectorAll(CONTENT).length > 0,
+      '该容器内应当确实有正文 article，否则这条测试没有意义',
+    );
   });
 
   it('服务端渲染的合法外链盒子没有被隐藏（标定发现的高分元素）', () => {
@@ -186,7 +226,8 @@ describe('集成：脚本注入的动态内容', () => {
     const hits = addHits(promo, options);
     assert.ok(isHidden(promo), '跨站推广位未被隐藏');
     assert.equal(hits.length, 1, `应产生 1 条命中，实际 ${hits.length}`);
-    assert.equal(hits[0]!.score, 6, JSON.stringify(hits[0]));
+    // 弱命名（promo/float → +2）加行为旁证（跨站链接 +4、推广参数 +2）
+    assert.equal(hits[0]!.score, 8, JSON.stringify(hits[0]));
     assert.deepEqual(hits[0]!.selector, '.tg-promo-float');
     assert.equal(recordableSelector(hits[0]!, doc), '.tg-promo-float');
   });
@@ -251,12 +292,13 @@ describe('集成：脚本注入的动态内容', () => {
 });
 
 describe('集成：快照不可信时启发式必须整体关闭', () => {
-  it('reliable=false 时，脚本注入的推广盒子不被隐藏', () => {
+  it('reliable=false 时，纯行为档关闭（无命名线索的推广盒子不被隐藏）', () => {
     const doc = freshDoc();
     const options = optionsFor(doc, false);
+    // 刻意用没有任何广告命名的 class：这样才能真正测到「纯行为档」
     const promo = inject(
       doc,
-      '<div class="tg-promo-float"><a href="https://spam.example.com/x?click_id=1"></a></div>',
+      '<div class="zzz-plain"><a href="https://spam.example.com/x?click_id=1"></a></div>',
     );
 
     const hits = addHits(promo, options);

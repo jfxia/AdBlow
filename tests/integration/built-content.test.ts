@@ -19,7 +19,25 @@ const hasDist = existsSync(distPath);
 const fixture = readFileSync(new URL('../fixtures/pilot-category.html', import.meta.url), 'utf8');
 const HOST = 'afford.gjvrohros.cc';
 const CONTENT = 'article[itemtype*="BlogPosting"]';
-const THUMB = 'img[data-src*="upload_01"]';
+/**
+ * ⚠️ 这不是正文缩略图，而是**服务端推荐位广告图**（20 个推荐位，id 形如
+ * `xqbj-recommand-item-banner-1-N`）。隐藏它们是正确行为。
+ * 试点站的正文缩略图由内联脚本从 pic.wvxrrip.cn 动态加载，见下面手工构造的用例。
+ */
+const RECOMMEND_IMG = 'img[data-src*="upload_01"]';
+
+/** 在第一篇正文 article 里塞一张跨站 CDN 的正文图，用来守「风险 A」。 */
+function fixtureWithContentThumb(): string {
+  // 注意：脱敏后的 fixture 由 jsdom 序列化，布尔属性会变成 itemscope=""，
+  // 所以这里不能按原始 HTML 的字面量匹配。
+  const marker = /(<article[^>]*itemtype="http:\/\/schema\.org\/BlogPosting"[^>]*>)/;
+  const out = fixture.replace(
+    marker,
+    '$1<img id="content-thumb" src="/x.png" data-src="https://pic.wvxrrip.cn/upload_01/xiao/a.jpeg">',
+  );
+  if (out === fixture) throw new Error('未能插入正文缩略图，fixture 结构可能已变');
+  return out;
+}
 
 type SendMessage = (msg: { type?: string; url?: string }) => Promise<unknown>;
 
@@ -102,14 +120,30 @@ describe(
       for (const s of slots) assert.ok(s.getAttribute('data-adblow-hidden') === '1', '占位符未隐藏');
     });
 
-    it('正文 article 与缩略图毫发无伤（误伤守卫）', async () => {
-      const { doc } = await runBundle({ packs: [pilotPack], pristine: null });
+    it('正文 article 与正文缩略图毫发无伤（误伤守卫）', async () => {
+      // 手工在正文里塞一张 pic.wvxrrip.cn 的图 —— 那是**风险 A**：
+      // 该域名既是 SSP 素材 CDN 又是正文缩略图 CDN，绝不能整体拉黑。
+      const { doc } = await runBundle({
+        packs: [pilotPack],
+        pristine: null,
+        html: fixtureWithContentThumb(),
+      });
 
       for (const a of Array.from(doc.querySelectorAll(CONTENT))) {
         assert.ok(!a.hasAttribute('data-adblow-hidden'), '正文 article 被误伤');
       }
-      for (const t of Array.from(doc.querySelectorAll(THUMB))) {
-        assert.ok(!t.hasAttribute('data-adblow-hidden'), '正文缩略图被误伤');
+      const thumb = doc.querySelector('#content-thumb');
+      assert.ok(thumb, '正文缩略图未被插入，测试无效');
+      assert.ok(!thumb.hasAttribute('data-adblow-hidden'), 'pic.wvxrrip.cn 的正文缩略图被误伤（风险 A）');
+    });
+
+    it('服务端推荐位广告图被隐藏（它们是广告位，不是正文）', async () => {
+      const { doc } = await runBundle({ packs: [pilotPack], pristine: null });
+
+      const imgs = Array.from(doc.querySelectorAll(RECOMMEND_IMG));
+      assert.ok(imgs.length > 0, 'fixture 里应当有推荐位图片');
+      for (const i of imgs) {
+        assert.ok(i.hasAttribute('data-adblow-hidden'), '推荐位广告图未被隐藏');
       }
     });
 
@@ -157,16 +191,27 @@ describe(
       assert.ok(promo.hasAttribute('data-adblow-hidden'), '启发式未拦住注入的推广位');
     });
 
-    it('无规则包且回填失败时，不产生任何假阳性', async () => {
+    it('无规则包且回填失败时，正文零误伤（但命名档照样拦广告）', async () => {
       const { doc } = await runBundle({ packs: [], pristine: null });
 
-      for (const sel of [CONTENT, THUMB, '.contact-link', 'footer#footer', 'div.container']) {
+      for (const sel of [CONTENT, '.contact-link', 'footer#footer', 'div.container']) {
         for (const e of Array.from(doc.querySelectorAll(sel))) {
-          assert.ok(!e.hasAttribute('data-adblow-hidden'), `${sel} 被误伤（回填失败时不该启用启发式）`);
+          assert.ok(!e.hasAttribute('data-adblow-hidden'), `${sel} 被误伤`);
         }
       }
-      // 连静态规则也没了（没有规则包），因此占位符保持可见——这是预期行为
-      assert.equal(doc.querySelectorAll('[data-ssp-slot-node][data-adblow-hidden]').length, 0);
+
+      // 改进点：以前没有规则包又回填失败时，占位符会留在页面上；
+      // 现在命名档（属性名含 data-ssp-）不依赖规则包也不依赖快照，能直接拦住它们。
+      const slots = Array.from(doc.querySelectorAll('[data-ssp-slot-node]'));
+      assert.ok(slots.length > 0);
+      for (const s of slots) {
+        assert.ok(s.hasAttribute('data-adblow-hidden'), '占位符应被命名档拦住');
+      }
+
+      // 容器仍然绝不能被隐藏（里面装着正文）
+      const container = doc.querySelector('[data-ssp-container="ssp-list"]');
+      assert.ok(container, '未找到 ssp-list 容器');
+      assert.ok(!container.hasAttribute('data-adblow-hidden'), '装着正文的容器被隐藏了');
     });
 
     it('站点被关闭时一个都不碰', async () => {

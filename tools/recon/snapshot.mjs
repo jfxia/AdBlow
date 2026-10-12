@@ -21,6 +21,8 @@ const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0';
 
 const url = process.argv[2] ?? 'https://afford.gjvrohros.cc/category/jrxw1/';
+/** 输出文件名（写到 tests/fixtures/ 下）。多站点回归靠它。 */
+const OUT_NAME = process.argv[3] ?? 'pilot-category.html';
 
 const SCRATCH = new URL('../../_probe/', import.meta.url);
 const FIXTURES = new URL('../../tests/fixtures/', import.meta.url);
@@ -95,12 +97,12 @@ for (const el of document.querySelectorAll('*')) {
 }
 
 const out = '<!doctype html>\n' + document.documentElement.outerHTML + '\n';
-writeFileSync(new URL('pilot-category.html', FIXTURES), out, 'utf8');
+writeFileSync(new URL(OUT_NAME, FIXTURES), out, 'utf8');
 
 // 4) 自检：脱敏后不应再有任何 CJK 文案残留
 CJK.lastIndex = 0;
 const leftovers = out.match(CJK) ?? [];
-console.log(`脱敏后 fixture：${out.length} 字节 -> tests/fixtures/pilot-category.html`);
+console.log(`脱敏后 fixture：${out.length} 字节 -> tests/fixtures/${OUT_NAME}`);
 console.log(`属性值中清理的 CJK 段：${cjkAttrs}`);
 console.log(`残留 CJK 段：${leftovers.length}${leftovers.length ? ' -> ' + leftovers.slice(0, 5).join(' | ') : '（干净）'}`);
 console.log(

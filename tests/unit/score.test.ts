@@ -10,13 +10,49 @@ function el(html: string): Element {
   return d.firstElementChild!;
 }
 
-describe('scoreNode', () => {
-  it('SSP 注入标记直接高分', () => {
+describe('scoreNode：命名证据', () => {
+  it('站点取证标记直接高分', () => {
     const r = scoreNode(el('<div data-ssp-sdk-popup-overlay></div>'), ctx);
     assert.ok(r.score >= 6, `score=${r.score}`);
     assert.ok(r.reasons.includes('ssp-marker'), JSON.stringify(r.reasons));
+    assert.equal(r.behavior, 0, '命名证据不应混进行为分');
   });
 
+  it('强广告命名直接高分', () => {
+    const r = scoreNode(el('<article class="ad-item"></article>'), ctx);
+    assert.equal(r.naming, 6);
+    assert.ok(r.reasons.includes('ad-naming'), JSON.stringify(r.reasons));
+  });
+
+  it('弱广告命名只给低分（需旁证）', () => {
+    const r = scoreNode(el('<div class="horizontal-banner"></div>'), ctx);
+    assert.equal(r.naming, 2);
+    assert.ok(r.reasons.includes('ad-naming-weak'), JSON.stringify(r.reasons));
+  });
+
+  it('命名分与行为分可分离，判定层才能分档处理', () => {
+    // 服务端渲染的广告卡：命名是确定性证据，行为只是旁证
+    const r = scoreNode(
+      el('<article class="ad-item"><a href="https://spam.example.com/x"></a></article>'),
+      ctx,
+    );
+    assert.equal(r.naming, 6);
+    assert.equal(r.behavior, 4);
+    assert.equal(r.score, 10);
+  });
+
+  it('正文 article 零分', () => {
+    const r = scoreNode(
+      el('<article itemscope itemtype="http://schema.org/BlogPosting"><a href="/archives/1/"><h2>t</h2></a></article>'),
+      ctx,
+    );
+    assert.equal(r.score, 0);
+    assert.equal(r.naming, 0);
+    assert.equal(r.behavior, 0);
+  });
+});
+
+describe('scoreNode：行为证据', () => {
   it('跨可注册域名的出站链接加分（元素自身即链接）', () => {
     const r = scoreNode(
       el('<a href="https://spam.example.com/landing?click_id=1"><img src="/a.png"></a>'),
@@ -48,14 +84,6 @@ describe('scoreNode', () => {
     const r = scoreNode(el('<img src="/local.png" data-src="https://ads.example.com/a.png">'), ctx);
     assert.ok(r.reasons.includes('cross-site-media'), JSON.stringify(r.reasons));
   });
-
-  it('正文 <article> 不加分', () => {
-    const r = scoreNode(
-      el('<article itemscope itemtype="http://schema.org/BlogPosting"><a href="/archives/1/"><h2>t</h2></a></article>'),
-      ctx,
-    );
-    assert.equal(r.score, 0);
-  });
 });
 
 describe('scoreNode 的聚合结构约束（2026-10-10 实测标定）', () => {
@@ -64,28 +92,29 @@ describe('scoreNode 的聚合结构约束（2026-10-10 实测标定）', () => {
 
   it('紧凑盒子里的跨站链接计入（小而密的外链盒子确实是广告形态）', () => {
     const r = scoreNode(el('<div class="x"><a href="https://spam.example.com/a"></a></div>'), ctx);
-    assert.equal(r.score, 4, JSON.stringify(r.reasons));
+    assert.equal(r.behavior, 4, JSON.stringify(r.reasons));
   });
 
-  it(`后代超过 ${12} 个元素时，后代信号被忽略（大容器不是广告）`, () => {
+  it('后代超过 12 个元素时，后代信号被忽略（大容器不是广告）', () => {
     const filler = '<i></i>'.repeat(15);
     const r = scoreNode(
       el(`<div class="x">${filler}<a href="https://spam.example.com/a?click_id=1"></a></div>`),
       ctx,
     );
-    assert.equal(r.score, 0, `大容器不应累加子树信号，reasons=${JSON.stringify(r.reasons)}`);
+    assert.equal(r.behavior, 0, `大容器不应累加子树信号，reasons=${JSON.stringify(r.reasons)}`);
   });
 
-  it('大容器自身若带 SSP 标记仍然高分（自身信号不受紧凑度影响）', () => {
+  it('大容器自身若带命名证据仍然高分（自身信号不受紧凑度影响）', () => {
     const filler = '<i></i>'.repeat(200);
     const r = scoreNode(el(`<div data-ssp-slot-root>${filler}</div>`), ctx);
+    assert.equal(r.naming, 6);
     assert.equal(r.score, 6);
   });
 
   it('容器规模可调，便于按站点标定', () => {
     const filler = '<i></i>'.repeat(15);
     const html = `<div>${filler}<a href="https://spam.example.com/a"></a></div>`;
-    assert.equal(scoreNode(el(html), { ...ctx, compactMax: 100 }).score, 4);
-    assert.equal(scoreNode(el(html), { ...ctx, compactMax: 5 }).score, 0);
+    assert.equal(scoreNode(el(html), { ...ctx, compactMax: 100 }).behavior, 4);
+    assert.equal(scoreNode(el(html), { ...ctx, compactMax: 5 }).behavior, 0);
   });
 });

@@ -1,5 +1,6 @@
 import { isInjected, type PristineIndex } from '../engine/pristine.ts';
 import { scoreNode } from '../engine/score.ts';
+import { NAMING_STRONG, NAMING_WEAK, namingSignal } from '../engine/lexicon.ts';
 import { generalizeSelector, isSelectorSafe } from '../engine/selector.ts';
 import { validateSitePack, type SitePack } from '../engine/rules.ts';
 
@@ -43,22 +44,26 @@ export function recordableSelector(
 export type InjectionTest = (el: Element) => boolean;
 
 /**
- * 默认的注入判定。
+ * 默认的注入判定。**只用于「纯行为证据」那一档**（见 createJudge 的三档决策）。
  *
  * ⚠️ 这里的 `reliable` 不是保守开关，是**实测必需的**（2026-10-10 标定）：
  *
  * `document_start` 时页面才刚开始解析，就地构建的快照索引几乎为空，不可信。
- * 而本站服务端 HTML 里就有紧凑外链盒子（`.contact-link`、`footer#footer`、
- * `div.container`）广告度达到 8 分，超过阈值 6 —— 用不可信快照跑启发式，
+ * 而试点站服务端 HTML 里就有紧凑外链盒子（`.contact-link`、`footer#footer`、
+ * `div.container`）广告度达到 8 分，超过阈值 6 —— 用不可信快照跑纯行为判定，
  * 必然误伤这三处；把阈值抬到 10 又会丢掉「跨站链接 + 推广参数」这条最有价值
  * 的通用检测。
  *
  * 因此：
- *   - `reliable === false`：启发式**整体关闭**，只留静态规则（精确锚点，安全）
+ *   - `reliable === false`：纯行为档**整体关闭**，只留静态规则与命名档
  *   - `reliable === true` ：快照来自完整服务端 HTML，按签名精确区分注入节点
  *
  * 快照回填见 src/engine/pristine.ts 的 buildPristineIndexFromHtml 与
  * src/content/index.ts 的 PRISTINE_STRATEGY。
+ *
+ * 注：**命名档（强广告命名）不受这里影响** —— 它是确定性证据，不需要注入佐证。
+ * 第二站点（1024cg.com）的广告是服务端渲染的 `article.ad-item`，正是靠命名档
+ * 才能拦住，否则会被这道闸门整个排除在外。
  */
 export function makeInjectionTest(index: PristineIndex, reliable: boolean): InjectionTest {
   return (el: Element) => reliable && isInjected(el, index);
@@ -89,12 +94,48 @@ export function selectorsFrom(
   return [...out];
 }
 
+/** 弱命名要成立，至少要有这么多行为旁证（跨站链接 = 4）。 */
+export const WEAK_NAMING_MIN_BEHAVIOR = 4;
+
 /**
- * 造一个启发式判定器。
+ * 内容标记：出现这些才说明该元素里装着**真实正文**。
  *
- * 两道闸门缺一不可：
- *   1. 必须像运行时注入 —— 否则会顺着行为特征误伤服务端正文
- *   2. 广告度必须过阈值 —— 否则所有动态内容都会被误伤
+ * 这是命名档的硬性例外，来自一次自己踩出来的事故：加上命名档之后，
+ * 试点站的 `<div data-ssp-container="ssp-list">` 因为属性名含 `data-ssp-`
+ * 被判成强命名，于是整个正文列表被隐藏——正是设计文档 §2 反复强调的那条红线。
+ *
+ * 教训：**命名证据再强，也不能推翻「这里面装着正文」这个事实。**
+ * 所以任何包含正文标记的元素，一律不因命名或行为被隐藏。
+ */
+export const CONTENT_MARKERS = [
+  'article[itemtype*="BlogPosting"]',
+  'article[itemprop]',
+  '[itemprop="articleBody"]',
+  'main article',
+];
+
+/** 元素自身是正文，或内部装着真实正文。 */
+export function holdsRealContent(el: Element): boolean {
+  const selector = CONTENT_MARKERS.join(',');
+  return el.matches(selector) || el.querySelector(selector) !== null;
+}
+
+/**
+ * 造一个启发式判定器。**三档决策，证据强度递减**。
+ *
+ * 这取代了早期「一律要求脚本注入」的单档设计。那个设计在第二站点
+ * （1024cg.com）上完全失效：它的广告是**服务端渲染**的 `article.ad-item`，
+ * 不是脚本注入的，于是被那道闸门整个排除在外，一个都拦不住。
+ *
+ * 三档：
+ *   ① 确定性命名证据（naming >= 强命名）：直接判定，不看注入时机、不看行为。
+ *      `class="ad-item"` 这种命名本身就是证据。
+ *   ② 弱命名 + 行为旁证：`banner` / `popup` / `sponsor` 这类词在正常 UI 里
+ *      也常见，单独出现不算数，但配上跨站外链就足够。
+ *   ③ 纯行为证据：没有命名线索，只能靠行为推断。此时**必须**先证明是脚本
+ *      注入，否则会顺着行为特征误伤服务端正文（标定证据见 makeInjectionTest）。
+ *
+ * 三档之前先过一次**内容守卫**（holdsRealContent）——见其注释。
  */
 export function createJudge(
   injected: InjectionTest,
@@ -103,12 +144,24 @@ export function createJudge(
   threshold: number = SCORE_THRESHOLD,
 ): (el: Element) => Hit | null {
   return (el: Element): Hit | null => {
-    if (!injected(el)) return null;
+    // 内容守卫优先于一切证据（事故回归保护）
+    if (holdsRealContent(el)) return null;
 
-    const { score, reasons } = scoreNode(el, { pageHost: host, viewportArea });
-    if (score < threshold) return null;
+    const naming = namingSignal(el).strength;
+    const { score, behavior, reasons } = scoreNode(el, { pageHost: host, viewportArea });
 
-    return { selector: generalizeSelector(el), score, reasons };
+    const hit = (): Hit => ({ selector: generalizeSelector(el), score, reasons });
+
+    // ① 确定性命名证据
+    if (naming >= NAMING_STRONG) return hit();
+
+    // ② 弱命名 + 行为旁证
+    if (naming === NAMING_WEAK && behavior >= WEAK_NAMING_MIN_BEHAVIOR) return hit();
+
+    // ③ 纯行为证据：必须先证明是脚本注入
+    if (injected(el) && behavior >= threshold) return hit();
+
+    return null;
   };
 }
 

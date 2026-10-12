@@ -1,16 +1,20 @@
-import { adSignalStrength } from './lexicon.ts';
+import { NAMING_NONE, NAMING_SSP, NAMING_STRONG, NAMING_WEAK, namingSignal } from './lexicon.ts';
 
 /**
  * 广告度打分。
  *
  * 这是「完全自研不用第三方列表」路线下通用性的来源：不依赖任何名单，
- * 只看节点的行为特征。
+ * 只看节点的命名与行为特征。
  *
- * ⚠️ 结构约束（2026-10-10 用真实页面标定得出，改了会出事）：
- * 后代链接/媒体信号**只在元素足够紧凑时**才计入。
- * 早期版本对整棵子树无条件聚合，结果 `<html>` 拿到 20 分、`<body>` 20 分、
- * `<footer>` 12 分——盒子越大分越高，一旦过阈值就是整页消失。
- * 那不是阈值问题，是模型问题：**大容器不是广告，小而密的外链盒子才是。**
+ * ⚠️ 两条结构约束都是 2026-10-10 用真实页面标定出来的，改了会出事：
+ *
+ * 1. **后代链接/媒体信号只在元素足够紧凑时计入。**
+ *    早期版本对整棵子树无条件聚合，结果 `<html>` 拿到 20 分、`<body>` 20 分——
+ *    盒子越大分越高，一旦过阈值就是整页消失。大容器不是广告，小而密的外链盒子才是。
+ *
+ * 2. **命名证据与行为证据必须分开返回。**
+ *    命名（class/id 里的广告术语）是确定性证据；行为（跨站外链、推广参数）
+ *    是间接证据。两者可信度不同，判定层要区别对待，因此不能只吐一个总分。
  */
 
 export const COMPACT_MAX_DESCENDANTS = 12;
@@ -23,7 +27,12 @@ export type ScoreContext = {
 };
 
 export type ScoreResult = {
+  /** 命名分 + 行为分 */
   score: number;
+  /** 仅命名证据所得分 */
+  naming: number;
+  /** 仅行为证据所得分 */
+  behavior: number;
   reasons: string[];
 };
 
@@ -55,9 +64,9 @@ function isAbsoluteUrl(u: string): boolean {
 /**
  * 取媒体地址。
  *
- * 注意这里必须先看 src 是否**绝对地址**再退回 data-src：
- * 该站用 `src=占位图 + data-src=真实图` 做懒加载（loadBannerDirect），
- * 若因为 src 存在就直接采用，跨站的真实图会被整批漏掉。
+ * 必须先看 src 是否**绝对地址**再退回 data-src：
+ * 该站用 `src=占位图 + data-src=真实图` 做懒加载，若因为 src 存在就直接采用，
+ * 跨站的真实图会被整批漏掉。
  */
 function mediaUrl(el: Element): string {
   const src = el.getAttribute('src') ?? '';
@@ -66,18 +75,24 @@ function mediaUrl(el: Element): string {
   return lazy || src;
 }
 
+/** 命名分：SSP 标记与强命名同分（都是确定性证据），弱命名减半。 */
+function namingScore(strength: number): { points: number; reason: string | null } {
+  if (strength >= NAMING_SSP) return { points: 6, reason: 'ssp-marker' };
+  if (strength === NAMING_STRONG) return { points: 6, reason: 'ad-naming' };
+  if (strength === NAMING_WEAK) return { points: 2, reason: 'ad-naming-weak' };
+  return { points: 0, reason: null };
+}
+
+export { NAMING_NONE, NAMING_SSP, NAMING_STRONG, NAMING_WEAK };
+
 export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
   const reasons = new Set<string>();
-  let score = 0;
 
-  const lexicon = adSignalStrength(el);
-  if (lexicon >= 3) {
-    score += 6;
-    reasons.add('ssp-marker');
-  } else if (lexicon > 0) {
-    score += 2;
-    reasons.add('ad-token');
-  }
+  const signal = namingSignal(el);
+  const naming = namingScore(signal.strength);
+  if (naming.reason) reasons.add(naming.reason);
+
+  let behavior = 0;
 
   const pageReg = registrableDomain(ctx.pageHost);
   const base = `https://${ctx.pageHost}`;
@@ -93,12 +108,12 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
         continue;
       }
       if (registrableDomain(parsed.hostname) !== pageReg) {
-        score += 4;
+        behavior += 4;
         reasons.add('cross-site-link');
       }
       const search = parsed.search.toLowerCase();
       if (PROMO_PARAMS.some((p) => search.includes(p))) {
-        score += 2;
+        behavior += 2;
         reasons.add('promo-params');
       }
     }
@@ -115,7 +130,7 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
         continue;
       }
       if (registrableDomain(parsed.hostname) !== pageReg) {
-        score += 3;
+        behavior += 3;
         reasons.add('cross-site-media');
       }
     }
@@ -134,5 +149,10 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
     }
   }
 
-  return { score, reasons: [...reasons] };
+  return {
+    score: naming.points + behavior,
+    naming: naming.points,
+    behavior,
+    reasons: [...reasons],
+  };
 }
