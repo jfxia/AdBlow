@@ -11,6 +11,7 @@ import {
   findLinkFarms,
   hideElement,
   holdsRealContent,
+  mustNotHide,
   judgeGrownElement,
   learnableAdDomains,
   makeInjectionTest,
@@ -18,6 +19,7 @@ import {
   recordableSelector,
   selectorsFrom,
   sweep,
+  verifyHiding,
   type Hit,
   type JudgeOptions,
 } from './engine.ts';
@@ -125,7 +127,13 @@ function installCosmeticStyle(selectors: string[]): void {
  */
 function installListCosmetic(selectors: string[]): number {
   if (selectors.length === 0) return 0;
-  const result = applyListCosmetic(document, selectors, holdsRealContent);
+  // 列表规则必须同时过「内容」与「导航」两道闸门：
+  // 社区列表是按域名批量套用的，一条过宽的选择器就能让整站正文或导航消失。
+  const result = applyListCosmetic(
+    document,
+    selectors,
+    (el) => holdsRealContent(el) || mustNotHide(el),
+  );
   if (result.droppedForContent.length) {
     console.debug(
       `[adblow] 列表选择器会隐藏正文，已剔除 ${result.droppedForContent.length} 条：` +
@@ -276,7 +284,7 @@ async function boot(): Promise<void> {
   const hideLinkFarms = (): number => {
     const farms = findLinkFarms(document, { host });
     for (const el of farms) {
-      hideElement(el);
+      hideElement(el, 'linkfarm');
       heuristic += 1;
     }
     if (farms.length) console.debug(`[adblow] 链接农场：隐藏 ${farms.length} 个块`);
@@ -292,7 +300,7 @@ async function boot(): Promise<void> {
   const hideFakeClose = (): number => {
     const ads = findFakeCloseAds(document, { host });
     for (const { element, hit } of ads) {
-      hideElement(element);
+      hideElement(element, 'fake-close');
       heuristic += 1;
       learn([hit]);
     }
@@ -312,7 +320,7 @@ async function boot(): Promise<void> {
       viewportArea: innerWidth * innerHeight,
     });
     for (const el of layers) {
-      hideElement(el);
+      hideElement(el, 'click-layer');
       heuristic += 1;
     }
     if (layers.length) {
@@ -330,7 +338,7 @@ async function boot(): Promise<void> {
   const hideOverlays = (): number => {
     const ads = findOverlayAds(document, { host, viewportArea: innerWidth * innerHeight });
     for (const { element, hit } of ads) {
-      hideElement(element);
+      hideElement(element, 'overlay');
       heuristic += 1;
       learn([hit]);
     }
@@ -356,13 +364,20 @@ async function boot(): Promise<void> {
     const fakeClose = hideFakeClose();
     const layers = hideClickLayers();
     const overlays = hideOverlays();
+    // 复核"我们隐藏过的元素是否又被显示回来了"。
+    // 必须放在最后：刚隐藏的元素立刻复核没有意义，而站点改回显示
+    // 通常发生在它自己的脚本跑完之后（实测 1024cg 的广告弹层就是这样，
+    // 不复核的话整页链接都点不动，而我们还以为自己拦住了）。
+    const audit = verifyHiding(document);
     learnAdDomains();
     void writeStats(store, host, { rule, heuristic });
     console.debug(
       `[adblow] ${label} host=${host} 规则包=${packs.length} ` +
         `选择器=${selectorSet.curated.length}包+${selectorSet.learned.length}学 ` +
         `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays} 点击层=${layers} ` +
-        `假关闭=${fakeClose} 链接农场=${farms}`,
+        `假关闭=${fakeClose} 链接农场=${farms} ` +
+        `复核=${audit.checked}/重新隐藏=${audit.refought}` +
+        (audit.stubborn.length ? ` 顽固=[${audit.stubborn.slice(0, 3).join(' ')}]` : ''),
     );
   };
 

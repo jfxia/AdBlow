@@ -66,6 +66,8 @@ export function recordableSelector(
   let images = 0;
   for (const el of matched) {
     if (holdsRealContent(el)) return null;
+    // 更不允许把「显式声明的导航」学成可隐藏
+    if (mustNotHide(el)) return null;
     images += el.matches(MEDIA_TAGS) ? 1 : 0;
     images += el.querySelectorAll('img,video,picture').length;
     if (images > maxImages) return null;
@@ -161,8 +163,91 @@ export const CONTENT_MARKERS = [
 
 /** 元素自身是正文，或内部装着真实正文。 */
 export function holdsRealContent(el: Element): boolean {
+  return hasContentMarker(el) || hasSubstantiveText(el);
+}
+
+/**
+ * 显式声明的**导航**结构。
+ *
+ * 与正文标记同理，这是作者的直接声明（不是我们猜的），因此列入绝对保护：
+ * 用户报告过「导航列表被屏蔽」。而导航里通常只有短标签，
+ * 走"文字量"这条代理指标是保护不住的（实测 12 项导航合计才 72 字）。
+ *
+ * ⚠️ **不用 `querySelector` 往外传播**（这点与正文标记不同）：
+ * 页面上 `<body>` 几乎都包含 `<nav>`，而"同时装着导航与广告的容器"更是常见 ——
+ * 一旦传播，这些容器就都变成不可隐藏，广告拦不住了。
+ * 因此只保护导航**自身**（`isNavigationLike`）与导航**内部**（`isInsideNavigation`）。
+ */
+export const NAVIGATION_MARKERS = [
+  'nav',
+  '[role="navigation"]',
+  '[role="menu"]',
+  '[role="menubar"]',
+  '[role="tablist"]',
+];
+
+export function isNavigationLike(el: Element): boolean {
+  return el.matches(NAVIGATION_MARKERS.join(','));
+}
+
+/** 元素位于导航内部。 */
+export function isInsideNavigation(el: Element): boolean {
+  return el.closest(NAVIGATION_MARKERS.join(',')) !== null;
+}
+
+/**
+ * **绝对不可隐藏**的判据：显式声明的正文与导航。
+ *
+ * 任何来源（启发式、站点规则包以外的自学习、过滤列表的 cosmetic 规则）都要过这一关。
+ * 文字量不在其中 —— 它是代理指标，允许被强命名推翻（见 createJudge）。
+ */
+export function mustNotHide(el: Element): boolean {
+  return hasContentMarker(el) || isNavigationLike(el);
+}
+
+/** 语义标记（schema.org 文章标注）——**绝对保护**，任何证据都不能推翻。 */
+export function hasContentMarker(el: Element): boolean {
   const selector = CONTENT_MARKERS.join(',');
   return el.matches(selector) || el.querySelector(selector) !== null;
+}
+
+/** 「实质文字量」门槛（字符数，空白折叠后）。 */
+export const SUBSTANTIVE_TEXT_MIN = 200;
+/** 「像样的段落」的门槛：每个至少这么多字，才算正文段落。 */
+export const SUBSTANTIVE_PARA_MIN = 40;
+/** 至少这么多个像样的段落才算正文。 */
+export const SUBSTANTIVE_PARA_COUNT = 2;
+
+/**
+ * 元素里是否有**实质文字量**。
+ *
+ * ## 为什么必须加这一条（真实事故）
+ *
+ * 原先的内容守卫只认 schema.org 的文章标记（`article[itemprop]` 等）。
+ * 那是针对试点站调的 —— 它恰好带这些标注。**换成普通站点，
+ * `<div class="content">`、`<nav>`、`<ul class="menu">`、纯 `<p>` 段落
+ * 一律不被保护**，内容守卫形同虚设，于是正文与导航被启发式成片误杀
+ * （用户报告 xchina.co 就是这个症状）。
+ *
+ * ## 与语义标记的区别（重要）
+ *
+ * 语义标记是**直接证据**（作者显式声明"这里是正文"）→ 绝对保护。
+ * 文字量是**代理指标**（广告也可能带一段文字）→ 只作为**强先验**：
+ * 弱命名与纯行为证据不得隐藏它，但**强命名**（`.sponsored-post` 之类）可以。
+ * 这个分层在 createJudge 里落实。
+ */
+export function hasSubstantiveText(el: Element): boolean {
+  const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+  if (text.length >= SUBSTANTIVE_TEXT_MIN) return true;
+
+  let solid = 0;
+  for (const p of Array.from(el.querySelectorAll('p'))) {
+    if ((p.textContent ?? '').replace(/\s+/g, ' ').trim().length >= SUBSTANTIVE_PARA_MIN) {
+      solid += 1;
+      if (solid >= SUBSTANTIVE_PARA_COUNT) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -208,16 +293,24 @@ export function createJudge(
   threshold: number = SCORE_THRESHOLD,
 ): (el: Element) => Hit | null {
   return (el: Element): Hit | null => {
-    // 内容守卫优先于一切证据（事故回归保护）
-    if (holdsRealContent(el)) return null;
+    // 语义标记优先于一切证据（事故回归保护）
+    if (hasContentMarker(el)) return null;
 
     const naming = namingSignal(el).strength;
     const { score, behavior, reasons } = scoreNode(el, { pageHost: host, viewportArea });
 
     const hit = (): Hit => ({ selector: generalizeSelector(el), score, reasons });
 
-    // ① 确定性命名证据
+    // ① 确定性命名证据（强命名可以直接推翻「文字量」这个代理指标，
+    //    因为命名是显式证据：`.sponsored-post` 里有正文也仍然是广告位）
     if (naming >= NAMING_STRONG) return hit();
+
+    // 导航是页面骨架：短标签的导航靠文字量保护不住，必须单独挡
+    if (isNavigationLike(el) || isInsideNavigation(el)) return null;
+
+    // 文字量大 = 像正文 → **弱命名与纯行为证据不得隐藏它**
+    // （这正是「正文/导航被成片误杀」的根因所在，见 hasSubstantiveText）
+    if (hasSubstantiveText(el)) return null;
 
     // ② 弱命名 + 行为旁证
     if (naming === NAMING_WEAK && behavior >= WEAK_NAMING_MIN_BEHAVIOR) return hit();
@@ -234,15 +327,85 @@ export function createJudge(
  *
  * 为什么不用样式表：内联 `!important` 在作者源里优先级最高，不会被站点后续
  * 插进来的 `!important` 规则反制。样式表只是防闪现的第一道便宜防线。
+ *
+ * ## ⚠️ 为什么还要设 `pointer-events` / `visibility`（真实事故）
+ *
+ * 实测（用户报告的 1024cg）：站点用**同一个作者源里的内联 `!important`**
+ * 把 `display` 改回 `block` —— 同优先级下后写的赢，于是我们"隐藏过了"
+ * 的元素又显示出来。那是一个 `position:fixed; z-index:9999`、覆盖 99.5% 视口的
+ * 广告弹层，结果**整个页面的链接都点不动**，而我们的 `data-adblow-hidden`
+ * 标记还挂着 —— 标记成了谎话。
+ *
+ * 所以隐藏要多管齐下：`display:none` 负责视觉，`pointer-events:none`
+ * 保证**即使显示被改回来，点击也能穿透到下面的链接**，
+ * `visibility:hidden` 再补一道。三条里至少有一条能扛住站点的反制。
+ *
+ * @param reason 隐藏的原因（写进 `data-adblow-reason`）。
+ *   这是**排查误杀的唯一手段** —— 用户报"正文/导航被屏蔽了"时，
+ *   必须能一眼看出是规则包、启发式、覆盖层、链接农场还是列表 cosmetic 干的。
  */
-export function hideElement(el: Element): void {
+export function hideElement(el: Element, reason?: string): void {
   el.setAttribute('data-adblow-hidden', '1');
+  if (reason) el.setAttribute(REASON_ATTR, reason);
   const style = (el as HTMLElement).style;
   if (!style) return;
   style.setProperty('display', 'none', 'important');
+  style.setProperty('visibility', 'hidden', 'important');
+  style.setProperty('pointer-events', 'none', 'important');
   style.setProperty('height', '0', 'important');
   style.setProperty('margin', '0', 'important');
   style.setProperty('padding', '0', 'important');
+}
+
+/** 我们隐藏过、但显示被站点改回来的次数（诊断用）。 */
+export const REFOUGHT_ATTR = 'data-adblow-refought';
+
+export type HidingAudit = {
+  /** 复核过的元素数 */
+  checked: number;
+  /** 发现被改回来并重新隐藏的元素数 */
+  refought: number;
+  /** 反复被改回来的元素（站点在主动对抗），按选择器摘要聚合 */
+  stubborn: string[];
+};
+
+/**
+ * 复核隐藏是否仍然生效，并对被站点改回来的元素重新隐藏。
+ *
+ * 为什么必须复核：**`!important` 不是不可战胜的** —— 站点脚本用同样
+ * `!important` 的内联样式后写就能覆盖我们（实测 1024cg 的广告弹层就是这么干的，
+ * 结果整页链接都点不动）。不复核的话，`data-adblow-hidden` 会变成谎话，
+ * 而我们还以为自己拦住了。
+ */
+export function verifyHiding(root: ParentNode): HidingAudit {
+  const audit: HidingAudit = { checked: 0, refought: 0, stubborn: [] };
+  const win = (root as Document).defaultView;
+  if (!win) return audit;
+
+  for (const el of Array.from(root.querySelectorAll(`[${HIDDEN_ATTR}]`))) {
+    audit.checked += 1;
+    let visible = false;
+    try {
+      const cs = win.getComputedStyle(el);
+      visible = cs.display !== 'none' && cs.visibility !== 'hidden';
+    } catch {
+      continue;
+    }
+    if (!visible) continue;
+
+    // 显示被改回来了 → 重新施加（保留原有原因，便于事后统计）
+    const reason = el.getAttribute(REASON_ATTR) ?? undefined;
+    const prev = Number(el.getAttribute(REFOUGHT_ATTR) ?? '0') + 1;
+    hideElement(el, reason);
+    el.setAttribute(REFOUGHT_ATTR, String(prev));
+    audit.refought += 1;
+    if (prev >= 2) {
+      const tag = el.tagName.toLowerCase();
+      const cls = (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean).slice(0, 2).join('.');
+      audit.stubborn.push(`${tag}${cls ? '.' + cls : ''}×${prev}`);
+    }
+  }
+  return audit;
 }
 
 export function isHidden(el: Element): boolean {
@@ -255,6 +418,9 @@ export function isInsideHidden(el: Element): boolean {
 }
 
 export const HIDDEN_ATTR = 'data-adblow-hidden';
+
+/** 隐藏原因所在属性（排查误杀用）。 */
+export const REASON_ATTR = 'data-adblow-reason';
 
 /**
  * 覆盖层检测：**独立的一趟遍历，不参与逐元素打分。**
@@ -468,6 +634,15 @@ export function findLinkFarms(
     }
     if (domains.size < min) continue;
     if (holdsRealContent(el)) continue;
+    // 导航（自身或内部）不是链接农场 —— 用户报告过「导航列表被屏蔽」。
+    // ⚠️ 但**伪装成导航的广告位**要留出退路：如果它自己带着广告强命名
+    // （`nav.ad-links` 这种），那命名就是显式证据，照判。
+    if (isNavigationLike(el) || isInsideNavigation(el)) {
+      if (namingSignal(el).strength < NAMING_STRONG) continue;
+    }
+    // 链接农场是"只有链接、没有文字"的墙。带实质文字的块不是农场 ——
+    // 导航列表、友链说明、索引页都可能挂着不少外链，但它们是内容。
+    if (hasSubstantiveText(el)) continue;
     // 文章内部的"相关链接/参考链接"是作者写的内容，不是广告垃圾
     if (isInsideRealContent(el)) continue;
     candidates.push(el);
@@ -824,10 +999,16 @@ export function judgeElement(el: Element, options: JudgeOptions): Verdict | null
   return hit ? { kind: 'heuristic', hit } : null;
 }
 
-/** 判定并应用隐藏。 */
+/** 判定并应用隐藏。隐藏原因写进 `data-adblow-reason`，便于事后排查误杀。 */
 export function applyVerdict(el: Element, verdict: Verdict | null): Verdict | null {
   if (!verdict) return null;
-  hideElement(el);
+  const reason =
+    verdict.kind === 'rule'
+      ? 'rule'
+      : (verdict.hit?.reasons ?? []).includes('learned-selector')
+        ? 'learned'
+        : 'heuristic';
+  hideElement(el, reason);
   return verdict;
 }
 

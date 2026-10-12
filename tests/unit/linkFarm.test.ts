@@ -94,12 +94,28 @@ describe('findLinkFarms：识别外站链接堆出来的块', () => {
     assert.deepEqual(findLinkFarms(doc, { host: HOST }), [], '只应数真外链，仍是 4 个域名');
   });
 
-  it('多标签也支持（section / ul / nav / aside）', () => {
-    for (const tag of ['section', 'ul', 'nav', 'aside', 'div']) {
+  it('多标签也支持（section / ul / aside / div）', () => {
+    for (const tag of ['section', 'ul', 'aside', 'div']) {
       const doc = root(
         `<${tag} id="f">${links(['a1.com', 'a2.com', 'a3.com', 'a4.com', 'a5.com'])}</${tag}>`,
       );
       assert.equal(findLinkFarms(doc, { host: HOST }).length, 1, tag);
     }
+  });
+
+  it('❗导航默认不判农场（用户报告过「导航列表被屏蔽」）', () => {
+    const nav = root(`<nav id="f">${links(['a1.com', 'a2.com', 'a3.com', 'a4.com', 'a5.com'])}</nav>`);
+    assert.deepEqual(findLinkFarms(nav, { host: HOST }), [], '导航是页面骨架，不能当农场端掉');
+
+    // 导航**内部**同理
+    const inner = root(
+      `<nav><div id="f">${links(['a1.com', 'a2.com', 'a3.com', 'a4.com', 'a5.com'])}</div></nav>`,
+    );
+    assert.deepEqual(findLinkFarms(inner, { host: HOST }), []);
+  });
+
+  it('❗但伪装成导航的广告位仍要判（强命名是显式证据）', () => {
+    const fake = root(`<nav id="f" class="ad-links">${links(['a1.com', 'a2.com', 'a3.com', 'a4.com', 'a5.com'])}</nav>`);
+    assert.equal(findLinkFarms(fake, { host: HOST }).length, 1);
   });
 });
