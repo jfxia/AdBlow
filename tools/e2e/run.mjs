@@ -315,14 +315,18 @@ async function measure({ port }) {
     const uniqAds = [...new Set(ads)];
     const contents = [...document.querySelectorAll(${JSON.stringify(profile.contentSelector)})];
     const cImgs = [...document.querySelectorAll(${JSON.stringify(profile.contentImageSelector)})];
+    const hiddenAttr = (el) => el.hasAttribute('data-adblow-hidden') ||
+      el.closest('[data-adblow-hidden]') !== null;
     return {
       adTotal: uniqAds.length,
       adVisible: uniqAds.filter(visible).length,
-      adHiddenByUs: uniqAds.filter((e) => e.hasAttribute('data-adblow-hidden')).length,
+      adHiddenByUs: uniqAds.filter(hiddenAttr).length,
       contentTotal: contents.length,
       contentVisible: contents.filter(visible).length,
+      contentHiddenByUs: contents.filter(hiddenAttr).length,
       contentImgsTotal: cImgs.length,
       contentImgsVisible: cImgs.filter(visible).length,
+      contentImgsHiddenByUs: cImgs.filter(hiddenAttr).length,
       adblowHiddenTotal: document.querySelectorAll('[data-adblow-hidden]').length,
       hasAdblowStyle: !!document.querySelector('style[data-adblow-cosmetic]'),
     };
@@ -461,14 +465,29 @@ try {
     `基线 ${baseline.dom.adVisible}/${baseline.dom.adTotal} → 净化后 ${filtered.dom.adVisible}/${filtered.dom.adTotal}`,
   );
   check(
-    '误伤守卫：正文可见数量与基线一致',
-    filtered.dom.contentVisible === baseline.dom.contentVisible && filtered.dom.contentTotal > 0,
-    `基线 ${baseline.dom.contentVisible}/${baseline.dom.contentTotal} → 净化后 ${filtered.dom.contentVisible}/${filtered.dom.contentTotal}`,
+    '误伤守卫：正文元素一个都没被我们隐藏',
+    filtered.dom.contentTotal > 0 && filtered.dom.contentHiddenByUs === 0,
+    `正文 ${filtered.dom.contentTotal} 个，被我们隐藏 ${filtered.dom.contentHiddenByUs} 个`,
+  );
+  check(
+    '误伤守卫：正文全部可见（可见数 == 总数）',
+    filtered.dom.contentVisible === filtered.dom.contentTotal && filtered.dom.contentTotal > 0,
+    `${filtered.dom.contentVisible}/${filtered.dom.contentTotal}`,
+  );
+  check(
+    '页面渲染量正常（防止把"页面只渲了一半"误判成成功）',
+    filtered.dom.contentTotal >= baseline.dom.contentTotal * 0.5,
+    `基线 ${baseline.dom.contentTotal} → 净化后 ${filtered.dom.contentTotal}`,
+  );
+  check(
+    '误伤守卫：正文图片一个都没被我们隐藏',
+    filtered.dom.contentImgsHiddenByUs === 0,
+    `正文图 ${filtered.dom.contentImgsTotal} 个，被隐藏 ${filtered.dom.contentImgsHiddenByUs} 个`,
   );
   check(
     '误伤守卫：正文图片仍可见',
     filtered.dom.contentImgsTotal === 0 ||
-      (filtered.dom.contentImgsVisible >= baseline.dom.contentImgsVisible &&
+      (filtered.dom.contentImgsVisible >= Math.min(baseline.dom.contentImgsVisible, filtered.dom.contentImgsTotal) &&
         filtered.dom.contentImgsVisible > 0),
     `基线 ${baseline.dom.contentImgsVisible}/${baseline.dom.contentImgsTotal} → 净化后 ${filtered.dom.contentImgsVisible}/${filtered.dom.contentImgsTotal}`,
   );

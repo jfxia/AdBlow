@@ -15,6 +15,8 @@ export interface DnrRule {
     urlFilter?: string;
     regexFilter?: string;
     resourceTypes: ResourceType[];
+    /** 这些发起方域名下不生效（用于「用户关掉了某站点」时豁免） */
+    excludedInitiatorDomains?: string[];
   };
 }
 

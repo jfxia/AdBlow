@@ -1,0 +1,114 @@
+/**
+ * 从 DOM 元素里提取「跨站资源域名」。
+ *
+ * 这是**自学习网络层**的输入：我们在 DOM 层把某个元素判定为广告并隐藏之后，
+ * 把它用到的跨站域名记下来；同一个域名反复出现在被隐藏的广告里，就晋级为
+ * DNR 拦截规则。这样未知站点从第 N 次访问起也能拿到**网络层**保护，
+ * 而且完全不需要用户配置，也不需要任何第三方过滤列表。
+ *
+ * ⚠️ 安全前提（由调用方负责，见 src/content/index.ts）：
+ * 本模块只负责"提取"，不负责"判断该不该学"。**必须排除那些同时被可见内容
+ * 使用的域名** —— 试点站的 `pic.wvxrrip.cn` 既是广告素材 CDN 又是正文缩略图
+ * CDN，学它就会把正文图全废掉。
+ */
+
+import { isIpLiteral, registrableDomain } from './score.ts';
+
+/** 带外链的资源选择器（不含 a[href]：那是点击目标，不是加载资源）。 */
+const RESOURCE_SELECTOR = [
+  'img[src]',
+  'img[data-src]',
+  'script[src]',
+  'link[href]',
+  'iframe[src]',
+  'video[src]',
+  'video[poster]',
+  'source[src]',
+  'embed[src]',
+  'object[data]',
+].join(',');
+
+/** 从单个元素自身取出资源 URL（不递归子元素）。 */
+export function resourceUrls(el: Element): string[] {
+  const urls: string[] = [];
+  if (!el.matches(RESOURCE_SELECTOR)) return urls;
+  for (const attr of ['src', 'data-src', 'href', 'poster', 'data']) {
+    const value = el.getAttribute(attr);
+    if (value) urls.push(value);
+  }
+  return urls;
+}
+
+/** 从单个元素自身取出外链 URL（`a[href]`）。 */
+export function linkUrls(el: Element): string[] {
+  if (!el.matches('a[href]')) return [];
+  const href = el.getAttribute('href');
+  return href ? [href] : [];
+}
+
+function isAbsoluteUrl(u: string): boolean {
+  return /^https?:/i.test(u) || u.startsWith('//');
+}
+
+export type DomainScope = {
+  /**
+   * 是否把 `a[href]` 也算进去。
+   *
+   * 为什么需要这个开关：**学习**广告域名时应该算上外链——那些域名是广告落地页，
+   * 学会后拦掉它们的**子资源**可以挡住弹窗与强制跳转；而拦截子资源并不影响
+   * `<a href>` 导航本身（DNR 规则排除了 main_frame），所以不会妨碍用户点击。
+   *
+   * 而判断「某域名是否被可见内容使用」时不该算外链——可见内容里出现一个指向
+   * 该域名的链接，不构成"该域名是站点的正常资源来源"。
+   */
+  includeLinks?: boolean;
+};
+
+/**
+ * 提取元素**及其子树**里所有跨站域名。
+ *
+ * 返回值已排除：相对地址、与页面同可注册域名的地址、以及无法解析的地址。
+ */
+export function crossSiteResourceDomains(
+  el: Element,
+  pageHost: string,
+  scope: DomainScope = {},
+): string[] {
+  const pageReg = registrableDomain(pageHost);
+  const base = `https://${pageHost}`;
+  const out = new Set<string>();
+
+  const consider = (raw: string): void => {
+    if (!isAbsoluteUrl(raw)) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(raw, base);
+    } catch {
+      return;
+    }
+    /**
+     * ⚠️ 跳过 IP 字面量。
+     *
+     * 实测踩过：站点把追踪端点放在裸 IP 上（`https://54.169.219.76:15212/...`），
+     * 而裸 IP 往往是**共享基础设施**（CDN 边缘）；按 `||ip^` 拦截既不够精确，
+     * 命中范围又可能波及无关服务。收益小、风险实在，因此不学。
+     */
+    if (isIpLiteral(parsed.hostname)) return;
+
+    const reg = registrableDomain(parsed.hostname);
+    if (reg && reg !== pageReg) out.add(reg);
+  };
+
+  const collect = (node: Element): void => {
+    for (const url of resourceUrls(node)) consider(url);
+    if (scope.includeLinks) for (const url of linkUrls(node)) consider(url);
+  };
+
+  collect(el);
+  for (const child of Array.from(el.querySelectorAll(RESOURCE_SELECTOR))) collect(child);
+  if (scope.includeLinks) {
+    for (const a of Array.from(el.querySelectorAll('a[href]'))) collect(a);
+  }
+
+  return [...out];
+}

@@ -1,7 +1,11 @@
 import { buildPristineIndexFromHtml } from '../engine/pristine.ts';
+import { withTimeout } from '../engine/async.ts';
 import type { SitePack } from '../engine/rules.ts';
 import {
   cosmeticCss,
+  findOverlayAds,
+  hideElement,
+  learnableAdDomains,
   makeInjectionTest,
   processAdded,
   recordableSelector,
@@ -11,6 +15,7 @@ import {
   type JudgeOptions,
 } from './engine.ts';
 import { promotedSelectors, recordHit } from './learn.ts';
+import { recordDomains } from './domainLearn.ts';
 import { isSiteDisabled, writeStats } from './settings.ts';
 import { chromeLocal } from './storage.ts';
 
@@ -32,6 +37,15 @@ import { chromeLocal } from './storage.ts';
  *   never       从不回填，启发式整体关闭
  */
 const PRISTINE_STRATEGY: 'auto' | 'always' | 'never' = 'auto';
+
+/**
+ * 快照回填的等待上限。
+ *
+ * SW 侧要再抓一次整页（试点站约 189KB），实测会偶发长时间不返回。
+ * 没有超时的话，整条 boot 会卡在这里 —— 症状是「元素确实被隐藏了，
+ * 但没打印就绪日志、自学习一个域名都没记」。
+ */
+const BACKFILL_TIMEOUT_MS = 6000;
 
 const store = chromeLocal();
 
@@ -92,6 +106,18 @@ async function boot(): Promise<void> {
     }
   };
 
+  /**
+   * 网络层自学习：把「被隐藏的广告用到的跨站域名」记下来，够次数就晋级成
+   * DNR 拦截规则。这是未知站点能**越用越好**的关键，且用户无需配置。
+   *
+   * 安全过滤（也被可见内容使用的域名一律不学）在 learnableAdDomains 里，
+   * 有独立回归测试 —— 试点站的 pic.wvxrrip.cn 就是风险 A。
+   */
+  const learnAdDomains = (): void => {
+    const candidates = learnableAdDomains(document, host);
+    if (candidates.length > 0) void recordDomains(store, host, candidates, location.href);
+  };
+
   // 阶段一：仅静态规则。injected 恒 false 即关闭启发式。
   let options: JudgeOptions = {
     injected: () => false,
@@ -125,9 +151,43 @@ async function boot(): Promise<void> {
     return r.hiddenByRule;
   };
 
+  /**
+   * 覆盖层单独一趟（不参与逐元素打分，见 findOverlays 的说明）。
+   *
+   * 放在最后跑：此时普通规则与启发式都已落地，覆盖层的旁证判定能拿到最完整的
+   * 上下文；而且它自己会改内联样式，放在打分之后才不会拖慢扫描。
+   */
+  const hideOverlays = (): number => {
+    const ads = findOverlayAds(document, { host, viewportArea: innerWidth * innerHeight });
+    for (const { element, hit } of ads) {
+      hideElement(element);
+      heuristic += 1;
+      learn([hit]);
+    }
+    return ads.length;
+  };
+
   // 首屏：此刻能扫到的部分。注意 document_start 时正文还没解析出来，
   // 这一趟通常只覆盖到 <head>，真正的清扫靠下一趟。
   sweepNow();
+
+  /**
+   * 收尾工作：覆盖层、网络层自学习、统计。
+   *
+   * ⚠️ **绝不能排在快照回填之后**（2026-10-10 实测踩坑）：
+   * 回填要由 SW 再抓一次整页（试点站 189KB），它慢或挂住时，后面这些收尾
+   * 就全被堵死——症状是「页面元素确实被隐藏了，但 AdBlow 没打印就绪日志、
+   * 自学习一个域名都没记」。而这些工作**本来就不依赖回填**。
+   */
+  const upkeep = (label: string): void => {
+    const overlays = hideOverlays();
+    learnAdDomains();
+    void writeStats(store, host, { rule, heuristic });
+    console.debug(
+      `[adblow] ${label} host=${host} 规则包=${packs.length} 选择器=${selectors.length} ` +
+        `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays}`,
+    );
+  };
 
   // 关键：DOM 解析完成后必须再扫一次。
   // 只依赖 MutationObserver 也能补上，但显式扫一遍更可靠（观察器可能丢事件），
@@ -139,34 +199,36 @@ async function boot(): Promise<void> {
     sweepNow();
   }
 
-  let mode = '仅静态规则';
+  // 阶段一收尾：不依赖回填，立刻落地
+  upkeep('就绪(仅静态规则)');
 
-  // 阶段二：回填完整服务端快照，启用启发式
-  const wantBackfill =
-    PRISTINE_STRATEGY === 'always' || (PRISTINE_STRATEGY === 'auto' && packs.length === 0);
-
-  if (wantBackfill) {
-    const html = await requestPristineHtml(location.href);
-    if (html) {
-      try {
-        const index = buildPristineIndexFromHtml(html, new DOMParser());
-        // 升级为带启发式的判定；已处理过的节点会被下面的全量 sweep 重新覆盖
-        options = { ...options, injected: makeInjectionTest(index, true) };
-        sweepNow();
-        mode = '含启发式';
-      } catch (error) {
-        console.warn('[adblow] 解析服务端快照失败，退化为仅静态规则', error);
-      }
-    } else {
-      mode = '仅静态规则（快照回填失败）';
-    }
+  // 延迟几轮再收尾一次，覆盖懒加载与延迟注入的广告位。
+  // 用有限的几次而不是常驻定时器，避免长驻开销。
+  for (const delay of [4000, 12000]) {
+    setTimeout(() => upkeep('巡回收尾'), delay);
   }
 
-  await writeStats(store, host, { rule, heuristic });
-  console.debug(
-    `[adblow] 就绪(${mode}) host=${host} 规则包=${packs.length} ` +
-      `选择器=${selectors.length} 隐藏 rule=${rule} heuristic=${heuristic}`,
-  );
+  // 阶段二：回填完整服务端快照，启用启发式。
+  // ⚠️ 必须带超时：SW 侧要再抓一次整页，卡住时不能让判定一直停在静态档。
+  const wantBackfill =
+    PRISTINE_STRATEGY === 'always' || (PRISTINE_STRATEGY === 'auto' && packs.length === 0);
+  if (!wantBackfill) return;
+
+  const html = await withTimeout(requestPristineHtml(location.href), BACKFILL_TIMEOUT_MS);
+  if (!html) {
+    console.debug('[adblow] 快照回填未在超时内返回，保持仅静态规则档');
+    return;
+  }
+
+  try {
+    const index = buildPristineIndexFromHtml(html, new DOMParser());
+    // 升级为带启发式的判定；已处理过的节点会被下面的全量 sweep 重新覆盖
+    options = { ...options, injected: makeInjectionTest(index, true) };
+    sweepNow();
+    upkeep('就绪(含启发式)');
+  } catch (error) {
+    console.warn('[adblow] 解析服务端快照失败，退化为仅静态规则', error);
+  }
 }
 
 void boot();

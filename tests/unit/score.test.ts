@@ -110,7 +110,6 @@ describe('scoreNode 的聚合结构约束（2026-10-10 实测标定）', () => {
     assert.equal(r.naming, 6);
     assert.equal(r.score, 6);
   });
-
   it('容器规模可调，便于按站点标定', () => {
     const filler = '<i></i>'.repeat(15);
     const html = `<div>${filler}<a href="https://spam.example.com/a"></a></div>`;
@@ -118,3 +117,47 @@ describe('scoreNode 的聚合结构约束（2026-10-10 实测标定）', () => {
     assert.equal(scoreNode(el(html), { ...ctx, compactMax: 5 }).behavior, 0);
   });
 });
+
+describe('scoreNode：iframe 信号（不依赖命名）', () => {
+  it('跨站 iframe 计入行为分', () => {
+    const r = scoreNode(el('<iframe src="https://ads.example.com/f"></iframe>'), ctx);
+    assert.equal(r.behavior, 4);
+    assert.ok(r.reasons.includes('cross-site-iframe'), JSON.stringify(r.reasons));
+  });
+
+  it('跨站 iframe 单独**不足以**判定（视频/地图/评论都是跨站 iframe）', () => {
+    const r = scoreNode(el('<iframe src="https://www.youtube.com/embed/x"></iframe>'), ctx);
+    assert.ok(r.behavior < 6, `behavior=${r.behavior}，不应单独过阈值`);
+  });
+
+  it('srcdoc / about:blank 的 iframe 是脚本注入内容的常见载体', () => {
+    const r = scoreNode(el('<iframe srcdoc="<p>x</p>"></iframe>'), ctx);
+    assert.equal(r.behavior, 2);
+    assert.ok(r.reasons.includes('inline-iframe'), JSON.stringify(r.reasons));
+  });
+
+  it('同站 iframe 不加分', () => {
+    const r = scoreNode(el('<iframe src="/local/frame"></iframe>'), ctx);
+    assert.equal(r.behavior, 0);
+  });
+
+  it('跨站 iframe + 推广链接一起才过阈值（典型的广告位形态）', () => {
+    const r = scoreNode(
+      el('<div><iframe src="https://ads.example.com/f"></iframe><a href="https://spam.example.com/x?click_id=1"></a></div>'),
+      ctx,
+    );
+    assert.ok(r.behavior >= 6, `behavior=${r.behavior}`);
+  });
+});
+
+describe('scoreNode：覆盖层**不参与**逐元素打分（架构约束）', () => {
+  // 曾经把覆盖层判定塞进 scoreNode，导致每个元素都要 getComputedStyle，
+  // 而扫描过程又不断改内联样式 —— 两者交替让样式/布局反复失效，
+  // 在 1024cg 这种大页面上整趟扫描跑不完（症状：样式注入了但零隐藏）。
+  // 现在覆盖层是独立一趟，见 src/content/engine.ts 的 findOverlayAds。
+  it('scoreNode 的结果不受定位样式影响', () => {
+    const r = scoreNode(el('<div class="horizontal-banner"></div>'), ctx);
+    assert.ok(!r.reasons.includes('overlay'), '覆盖层不应再出现在打分理由里');
+  });
+});
+

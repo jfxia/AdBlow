@@ -1,5 +1,6 @@
 import { isInjected, type PristineIndex } from '../engine/pristine.ts';
-import { scoreNode } from '../engine/score.ts';
+import { scoreNode, registrableDomain } from '../engine/score.ts';
+import { crossSiteResourceDomains } from '../engine/domains.ts';
 import { NAMING_STRONG, NAMING_WEAK, namingSignal } from '../engine/lexicon.ts';
 import { generalizeSelector, isSelectorSafe } from '../engine/selector.ts';
 import { validateSitePack, type SitePack } from '../engine/rules.ts';
@@ -183,6 +184,211 @@ export function hideElement(el: Element): void {
 
 export function isHidden(el: Element): boolean {
   return el.getAttribute('data-adblow-hidden') === '1';
+}
+
+/** 元素自身或任一祖先已被隐藏（即已经不可见）。 */
+export function isInsideHidden(el: Element): boolean {
+  return el.closest('[data-adblow-hidden]') !== null;
+}
+
+export const HIDDEN_ATTR = 'data-adblow-hidden';
+
+/**
+ * 覆盖层检测：**独立的一趟遍历，不参与逐元素打分。**
+ *
+ * 为什么必须独立（2026-10-10 实测踩坑）：一开始把覆盖层判定塞进 `scoreNode`，
+ * 于是每个元素都要 `getComputedStyle`；而扫描过程中又不断隐藏元素（改内联样式），
+ * 两者交替导致样式/布局反复失效。在 1024cg 这种大页面上直接导致整趟扫描跑不完 ——
+ * 症状是「样式表注入了，但一个元素都没隐藏」，极难定位。
+ *
+ * 现在：先用**廉价的属性预筛**（注入型覆盖层几乎都会写内联样式），
+ * 只对极少数候选做 `getComputedStyle` + 几何测量。
+ *
+ * 判定标准：固定/绝对定位 + 高 z-index + 占据大块视口。
+ * 注意它**不足以单独判定**（Cookie 同意条、登录弹层也长这样），
+ * 因此调用方应把结果当作"需要确认的候选"，而不是直接当广告。
+ */
+export const OVERLAY_AREA_RATIO = 0.4;
+export const OVERLAY_MIN_Z = 1000;
+
+/** 廉价预筛：只挑写了内联位置样式的元素。 */
+export const OVERLAY_PRESELECTOR = '[style*="position"]';
+
+export type OverlayContext = {
+  viewportArea: number;
+  styleOf?: (el: Element) => { position: string; zIndex: string } | null;
+  rectOf?: (el: Element) => { width: number; height: number } | null;
+};
+
+const defaultStyleOf = (el: Element): { position: string; zIndex: string } | null => {
+  const g = globalThis as unknown as { getComputedStyle?: (e: Element) => CSSStyleDeclaration };
+  if (typeof g.getComputedStyle !== 'function') return null;
+  try {
+    const s = g.getComputedStyle(el);
+    return { position: s.position, zIndex: s.zIndex };
+  } catch {
+    return null;
+  }
+};
+
+const defaultRectOf = (el: Element): { width: number; height: number } | null => {
+  try {
+    const r = el.getBoundingClientRect();
+    return { width: r.width, height: r.height };
+  } catch {
+    return null;
+  }
+};
+
+export function isOverlay(el: Element, ctx: OverlayContext): boolean {
+  const style = (ctx.styleOf ?? defaultStyleOf)(el);
+  if (!style) return false;
+  if (style.position !== 'fixed' && style.position !== 'absolute') return false;
+
+  const z = Number.parseInt(style.zIndex, 10);
+  if (!Number.isFinite(z) || z < OVERLAY_MIN_Z) return false;
+
+  const rect = (ctx.rectOf ?? defaultRectOf)(el);
+  if (!rect || ctx.viewportArea <= 0) return false;
+
+  return (rect.width * rect.height) / ctx.viewportArea >= OVERLAY_AREA_RATIO;
+}
+
+/** 找出页面上的覆盖层候选（覆盖大块视口的固定/绝对定位盒子）。 */
+export function findOverlays(root: ParentNode, ctx: OverlayContext): Element[] {
+  const out: Element[] = [];
+  for (const el of Array.from(root.querySelectorAll(OVERLAY_PRESELECTOR))) {
+    if (isInsideHidden(el)) continue;
+    if (isOverlay(el, ctx)) out.push(el);
+  }
+  return out;
+}
+
+/** 覆盖层形态本身作为旁证时，额外计入的分值。 */
+export const OVERLAY_BONUS = 4;
+/** 覆盖层要有多少"其它"证据才成立（弱命名或跨站链接即达标）。 */
+export const OVERLAY_CORROBORATION = 4;
+
+export type OverlayAd = { element: Element; hit: Hit };
+
+/**
+ * 找出并判定覆盖型广告位。
+ *
+ * 为什么需要旁证：Cookie 同意条、登录弹层、全屏引导页都是"固定定位 + 高层级 +
+ * 大块视口"的形态。**只看形态会误伤它们**，而误伤 Cookie 条可能让站点卡住不
+ * 给看内容。所以要求至少还有一项其它证据：弱命名以上，或有跨站链接/媒体/iframe
+ * 等行为信号（后者通常意味着这层是广告而不是站点自己的 UI）。
+ */
+export function findOverlayAds(
+  root: ParentNode,
+  opts: { host: string; viewportArea: number; overlay?: OverlayContext },
+): OverlayAd[] {
+  const overlayCtx: OverlayContext = opts.overlay ?? { viewportArea: opts.viewportArea };
+  const out: OverlayAd[] = [];
+
+  for (const el of findOverlays(root, overlayCtx)) {
+    const naming = namingSignal(el).strength;
+    const { score, behavior, reasons } = scoreNode(el, {
+      pageHost: opts.host,
+      viewportArea: opts.viewportArea,
+    });
+
+    if (naming < NAMING_WEAK && behavior < OVERLAY_CORROBORATION) continue;
+
+    out.push({
+      element: el,
+      hit: {
+        selector: generalizeSelector(el),
+        score: score + OVERLAY_BONUS,
+        reasons: [...reasons, 'overlay'],
+      },
+    });
+  }
+
+  return out;
+}
+
+/**
+ * 只看会**加载资源**的标签；不看 `<a href>`（那是点击目标，不算"使用"）。
+ */
+export const RESOURCE_TAGS = 'img,script,link,iframe,video,source,embed,object';
+
+/**
+ * 站点自有基础设施的声明位置（canonical / og / 图标）。
+ *
+ * 为什么需要：试点站的 canonical 指向 `cgw666.com` —— 那是它的**镜像域名**，
+ * 同时托管正文图。而「被隐藏的推荐位图片」恰好引用了它。若不排除，
+ * 网络层自学习会把站点自己的域名学成广告域名，一次就把正文图全废掉。
+ * 这与 §2 的风险 A 是同一类错误，只是入口不同。
+ */
+const SITE_OWNED_SELECTOR = [
+  'link[rel~="canonical"]',
+  'link[rel~="icon"]',
+  'link[rel~="apple-touch-icon"]',
+  'link[rel~="alternate"]',
+  'meta[property="og:url"]',
+  'meta[property="og:image"]',
+  'meta[name="twitter:image"]',
+].join(',');
+
+/** 从 head 元数据里提取「这个站点自己的」域名。 */
+export function siteOwnedDomains(root: ParentNode, pageHost: string): Set<string> {
+  const out = new Set<string>();
+  const consider = (raw: string): void => {
+    if (!raw) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(raw, `https://${pageHost}`);
+    } catch {
+      return;
+    }
+    const reg = registrableDomain(parsed.hostname);
+    if (reg) out.add(reg);
+  };
+
+  for (const node of Array.from(root.querySelectorAll(SITE_OWNED_SELECTOR))) {
+    consider(node.getAttribute('href') ?? '');
+    consider(node.getAttribute('content') ?? '');
+  }
+  return out;
+}
+
+/**
+ * 从「已被隐藏的广告」里提炼出**可以安全学习**的跨站域名。
+ *
+ * 这是网络层自学习的决策核心，因此放在纯逻辑层而不是接线层。
+ *
+ * ⚠️ 两道安全过滤都是硬要求，且各有一条回归测试：
+ *   1. 凡是**也被可见内容使用**的域名一律不学。试点站的 `pic.wvxrrip.cn`
+ *      既是广告素材 CDN 又是正文缩略图 CDN（风险 A），学它会把正文图废掉。
+ *   2. 站点自有域名（canonical / og / 图标所指）一律不学。试点站的
+ *      `cgw666.com` 是镜像域名且托管正文图，学它同样致命。
+ */
+export function learnableAdDomains(root: ParentNode, pageHost: string): string[] {
+  const hidden = root.querySelectorAll(`[${HIDDEN_ATTR}]`);
+  if (hidden.length === 0) return [];
+
+  const adDomains = new Set<string>();
+  for (const el of hidden) {
+    // 学习时算上外链：广告落地页域名学会后拦其子资源可挡弹窗，
+    // 而拦截子资源不影响 <a href> 导航（main_frame 已排除）。
+    for (const d of crossSiteResourceDomains(el, pageHost, { includeLinks: true })) {
+      adDomains.add(d);
+    }
+  }
+  if (adDomains.size === 0) return [];
+
+  // 可见内容的判定**不算外链**：可见内容里有个指向该域名的链接，
+  // 不构成"该域名是站点的正常资源来源"。
+  const usedByVisible = new Set<string>();
+  for (const el of root.querySelectorAll(RESOURCE_TAGS)) {
+    if (isInsideHidden(el)) continue;
+    for (const d of crossSiteResourceDomains(el, pageHost)) usedByVisible.add(d);
+  }
+
+  const owned = siteOwnedDomains(root, pageHost);
+
+  return [...adDomains].filter((d) => !usedByVisible.has(d) && !owned.has(d));
 }
 
 /** 生成防闪现用的样式表内容。 */

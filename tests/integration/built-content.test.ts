@@ -75,13 +75,26 @@ async function runBundle(options: {
   packs: unknown[];
   pristine: string | null;
   html?: string;
+  host?: string;
 }): Promise<{ doc: Document; win: Window & typeof globalThis; storage: Record<string, unknown> }> {
   const code = readFileSync(distPath, 'utf8');
+  const host = options.host ?? HOST;
   const dom = new JSDOM(options.html ?? fixture, {
-    url: `https://${HOST}/category/jrxw1/`,
+    url: `https://${host}/category/jrxw1/`,
     runScripts: 'dangerously',
     pretendToBeVisual: true,
   });
+
+  // 内容脚本 boot 里的异常若不捕获只会变成 unhandled rejection，
+  // 计数断言会以「什么都没发生」的形式失败，很难定位。这里显式抓下来。
+  const errors: string[] = [];
+  dom.window.addEventListener('unhandledrejection', (e) => {
+    errors.push(String((e as PromiseRejectionEvent).reason));
+  });
+  dom.window.addEventListener('error', (e) => {
+    errors.push(String((e as ErrorEvent).message));
+  });
+  (dom.window as unknown as Record<string, unknown>).__adblowErrors = errors;
 
   const chromeStub = fakeChrome(options) as {
     storage: { local: { get: (k: string | null) => Promise<Record<string, unknown>> } };
@@ -107,7 +120,6 @@ async function runBundle(options: {
     storage: await chromeStub.storage.local.get(null),
   };
 }
-
 describe(
   '构建产物冒烟测试（真实 dist/content.js）',
   { skip: hasDist ? false : 'dist/content.js 不存在，先运行 pnpm build 或 pnpm verify' },
@@ -239,6 +251,53 @@ describe(
 
       assert.equal(dom.window.document.querySelectorAll('[data-adblow-hidden]').length, 0);
       assert.equal(dom.window.document.querySelectorAll('style[data-adblow-cosmetic]').length, 0);
+    });
+
+    it('内容脚本执行期间没有未捕获异常（定位 boot 静默失败）', async () => {
+      const { win } = await runBundle({ packs: [pilotPack], pristine: null });
+      const errors = (win as unknown as Record<string, unknown>).__adblowErrors as string[];
+      assert.deepEqual(errors, [], `内容脚本抛出异常：${errors?.join(' | ')}`);
+    });
+
+    it('网络层自学习：在第二站点上把广告域名写进存储', async () => {
+      // 第二站点刻意不给规则包 —— 网络层自学习是它唯一能获得网络层保护的途径
+      const secondSite = readFileSync(
+        new URL('../fixtures/1024cg-home.html', import.meta.url),
+        'utf8',
+      );
+      const { storage, win } = await runBundle({
+        packs: [],
+        pristine: null,
+        html: secondSite,
+        host: '1024cg.com',
+      });
+
+      const errors = (win as unknown as Record<string, unknown>).__adblowErrors as string[];
+      assert.deepEqual(errors, [], `内容脚本抛出异常：${errors?.join(' | ')}`);
+
+      const key = 'adDomains:1024cg.com';
+      const domains = storage[key] as Record<string, { host: string; hits: number }> | undefined;
+      assert.ok(domains, `未写入自学习域名。已有键：${Object.keys(storage).join(', ')}`);
+      const hosts = Object.keys(domains);
+      assert.ok(hosts.length > 0, '学到的域名列表为空');
+      // 站点自己的域名绝不能被学成要拦截的广告域名
+      assert.ok(!hosts.includes('1024cg.com'), `学到了站点自己的域名：${hosts.join(', ')}`);
+      // 裸 IP 不学（共享基础设施，拦截不精确）
+      assert.ok(
+        hosts.every((h) => !/^\d{1,3}(\.\d{1,3}){3}$/.test(h)),
+        `学到了裸 IP：${hosts.join(', ')}`,
+      );
+    });
+
+    it('网络层自学习：试点站不学镜像域名与素材 CDN（风险 A）', async () => {
+      const { storage } = await runBundle({ packs: [pilotPack], pristine: null });
+      const domains = storage[`adDomains:${HOST}`] as
+        | Record<string, { host: string }>
+        | undefined;
+      const hosts = domains ? Object.keys(domains) : [];
+      for (const forbidden of ['cgw666.com', 'wvxrrip.cn']) {
+        assert.ok(!hosts.includes(forbidden), `学到了不该学的域名 ${forbidden}`);
+      }
     });
   },
 );

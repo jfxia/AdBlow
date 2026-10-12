@@ -50,9 +50,26 @@ const PROMO_PARAMS = [
 const LINK_SELECTOR = 'a[href]';
 /** 注意 data-src：该站用 loadBannerDirect + data-src 做懒加载，只认 src 会漏。 */
 const MEDIA_SELECTOR = 'img[src],img[data-src],video[src],source[src]';
+/** iframe 也是常见投放方式（广告联盟普遍用它），必须计入。 */
+const IFRAME_SELECTOR = 'iframe[src],iframe[srcdoc]';
 
-/** 粗略取可注册域名：末两段。对 .com.cn 这类多段后缀会不准，v1 接受。 */
+const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
+const IPV6 = /^\[?[0-9a-f:]+\]?$/i;
+
+/** 主机名是否为 IP 字面量（v4 或 v6）。 */
+export function isIpLiteral(host: string): boolean {
+  return IPV4.test(host) || (host.includes(':') && IPV6.test(host));
+}
+
+/**
+ * 粗略取可注册域名：末两段。
+ *
+ * ⚠️ IP 字面量必须原样返回。实测踩过：对 `54.169.219.76` 取末两段会得到
+ * `219.76`，进而生成 `||219.76^` 这种会误配无关主机的拦截规则。
+ * 对 .com.cn 这类多段后缀仍会不准，v1 接受。
+ */
 export function registrableDomain(host: string): string {
+  if (isIpLiteral(host)) return host;
   const parts = host.split('.');
   return parts.length <= 2 ? host : parts.slice(-2).join('.');
 }
@@ -136,16 +153,44 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
     }
   };
 
-  // ① 自身即链接 / 自身即媒体
+  const addIframes = (frames: Element[]): void => {
+    for (const f of frames) {
+      const src = f.getAttribute('src') ?? '';
+      // about:blank / srcdoc / javascript: 的 iframe 是脚本注入内容的常见载体
+      if (!isAbsoluteUrl(src)) {
+        if (f.hasAttribute('srcdoc') || src === '' || src === 'about:blank') {
+          behavior += 2;
+          reasons.add('inline-iframe');
+        }
+        continue;
+      }
+      let parsed: URL;
+      try {
+        parsed = new URL(src, base);
+      } catch {
+        continue;
+      }
+      if (registrableDomain(parsed.hostname) !== pageReg) {
+        // 4 分与跨站链接同权：跨站 iframe 也可能是正常的第三方嵌入
+        // （视频、地图、评论），所以**不足以单独判定**，需要别的证据。
+        behavior += 4;
+        reasons.add('cross-site-iframe');
+      }
+    }
+  };
+
+  // ① 自身即链接 / 自身即媒体 / 自身即 iframe
   if (el.matches(LINK_SELECTOR)) addLinks([el]);
   if (el.matches(MEDIA_SELECTOR)) addMedia([el]);
+  if (el.matches(IFRAME_SELECTOR)) addIframes([el]);
 
   // ② 后代信号：仅在该元素紧凑时计入（见文件头说明）
   const compactMax = ctx.compactMax ?? COMPACT_MAX_DESCENDANTS;
-  if (el.querySelector(`${LINK_SELECTOR},${MEDIA_SELECTOR}`)) {
+  if (el.querySelector(`${LINK_SELECTOR},${MEDIA_SELECTOR},${IFRAME_SELECTOR}`)) {
     if (el.querySelectorAll('*').length <= compactMax) {
       addLinks(Array.from(el.querySelectorAll(LINK_SELECTOR)));
       addMedia(Array.from(el.querySelectorAll(MEDIA_SELECTOR)));
+      addIframes(Array.from(el.querySelectorAll(IFRAME_SELECTOR)));
     }
   }
 
