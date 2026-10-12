@@ -1,12 +1,17 @@
-node_modules/
+﻿node_modules/
 dist/
 coverage/
 
-# pnpm 把内容寻址存储建在了工程根目录，绝不能入库
+# pnpm 把内容寻址存储建在工程根目录，绝不能入库
 .pnpm-store/
 
 # 侦察临时区：原始页面、日志、浏览器 profile、探针 ext 都放这里，可随时重抓
 _probe/
 
-# �����б������ɵĹ��򼯣�����֤ԭ����⣨�� docs/plans/2026-10-11-filter-list-integration.md��
-filters/
+# 过滤列表与生成的规则集：许可证原因不入库
+# （见 docs/plans/2026-10-11-filter-list-integration.md）
+#
+# ⚠️ 必须写成 /filters/（只匹配仓库根）。
+# 写成 filters/ 会匹配任意层级的同名目录，于是 tools/filters/（抓取脚本本身）
+# 一直被静默忽略、从未进入版本控制 —— 真实踩过的坑。
+/filters/
