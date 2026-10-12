@@ -52,6 +52,9 @@ const ENTRIES = [
   { name: 'background', format: 'es', from: 'src/background/index.ts' },
   { name: 'content', format: 'iife', from: 'src/content/index.ts' },
   { name: 'inject', format: 'iife', from: 'src/inject/index.ts' },
+  // 脚本注入（第三期）：引擎单独一个文件，随 manifest 声明为 <all_urls>；
+  // 规则表由构建期生成（scriptlets/bundle-N.js），只在那批域名上注入。
+  { name: 'scriptlets-engine', format: 'iife', from: 'src/inject/scriptletsGlobal.ts' },
   { name: 'popup', format: 'iife', from: 'src/ui/popup.ts' },
   { name: 'options', format: 'iife', from: 'src/ui/options.ts' },
 ];
@@ -75,6 +78,11 @@ for (const entry of ENTRIES) {
     plugins: [nodeResolve(), adblowTs],
     onwarn: (warning) => {
       if (warning.code === 'CIRCULAR_DEPENDENCY') return;
+      // 入口有 export 但 IIFE 没给 output.name 时的提示。
+      // 我们**有意不加 name**：加了会在页面全局作用域塞一个变量，
+      // 而 scriptlets-engine 是 MAIN world 脚本，那属于污染与指纹面。
+      // 它需要暴露的东西由文件自己挂到 window.__adblowScriptlets 上。
+      if (warning.code === 'MISSING_NAME_OPTION_FOR_IIFE_EXPORT') return;
       console.warn(`[rollup] ${warning.code}: ${warning.message}`);
     },
   });
@@ -123,6 +131,50 @@ if (existsSync(rulesetPatch)) {
   const manifestPath = `${DIST}/manifest.json`;
   const m = JSON.parse(readFileSync(manifestPath, 'utf8'));
   m.declarative_net_request = { rule_resources: resources };
+
+  /**
+   * 脚本注入（第三期）：manifest 里为引擎声明 <all_urls>、为每个 bundle
+   * 声明它负责的那批域名。
+   *
+   * 为什么必须走 manifest：脚本要在 `document_start`、**页面脚本之前**执行完。
+   * 靠内容脚本向 SW 取数据再执行会与页面脚本竞态（SW 消息是异步的）。
+   * 由浏览器按 matches 直接注入就没有竞态 —— uBOL 用的同一套机制。
+   */
+  const scriptletManifestPath = p('filters/generated/scriptlet-manifest.json');
+  if (existsSync(scriptletManifestPath)) {
+    const sm = JSON.parse(readFileSync(scriptletManifestPath, 'utf8'));
+    mkdirSync(`${DIST}/scriptlets`, { recursive: true });
+    let sb = 0;
+    for (const b of sm.bundles) {
+      copyFileSync(`${p('filters/generated')}/${b.file}`, `${DIST}/scriptlets/${b.file}`);
+      sb += statSync(`${p('filters/generated')}/${b.file}`).size;
+    }
+
+    const scriptletScripts = [
+      {
+        matches: ['<all_urls>'],
+        js: ['scriptlets-engine.js'],
+        run_at: 'document_start',
+        all_frames: true,
+        world: 'MAIN',
+      },
+      ...sm.bundles.map((b) => ({
+        matches: b.matches,
+        js: [`scriptlets/${b.file}`],
+        run_at: 'document_start',
+        all_frames: true,
+        world: 'MAIN',
+      })),
+    ];
+    m.content_scripts = [...(m.content_scripts ?? []), ...scriptletScripts];
+    // 引擎必须**先于**规则表注入（manifest 顺序即注入顺序）
+    report.push([`scriptlets/ (${sm.bundles.length} bundles)`, sb, 'ruleset']);
+    console.log(
+      `脚本注入：引擎 1 个 + 规则表 ${sm.bundles.length} 个 bundle（${(sb / 1024).toFixed(0)} KB）、` +
+        `manifest 新增 ${scriptletScripts.length} 个 content_scripts 条目`,
+    );
+  }
+
   writeFileSync(manifestPath, JSON.stringify(m, null, 2), 'utf8');
 
   for (const [name, size] of rulesetFiles) report.push([name, size, 'ruleset']);

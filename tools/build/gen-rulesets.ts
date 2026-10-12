@@ -22,6 +22,11 @@ import {
   shardIndex,
   type CosmeticFilter,
 } from '../../src/engine/filterList/cosmetic.ts';
+import {
+  buildScriptletIndex,
+  parseScriptletRule,
+  type ScriptletRule,
+} from '../../src/engine/filterList/scriptlet.ts';
 
 const ROOT = new URL('../../', import.meta.url);
 const p = (rel: string) => fileURLToPath(new URL(rel, ROOT));
@@ -76,6 +81,7 @@ const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as {
 const perList: { id: string; network: number; cosmetic: number; skipped: number }[] = [];
 const allFilters = [];
 const allCosmetic: CosmeticFilter[] = [];
+const allScriptlets: ScriptletRule[] = [];
 const skipReasons: Record<string, number> = {};
 let cosmeticTotal = 0;
 
@@ -102,6 +108,9 @@ for (const entry of meta.lists) {
   for (const c of parsed.cosmetic) {
     const f = parseCosmeticLine(c.raw);
     if (f) allCosmetic.push(f);
+    // 脚本注入规则也走 cosmetic 通道分类过来
+    const s = parseScriptletRule(c.raw);
+    if (s) allScriptlets.push(s);
   }
 }
 
@@ -245,3 +254,71 @@ console.log(
   `  分片                ${shardFiles}/${COSMETIC_SHARD_COUNT} 片，合计 ${(shardBytes / 1024).toFixed(0)} KB，` +
     `单片最大 ${(maxShardBytes / 1024).toFixed(1)} KB`,
 );
+
+// ── 脚本注入（第三期）────────────────────────────────────────────
+//
+// 投递方式与 cosmetic 不同：脚本要在 document_start、**页面脚本之前**跑完，
+// 靠 SW 消息取数据会有竞态。因此按 uBOL 的做法：构建期把规则按域名分组，
+// manifest 为每组声明匹配域名，由浏览器保证注入时机。
+
+const scriptletIndex = buildScriptletIndex(allScriptlets);
+const BUNDLE_DOMAINS = 48;
+const scriptletDomains = [...scriptletIndex.byDomain.keys()].sort();
+const scriptletBundles: { file: string; matches: string[]; domains: number }[] = [];
+
+for (let i = 0; i < scriptletDomains.length; i += BUNDLE_DOMAINS) {
+  const group = scriptletDomains.slice(i, i + BUNDLE_DOMAINS);
+  const table: Record<string, { canonical: string; args: string[] }[]> = {};
+  const matches: string[] = [];
+  for (const d of group) {
+    // 通配 TLD 键（`ticketmaster.*`）无法表达成 match pattern，跳过并计数
+    if (d.includes('*')) continue;
+    table[d] = scriptletIndex.byDomain.get(d)!;
+    matches.push(`*://*.${d}/*`);
+  }
+  if (Object.keys(table).length === 0) continue;
+
+  const index = scriptletBundles.length + 1;
+  const file = `scriptlet-bundle-${index}.js`;
+  writeFileSync(
+    `${OUT_DIR}${file}`,
+    `// AdBlow 生成的脚本注入规则表（第 ${index} 组，${Object.keys(table).length} 个域名）\n` +
+      `(function(){var t=${JSON.stringify(table)};` +
+      `var e=window.__adblowScriptlets;if(e)e.run(t,location.hostname);})();\n`,
+    'utf8',
+  );
+  scriptletBundles.push({ file, matches, domains: Object.keys(table).length });
+}
+
+writeFileSync(
+  `${OUT_DIR}scriptlet-manifest.json`,
+  JSON.stringify(
+    {
+      bundles: scriptletBundles,
+      stats: scriptletIndex.stats,
+      bundlesCount: scriptletBundles.length,
+      droppedWildcardDomains: scriptletDomains.filter((d) => d.includes('*')).length,
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+
+console.log('\n脚本注入（第三期）：');
+console.log(`  解析                ${scriptletIndex.stats.parsed} 条`);
+console.log(
+  `  ✦ 支持并已生成      ${scriptletIndex.stats.supported} 条 → ${scriptletBundles.length} 个 bundle，` +
+    `覆盖 ${scriptletIndex.stats.domains} 个域名`,
+);
+console.log(`  名字未支持          ${scriptletIndex.stats.unsupportedName} 条`);
+console.log(
+  `  通配 TLD 域名跳过   ${scriptletDomains.filter((d) => d.includes('*')).length} 个（无法表达成 match pattern）`,
+);
+console.log(`  ~ 排除型跳过        ${scriptletIndex.stats.skippedExcluded} 条`);
+console.log('  未支持的名字（按条数，决定下一步做什么）：');
+for (const [name, n] of Object.entries(scriptletIndex.stats.unsupportedByCanonical)
+  .sort((a, b) => b[1] - a[1])
+  .slice(0, 8)) {
+  console.log(`    ${String(n).padStart(5)}  ${name}`);
+}

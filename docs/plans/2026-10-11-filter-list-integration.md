@@ -245,7 +245,106 @@ iqiyi 57 条；内容守卫全部放行（这些选择器确实都是广告容�
 只渲染部分内容。也就是说**机制已验证，实际增益在首页上有限**，需要文章页
 场景才能量到更多命中。
 
-### 第三期：脚本注入子集（待做，2,793 条 `##+js(...)`）
+### 第三期：脚本注入子集（已完成）
+
+实测 2,807 条 `##+js(...)` 规则、**3,748 个域名、50 个脚本名**，
+频率分布极不均：
+
+```
+aopr 636｜acs 359｜set 327｜aeld 206｜nostif 195｜aopw 184｜nowoif 178
+前 5 名覆盖 61%，前 10 名覆盖 81%，前 20 名覆盖 94%
+```
+
+**取舍依据就是这个分布**：实现 11 个高频、语义自包含的规范名，
+而不是去追 50 个。已实现（含别名）：
+
+| 规范名 | 别名 | 作用 |
+|---|---|---|
+| `set-constant` | `set` | 把属性固定成某值（页面改不动） |
+| `abort-on-property-read` | `aopr` | 读该属性即抛错，中止当前脚本 |
+| `abort-on-property-write` | `aopw` | 写该属性即抛错 |
+| `no-setTimeout-if` | `nostif` | 拦住匹配的定时器 |
+| `no-setInterval-if` | `nosiif` | 同上 |
+| `no-window-open-if` | `nowoif` | 拦住匹配的 `window.open` |
+| `no-fetch-if` | — | 匹配的 fetch 直接返回空响应 |
+| `no-xhr-if` | — | 拦住匹配的 XHR |
+| `json-prune` | — | 从 `JSON.parse` 结果里删路径 |
+| `set-local-storage-item` | — | 设置/删除 localStorage 项 |
+| `remove-cookie` | — | 让指定 cookie 过期 |
+
+**明确不做的**（原因写在 `filterList/scriptlet.ts` 的 `SUPPORT_NOTES` 里，
+避免以后有人"顺手加上"）：`abort-current-script`（要靠 getter 陷阱反查当前脚本，
+易误伤同页其它脚本）、`abort-on-element-load`（语义未核实）、
+`abort-on-stack-trace`（依赖错误栈字符串，脆弱）、`nowebrtc` / `noeval`（超出广告过滤范围）、
+`href-sanitizer`（改写链接，风险高于收益）等。
+
+**投递机制（与 cosmetic 不同，关键差异）**：
+
+```
+manifest 声明：
+  scriptlets-engine.js        MAIN / document_start / <all_urls>   ← 引擎
+  scriptlets/bundle-N.js      MAIN / document_start / 该组域名     ← 只含那批域名的规则表
+```
+
+为什么不能像 cosmetic 那样靠 SW 消息取数据：**脚本必须在 `document_start`、
+页面脚本之前执行完**，而 SW 消息是异步的 —— 会有竞态。由 manifest 声明匹配域名、
+浏览器直接注入就没有竞态。这正是 uBlock Origin Lite 的做法
+（它把 `##+js(...)` 编译成按 world 打包的脚本文件，理由相同）。
+
+实测结果：**1,964 条已支持 → 60 个 bundle、覆盖 2,841 个域名**；
+341 个通配 TLD 域名跳过（无法表达成 match pattern）；7 条 `~` 排除型跳过。
+manifest 因此从 2 KB 增到 92 KB（62 个 content_scripts 条目）。
+
+**语义核实（子代理对 uBO master 源码逐条核实，2026-10-11）修正了我三处错误**：
+
+| 我原先的假设 | 核实结果 |
+|---|---|
+| `aeld` = `abort-on-element-load` | ❌ 这个脚本**不存在**。`aeld` = **`prevent-addEventListener`** —— 代理 `EventTarget.prototype.addEventListener`，**事件类型与处理函数源码都匹配**时才丢弃监听器 |
+| `remove-cookie` 的第一个参数是 cookie 名 | ❌ 是**匹配式**（字符串或 `/正则/`）。实测样例 `remove-cookie, /sc_anonymous_id\|sc_tracking_anonymous_id/`；按字面名处理会去写一个名字是那串正则的 cookie |
+| `set-local-storage-item` 的 key 总是字面键 | ❌ 当 value 是 `$remove$` 时 key 是**模式**，要删掉所有匹配的键 |
+| `set-constant` 支持 `$remove$` | ❌ `$remove$` 属于 storage 类脚本，`set-constant` 不支持 |
+| `no-window-open-if` 只匹配 URL | ❌ 匹配的是 `callArgs.join(' ')`（广告常把关键信息放在 features 里） |
+| `nostif`/`nosiif` 只有一个 needle 参数 | ❌ 还有 `delay`，支持精确值与区间 `min-max`/`min-`/`-max`，且可 `!` 取反 |
+
+**有意保留的偏离**（记录清楚，不假装与 uBO 完全一致）：
+
+- `set-constant` 的安全闸门**收窄了**：uBO 是 `typeof` 不符就拒绝接管
+  （连 `1 → false` 都拒绝），我们只拒绝"**真实对象/函数 ↔ 原始值**"这一种。
+  理由：前者会让大量过滤器本意落空，后者才是真正会把页面弄坏的情况。
+- `nostif`/`nosiif` 拦截时用空函数替换回调（与 uBO 一致），
+  但**未实现** `delay` 无法解析时的默认值语义（我们取"匹配任意"，更保守）。
+
+**安全纪律**（比网络规则更要紧 —— 出错是"站点功能坏掉"而不是"广告漏拦"）：
+
+- 每一步包 try/catch，**任何异常都不得外泄到页面**
+  （实测踩到一次：jsdom 没有 `Response` 构造器，`no-fetch-if` 会把异常抛给页面）
+- 只实现语义自包含、误伤面可控的子集
+- **`#@#+js(...)` 例外本期不处理**：宁可不注入，也不能注入后没法制止
+
+**真实浏览器验证**：techcrunch.com / soundcloud.com 上
+引擎在 MAIN world 就位、`navigator.globalPrivacyControl === false`（set-constant 生效）、
+页面文字完好（12254 / 3218 字符）、控制台报 `执行 1/2`、`3/4`。
+
+## 三期完成度小结
+
+| 期 | 内容 | 输入 | 产出 | 状态 |
+|---|---|---|---|---|
+| 一 | 网络规则 | 127,336 条 | 21,146 条 DNR 规则（105,675 域名打包 + 21,033 逐条） | ✅ |
+| 二 | cosmetic 选择器 | 36,019 条 | 16,878 条域名专用（10,812 域名）→ 256 分片 | ✅ |
+| 三 | 脚本注入 | 2,790 条 | 1,964 条（12 个规范名）→ 60 bundle（2,841 域名） | ✅ |
+
+**未接入的部分及原因**（都不是遗漏）：通用 cosmetic 14,418 条（默认不启用，
+与 uBOL 取舍一致）、程序化 `#?#` 435 条（需要程序化引擎 + 每条 200ms 预算）、
+`abort-current-script` 等 744 条未支持脚本名、341 个通配 TLD 域名。
+
+## 别名表的来源（重要，避免以后照抄过时文档）
+
+uBO **没有**一份官方 JSON 别名表；权威来源是运行期拼装的
+`redirectEngine.aliases`（`src/js/redirect-engine.js` 的 `loadBuiltinResources()`
+从 `builtinScriptlets` 的 `aliases` 字段与 `redirect-resources.js` 的 `alias:` 字段收集）。
+另外 ⚠️ 旧文档常引用的 `assets/resources/scriptlets.js` 在 master 里**已不存在**
+（当前按脚本拆到 `src/js/resources/*.js`）。以后要更新别名表，应从源码派生，
+不要从 wiki 抄（wiki 里有已废弃的别名）。
 
 uBOL 把 `##+js(...)` 编译成**按 world 打包的脚本文件**
 （`/rulesets/scripting/scriptlet/<world>/<id>.js`，`runAt: document_start`），
