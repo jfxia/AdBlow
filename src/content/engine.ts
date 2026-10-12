@@ -165,6 +165,17 @@ export function holdsRealContent(el: Element): boolean {
   return el.matches(selector) || el.querySelector(selector) !== null;
 }
 
+/**
+ * 元素位于正文**内部**（自身或其祖先带正文标记）。
+ *
+ * 与 holdsRealContent 的区别：那个问"里面装着正文吗"，这个问"我在正文里面吗"。
+ * 链接农场需要后者 —— 文章内的"相关链接/参考链接"区块有 5 个以上外链很正常，
+ * 但它是**作者写的内容**，不能隐藏；而页脚/侧栏里的同类区块就是广告垃圾。
+ */
+export function isInsideRealContent(el: Element): boolean {
+  return el.closest(CONTENT_MARKERS.join(',')) !== null;
+}
+
 /** 媒体选择器：图片 / 视频 / 嵌入对象。 */
 export const MEDIA_TAGS = 'img,video,source,embed,object,picture';
 
@@ -401,6 +412,70 @@ export function findOverlayAds(
   }
 
   return out;
+}
+
+// ── 链接农场（用大量外站链接堆出来的广告/SEO 垃圾块）────────────────
+
+/**
+ * 一个容器里出现这么多个**不同**的跨站域名，就算链接农场。
+ *
+ * 取证背景（2026-10-10，用户反馈某站点图片广告仍在显示）：实测那个页面页脚有
+ * **39 个不同跨站域名**的链接（`a.referrerLink`，全部 `target=_blank`），
+ * 由站点自己的 `/js/partners.js` 注入到 `[data-javeve-partners]`。
+ *
+ * 为什么原有判据抓不到：单条跨站链接只值 4 分，低于纯行为档的 6 分门槛
+ * （这是**故意的**，否则页面上每个正常外链都会变成隐藏目标）；
+ * 而容器又因为后代太多（>12）根本不采信后代信号。
+ *
+ * 但"**一个块里挂着 5 个以上互不相同的外站域名**"是另一回事 ——
+ * 正常内容区不会这样组织，广告/SEO 垃圾块才会。
+ */
+export const LINK_FARM_MIN_DOMAINS = 5;
+
+/** 可能承载链接农场的容器标签。不包含 body/html/main/article（它们装着正文）。 */
+const FARM_TAGS = 'div,ul,ol,section,aside,nav,footer,dl,table';
+
+/**
+ * 找出链接农场块。
+ *
+ * 只返回**最深**的那些候选：父级往往也满足条件（甚至整个 footer 都满足），
+ * 但隐藏最深的那层就足以清掉农场，而且不会连带抹掉同层容器里的正常内容
+ * （页脚导航、版权声明等）。
+ */
+export function findLinkFarms(
+  root: ParentNode,
+  opts: { host: string; minDomains?: number },
+): Element[] {
+  const min = opts.minDomains ?? LINK_FARM_MIN_DOMAINS;
+  const pageReg = registrableDomain(opts.host);
+
+  const candidates: Element[] = [];
+  for (const el of Array.from(root.querySelectorAll(FARM_TAGS))) {
+    if (isInsideHidden(el)) continue;
+
+    const domains = new Set<string>();
+    for (const a of Array.from(el.querySelectorAll('a[href]'))) {
+      const href = a.getAttribute('href') ?? '';
+      if (!href || href.startsWith('#') || href.startsWith('javascript:')) continue;
+      try {
+        const parsed = new URL(href, `https://${opts.host}`);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
+        const reg = registrableDomain(parsed.hostname);
+        if (reg && reg !== pageReg) domains.add(reg);
+      } catch {
+        /* 忽略非法 URL */
+      }
+    }
+    if (domains.size < min) continue;
+    if (holdsRealContent(el)) continue;
+    // 文章内部的"相关链接/参考链接"是作者写的内容，不是广告垃圾
+    if (isInsideRealContent(el)) continue;
+    candidates.push(el);
+  }
+
+  return candidates.filter(
+    (el) => !candidates.some((other) => other !== el && el.contains(other)),
+  );
 }
 
 /**

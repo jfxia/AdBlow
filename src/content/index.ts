@@ -6,8 +6,9 @@ import type { SitePack } from '../engine/rules.ts';
 import {
   applyVerdict,
   cosmeticCss,
-  findFakeCloseAds,
   findOverlayAds,
+  findFakeCloseAds,
+  findLinkFarms,
   hideElement,
   judgeGrownElement,
   learnableAdDomains,
@@ -203,6 +204,23 @@ async function boot(): Promise<void> {
   };
 
   /**
+   * 链接农场（用大量不同外站链接堆出来的广告/SEO 垃圾块）—— 独立一趟。
+   *
+   * 取证：实测站点页脚有 39 个不同跨站域名的链接，由站点自己的 partners.js
+   * 注入。单条跨站链接只值 4 分（低于 6 分门槛，这是故意的），
+   * 容器又因后代过多不采信后代信号 —— 所以必须单独判。
+   */
+  const hideLinkFarms = (): number => {
+    const farms = findLinkFarms(document, { host });
+    for (const el of farms) {
+      hideElement(el);
+      heuristic += 1;
+    }
+    if (farms.length) console.debug(`[adblow] 链接农场：隐藏 ${farms.length} 个块`);
+    return farms.length;
+  };
+
+  /**
    * 假关闭按钮（伪装成关闭的跨站链接）—— 独立一趟。
    *
    * 小浮窗过不了覆盖层面积阈值，又常常没有任何广告命名，常规判据抓不到。
@@ -271,6 +289,7 @@ async function boot(): Promise<void> {
   const upkeep = (label: string): void => {
     // 先跑几何巡检：第一轮建立面积基线，后续轮次才能发现"被撑大"
     recheckGrown();
+    const farms = hideLinkFarms();
     const fakeClose = hideFakeClose();
     const layers = hideClickLayers();
     const overlays = hideOverlays();
@@ -279,7 +298,8 @@ async function boot(): Promise<void> {
     console.debug(
       `[adblow] ${label} host=${host} 规则包=${packs.length} ` +
         `选择器=${selectorSet.curated.length}包+${selectorSet.learned.length}学 ` +
-        `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays} 点击层=${layers} 假关闭=${fakeClose}`,
+        `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays} 点击层=${layers} ` +
+        `假关闭=${fakeClose} 链接农场=${farms}`,
     );
   };
 
@@ -297,6 +317,7 @@ async function boot(): Promise<void> {
       geometryTimer = null;
       recheckGrown();
       hideFakeClose();
+      hideLinkFarms();
     }, GEOMETRY_DEBOUNCE_MS);
   };
 
