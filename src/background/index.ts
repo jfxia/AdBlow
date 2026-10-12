@@ -81,6 +81,18 @@ function scheduleSync(): void {
 chrome.runtime.onInstalled.addListener(() => void syncDnrRules());
 chrome.runtime.onStartup.addListener(() => void syncDnrRules());
 
+/**
+ * Service Worker 每次被唤醒都重建一次规则。
+ *
+ * 为什么需要（用户反馈驱动）：DNR 动态规则是**持久化**的，代码升级后旧规则
+ * 仍然生效。曾经因此出过一次事故 —— 自学习把内容图 CDN 学成拦截域名并写进了
+ * 规则，修复了学习逻辑但用户浏览器里的旧规则还在，图片依然不显示。
+ * 无条件重建保证「规则策略永远与当前代码一致」。
+ *
+ * 开销可忽略（一次 getDynamicRules + 一次 updateDynamicRules，且幂等）。
+ */
+void syncDnrRules();
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   for (const key of Object.keys(changes)) {
