@@ -1,5 +1,6 @@
 import { buildPristineIndexFromHtml } from '../engine/pristine.ts';
 import { withTimeout } from '../engine/async.ts';
+import { findInvisibleClickLayers } from '../engine/clickLayer.ts';
 import type { SitePack } from '../engine/rules.ts';
 import {
   cosmeticCss,
@@ -157,6 +158,27 @@ async function boot(): Promise<void> {
   };
 
   /**
+   * 隐形点击层（点击劫持）—— 独立一趟。
+   *
+   * 与覆盖层同理，几何与样式判断不能进逐元素打分的热路径。
+   * 主动隐藏它比「等用户点击时再拦」更好：隐藏后点击根本落不到它上面，
+   * 而且隐藏一个「渲染不出任何可见内容」的元素在视觉上是零影响。
+   */
+  const hideClickLayers = (): number => {
+    const layers = findInvisibleClickLayers(document, {
+      viewportArea: innerWidth * innerHeight,
+    });
+    for (const el of layers) {
+      hideElement(el);
+      heuristic += 1;
+    }
+    if (layers.length) {
+      console.debug(`[adblow] 已隐藏 ${layers.length} 个隐形点击层`);
+    }
+    return layers.length;
+  };
+
+  /**
    * 覆盖层单独一趟（不参与逐元素打分，见 findOverlays 的说明）。
    *
    * 放在最后跑：此时普通规则与启发式都已落地，覆盖层的旁证判定能拿到最完整的
@@ -185,13 +207,14 @@ async function boot(): Promise<void> {
    * 自学习一个域名都没记」。而这些工作**本来就不依赖回填**。
    */
   const upkeep = (label: string): void => {
+    const layers = hideClickLayers();
     const overlays = hideOverlays();
     learnAdDomains();
     void writeStats(store, host, { rule, heuristic });
     console.debug(
       `[adblow] ${label} host=${host} 规则包=${packs.length} ` +
         `选择器=${selectorSet.curated.length}包+${selectorSet.learned.length}学 ` +
-        `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays}`,
+        `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays} 点击层=${layers}`,
     );
   };
 
