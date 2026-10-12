@@ -54,7 +54,14 @@ export function learnedDomainRules(
 
   return domains.map((domain, i) => ({
     id: idBase + i,
-    priority: 1,
+    /**
+     * 优先级 2：**高于列表普通拦截（1）、低于列表例外（3）**。
+     *
+     * 这个次序是有意的：自学习会学错（域名被复用于正常服务、或站点改版），
+     * 所以必须留一条"列表例外能推翻自学习"的退路。
+     * 见 filterList/compile.ts 的 PRIORITY 表。
+     */
+    priority: 2,
     action: { type: 'block' as const },
     condition: {
       urlFilter: `||${domain}^`,

@@ -161,6 +161,38 @@ pnpm build       # 组装 dist/ 并注入 manifest
 | **站点规则包**（动态） | 逐站取证 | 4 | 比通用列表更可信 |
 
 优先级安排让「列表例外」能推翻自学习域名（3 > 2）—— 自学习会学错，必须留这条退路。
+（本次把自学习规则的优先级从 1 明确改为 **2**，让文档承诺的层次在代码里真实存在。）
+
+**集成层的证明**（`tests/integration/listLearningBoundary.test.ts`）：
+项目原有的自学习安全测试都是在"没有列表"的前提下测的，所以专门补了一组
+在**合并之后**成立的断言：
+
+1. 对照前提：列表规则**确实**会拦 image（否则这组测试没有意义）
+2. 自学习规则绝不拦 image / media（且 `SUBRESOURCE_TYPES` 结构上不含它们）
+3. 自学习规则绝不拦 main_frame
+4. **列表"允许拦图片"不传染给自学习规则** —— 同域名下两者类型集合不同
+5. **列表例外（3）能推翻自学习拦截（2）**
+6. 合并后的整体仍通过 DNR 约束自检（含主文档纪律）
+7. 唯一允许拦主文档的来源仍是列表里**显式写的 `$document`**
+
+## 列表来源只限无付费白名单者（目标要求，已变成代码强制检查）
+
+背景：EasyList 等列表本身**不含**付费白名单，但"Acceptable Ads"是**另一份订阅**
+（`exceptionrules.txt`）—— 广告主付费后进入该列表被放行。各种"免费 adblock"
+后来变味，往往就是从默认勾选这份订阅开始的。
+
+因此 `tools/filters/fetch-lists.mjs` 里加了两道**硬检查**，而不是只在文档里承诺：
+
+- **来源配置检查**（`checkNoPaidWhitelist`）：任一来源的 id 或 URL 命中
+  `exceptionrules` / `acceptableads` / `allowlist` / `whitelist` 等特征 → **中止抓取**
+- **正文痕迹检查**（`scanTextForPaidWhitelist`）：列表头部注释出现
+  Acceptable Ads 字样 → **标红并置非零退出码**
+  （不能只看 URL —— 万一上游把 AA 合并进主列表，这里能在本地发现）
+
+检查结果写入 `filters/meta.json` 的 `noPaidWhitelist` 字段，**每次抓取都可审计**。
+实测（2026-10-11）：来源配置 6 份均通过；正文未出现任何 AA / exceptionrules 痕迹 ✓
+
+来源清单由测试钉死（`tests/unit/listSources.test.ts`），任何增删都会被暴露。
 
 ## 回归测试与真实站点验证（目标要求）
 
