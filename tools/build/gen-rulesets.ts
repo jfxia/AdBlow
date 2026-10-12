@@ -15,6 +15,13 @@ import { fileURLToPath } from 'node:url';
 import { parseList } from '../../src/engine/filterList/parse.ts';
 import { compileFilters, type DnrListRule } from '../../src/engine/filterList/compile.ts';
 import { validateRulesets } from '../../src/engine/filterList/validate.ts';
+import {
+  COSMETIC_SHARD_COUNT,
+  buildCosmeticIndex,
+  parseCosmeticLine,
+  shardIndex,
+  type CosmeticFilter,
+} from '../../src/engine/filterList/cosmetic.ts';
 
 const ROOT = new URL('../../', import.meta.url);
 const p = (rel: string) => fileURLToPath(new URL(rel, ROOT));
@@ -68,6 +75,7 @@ const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as {
 
 const perList: { id: string; network: number; cosmetic: number; skipped: number }[] = [];
 const allFilters = [];
+const allCosmetic: CosmeticFilter[] = [];
 const skipReasons: Record<string, number> = {};
 let cosmeticTotal = 0;
 
@@ -90,6 +98,11 @@ for (const entry of meta.lists) {
   }
   cosmeticTotal += parsed.cosmetic.length;
   allFilters.push(...parsed.network);
+
+  for (const c of parsed.cosmetic) {
+    const f = parseCosmeticLine(c.raw);
+    if (f) allCosmetic.push(f);
+  }
 }
 
 console.log(`读取 ${perList.length} 份列表：`);
@@ -182,7 +195,53 @@ console.log(`\n未支持的语法（解析阶段）：`);
 for (const [reason, n] of Object.entries(skipReasons).sort((a, b) => b[1] - a[1])) {
   console.log(`  ${String(n).padStart(7)}  ${reason}`);
 }
+// ── cosmetic：按域名分片（第二期）────────────────────────────────
+
+const cosmeticIndex = buildCosmeticIndex(allCosmetic);
+const shards = shardIndex(cosmeticIndex, COSMETIC_SHARD_COUNT);
+
+let shardFiles = 0;
+let shardBytes = 0;
+let maxShardBytes = 0;
+for (let i = 0; i < shards.length; i += 1) {
+  const shard = shards[i]!;
+  if (Object.keys(shard.hide).length === 0 && Object.keys(shard.unhide).length === 0) continue;
+  const json = JSON.stringify(shard);
+  writeFileSync(`${OUT_DIR}cosmetic-${i}.json`, json, 'utf8');
+  shardFiles += 1;
+  shardBytes += json.length;
+  if (json.length > maxShardBytes) maxShardBytes = json.length;
+}
+
+const cosmeticMeta = {
+  shardCount: COSMETIC_SHARD_COUNT,
+  shardFiles,
+  shardBytes,
+  maxShardBytes,
+  ...cosmeticIndex.stats,
+  domainCount: cosmeticIndex.hideByDomain.size,
+  unhideDomainCount: cosmeticIndex.unhideByDomain.size,
+  /** 通用规则默认不注入（与 uBOL 一致），仅记录数量 */
+  genericNotInjected: cosmeticIndex.genericHide.size,
+};
+writeFileSync(
+  `${OUT_DIR}cosmetic-meta.json`,
+  JSON.stringify(cosmeticMeta, null, 2),
+  'utf8',
+);
+
+console.log('\ncosmetic（第二期）：');
+console.log(`  解析                ${cosmeticIndex.stats.parsed} 条`);
+console.log(`  域名专用隐藏        ${cosmeticIndex.stats.domainSpecific} 条 → ${cosmeticIndex.hideByDomain.size} 个域名`);
+console.log(`  例外 #@#            ${cosmeticIndex.hideByDomain.size ? cosmeticIndex.unhideByDomain.size : 0} 个域名`);
+console.log(`  通用选择器          ${cosmeticIndex.genericHide.size} 条（**默认不注入**，与 uBOL 取舍一致）`);
 console.log(
-  `\ncosmetic 选择器 ${cosmeticTotal} 条暂未使用（第二期），` +
-    `产物：filters/generated/（${resources.length} 个规则集）`,
+  `  暂缓（第三期）      程序化 ${cosmeticIndex.stats.deferred['procedural'] ?? 0}｜` +
+    `样式 ${cosmeticIndex.stats.deferred['style'] ?? 0}｜脚本注入 ${cosmeticIndex.stats.deferred['scriptlet'] ?? 0}`,
+);
+console.log(`  跳过 ~ 排除型       ${cosmeticIndex.stats.skippedExcluded} 条（正向索引表达不了，不误用）`);
+console.log(`  丢弃非法选择器      ${cosmeticIndex.stats.invalidSelectors} 条（一条非法会毁掉整张样式表）`);
+console.log(
+  `  分片                ${shardFiles}/${COSMETIC_SHARD_COUNT} 片，合计 ${(shardBytes / 1024).toFixed(0)} KB，` +
+    `单片最大 ${(maxShardBytes / 1024).toFixed(1)} KB`,
 );

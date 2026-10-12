@@ -10,6 +10,7 @@ import {
   findFakeCloseAds,
   findLinkFarms,
   hideElement,
+  holdsRealContent,
   judgeGrownElement,
   learnableAdDomains,
   makeInjectionTest,
@@ -21,6 +22,7 @@ import {
   type JudgeOptions,
 } from './engine.ts';
 import { promotedSelectors, recordHit } from './learn.ts';
+import { applyListCosmetic } from './listCosmetic.ts';
 import { recordDomains } from './domainLearn.ts';
 import { isSiteDisabled, writeStats } from './settings.ts';
 import { chromeLocal } from './storage.ts';
@@ -80,6 +82,19 @@ async function loadPacks(url: string): Promise<SitePack[]> {
   }
 }
 
+/** 取过滤列表里该主机名适用的域名专用 cosmetic 选择器。 */
+async function requestListCosmetic(host: string): Promise<string[]> {
+  try {
+    const res = (await chrome.runtime.sendMessage({ type: 'get-cosmetic', host })) as
+      | { selectors?: string[] }
+      | undefined;
+    return res?.selectors ?? [];
+  } catch (error) {
+    console.warn('[adblow] 取列表 cosmetic 规则失败', error);
+    return [];
+  }
+}
+
 async function requestPristineHtml(url: string): Promise<string | null> {
   try {
     const res = (await chrome.runtime.sendMessage({ type: 'get-pristine', url })) as
@@ -97,6 +112,30 @@ function installCosmeticStyle(selectors: string[]): void {
   style.setAttribute('data-adblow-cosmetic', '');
   style.textContent = cosmeticCss(selectors);
   (document.head ?? document.documentElement).appendChild(style);
+}
+
+/**
+ * 过滤列表的域名专用 cosmetic 选择器（第二期）。
+ *
+ * 与「站点规则包选择器」的区别：
+ *   - 规则包选择器经逐站取证 + fixture 回归测试 → 可信，直接进样式表
+ *   - 列表选择器来自社区维护、覆盖上万域名 → **必须过内容守卫**
+ *
+ * 守卫逻辑在 content/listCosmetic.ts 里（document 由调用方注入，可单测）。
+ */
+function installListCosmetic(selectors: string[]): number {
+  if (selectors.length === 0) return 0;
+  const result = applyListCosmetic(document, selectors, holdsRealContent);
+  if (result.droppedForContent.length) {
+    console.debug(
+      `[adblow] 列表选择器会隐藏正文，已剔除 ${result.droppedForContent.length} 条：` +
+        result.droppedForContent.slice(0, 3).map((s) => s.slice(0, 40)).join(' | '),
+    );
+  }
+  if (result.droppedInvalid.length) {
+    console.debug(`[adblow] 列表选择器非法，已剔除 ${result.droppedInvalid.length} 条`);
+  }
+  return result.injected;
 }
 
 async function boot(): Promise<void> {
@@ -121,6 +160,30 @@ async function boot(): Promise<void> {
   // 包装类，内含 22 张图）与 `.post-card`（正文卡片类名）被写进样式表后，
   // 页面一开头就隐藏了一大片内容与图片。自学习选择器只走带守卫的逐元素判定。
   installCosmeticStyle(selectorSet.curated);
+
+  // 过滤列表的域名专用 cosmetic 规则（第二期）。
+  //
+  // 越早注入越好（防闪现），但它是异步的（要向 SW 取分片），所以先发起请求，
+  // 不阻塞后面的判定流程；拿到后再注入并走内容守卫。
+  let listCosmeticCount = 0;
+  void requestListCosmetic(host).then((selectors) => {
+    listCosmeticCount = installListCosmetic(selectors);
+    if (listCosmeticCount || selectors.length) {
+      console.debug(
+        `[adblow] 列表 cosmetic：候选 ${selectors.length} 条，通过内容守卫 ${listCosmeticCount} 条`,
+      );
+    }
+    // 内容守卫依赖 DOM 已解析出元素；解析完成后再复核一次
+    if (document.readyState === 'loading') {
+      document.addEventListener(
+        'DOMContentLoaded',
+        () => {
+          listCosmeticCount = installListCosmetic(selectors);
+        },
+        { once: true },
+      );
+    }
+  });
 
   // 只记录经宽度检查的泛化选择器；不合格的只隐藏、不建规则
   const learn = (hits: Hit[]): void => {

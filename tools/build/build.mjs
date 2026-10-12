@@ -14,7 +14,7 @@
 import { rollup } from 'rollup';
 import { nodeResolve } from '@rollup/plugin-node-resolve';
 import ts from 'typescript';
-import { copyFileSync, mkdirSync, readFileSync, statSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, statSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const root = new URL('../../', import.meta.url);
@@ -130,6 +130,23 @@ if (existsSync(rulesetPatch)) {
     `过滤列表规则集：${resources.length} 卷、合计 ${(bytes / 1024 / 1024).toFixed(2)} MB ` +
       `（已注入 manifest）`,
   );
+
+  // cosmetic 分片（第二期）：由 SW 读取后经消息回给内容脚本，
+  // 因此**不需要** web_accessible_resources（少一个指纹面）。
+  const cosmeticDir = p('filters/generated');
+  const cosmeticFiles = existsSync(cosmeticDir)
+    ? readdirSync(cosmeticDir).filter((f) => /^cosmetic-\d+\.json$/.test(f))
+    : [];
+  if (cosmeticFiles.length) {
+    mkdirSync(`${DIST}/cosmetic`, { recursive: true });
+    let cb = 0;
+    for (const f of cosmeticFiles) {
+      copyFileSync(`${cosmeticDir}/${f}`, `${DIST}/cosmetic/shard-${f.replace(/\D+/g, '')}.json`);
+      cb += statSync(`${cosmeticDir}/${f}`).size;
+    }
+    report.push([`cosmetic/ (${cosmeticFiles.length} shards)`, cb, 'copy']);
+    console.log(`cosmetic 分片：${cosmeticFiles.length} 片、合计 ${(cb / 1024).toFixed(0)} KB`);
+  }
 } else {
   console.log(
     '未找到过滤列表规则集 —— 跳过注入。若要启用：pnpm filters && node tools/build/gen-rulesets.ts',

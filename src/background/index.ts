@@ -2,11 +2,54 @@ import { toDnrRules } from '../engine/dnr.ts';
 import { learnedDomainRules } from '../engine/learnedRules.ts';
 import { matchPattern } from '../engine/match.ts';
 import { validateSitePack, type NetworkRule } from '../engine/rules.ts';
+import {
+  COSMETIC_SHARD_COUNT,
+  selectorsFromShards,
+  shardsForHost,
+  type CosmeticShard,
+} from '../engine/filterList/cosmetic.ts';
 import { allPromotedDomains } from '../content/domainLearn.ts';
 import { migrateLearnedSchema } from '../content/learn.ts';
 import { disabledKey } from '../content/settings.ts';
 import { chromeLocal } from '../content/storage.ts';
 import { SITE_PACKS } from '../rules/sites/index.ts';
+
+/**
+ * cosmetic 分片的进程内缓存。
+ *
+ * key 是分片下标；value 是分片内容（取不到时记 null，避免反复重试）。
+ * SW 会被回收，缓存随之失效，这是可接受的——重读本地文件很便宜。
+ */
+const cosmeticShardCache = new Map<number, CosmeticShard | null>();
+
+async function loadShard(index: number): Promise<CosmeticShard | null> {
+  const cached = cosmeticShardCache.get(index);
+  if (cached !== undefined) return cached;
+
+  try {
+    const url = chrome.runtime.getURL(`cosmetic/shard-${index}.json`);
+    const res = await fetch(url);
+    const shard = res.ok ? ((await res.json()) as CosmeticShard) : null;
+    cosmeticShardCache.set(index, shard);
+    return shard;
+  } catch {
+    cosmeticShardCache.set(index, null);
+    return null;
+  }
+}
+
+/**
+ * 取某主机名应生效的域名专用 cosmetic 选择器。
+ *
+ * 只读该主机名及其各级父域落到的分片（实测通常 2–3 片、单片几 KB）。
+ * 没有分片文件时返回空数组（列表未生成或未抓取，扩展照常工作）。
+ */
+async function cosmeticForHost(host: string): Promise<string[]> {
+  const indexes = shardsForHost(host, COSMETIC_SHARD_COUNT);
+  const shards = await Promise.all(indexes.map((i) => loadShard(i)));
+  return selectorsFromShards(shards, host);
+}
+
 
 /**
  * Service Worker。
@@ -114,7 +157,36 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
-  const msg = message as { type?: string; url?: string } | undefined;
+  const msg = message as { type?: string; url?: string; host?: string } | undefined;
+
+  /**
+   * cosmetic（页面元素隐藏）规则：按主机名返回该站应生效的**域名专用**选择器。
+   *
+   * 为什么由 SW 读文件而不是内容脚本直接读：
+   * 内容脚本读扩展内文件需要把文件列进 `web_accessible_resources`，
+   * 那等于把它们暴露给页面（多一个指纹面）。uBlock Origin Lite 也是这个架构：
+   * 数据由 SW 读、经消息回给内容脚本。
+   *
+   * 分片按**域名哈希**切分，这里只读当前主机名及其各级父域所在的那几片
+   * （实测 256 片、单片最大 6.3 KB），并有进程内缓存。
+   */
+  if (msg?.type === 'get-cosmetic') {
+    const host = msg.host;
+    if (!host) {
+      respond([]);
+      return true;
+    }
+    void (async () => {
+      try {
+        const selectors = await cosmeticForHost(host);
+        respond({ selectors });
+      } catch (error) {
+        console.warn('[adblow] 读取 cosmetic 分片失败', error);
+        respond({ selectors: [] });
+      }
+    })();
+    return true;
+  }
 
   if (msg?.type === 'get-site-packs') {
     const url = msg.url ?? '';
