@@ -14,7 +14,7 @@
 import { rollup } from 'rollup';
 import { nodeResolve } from '@rollup/plugin-node-resolve';
 import ts from 'typescript';
-import { copyFileSync, mkdirSync, readFileSync, statSync, rmSync, existsSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, statSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const root = new URL('../../', import.meta.url);
@@ -97,6 +97,45 @@ for (const asset of ASSETS) {
   report.push([asset.to, statSync(`${DIST}/${asset.to}`).size, 'copy']);
 }
 
+/**
+ * 注入过滤列表生成的静态规则集。
+ *
+ * 列表与生成的规则集都**不进版本库**（许可证原因，见
+ * docs/plans/2026-10-11-filter-list-integration.md），因此这里缺失时不报错，
+ * 只提示先跑 `pnpm filters && node tools/build/gen-rulesets.ts`。
+ */
+const rulesetPatch = p('filters/generated/manifest-patch.json');
+const rulesetFiles = [];
+if (existsSync(rulesetPatch)) {
+  const patch = JSON.parse(readFileSync(rulesetPatch, 'utf8'));
+  const resources = patch.declarative_net_request?.rule_resources ?? [];
+  mkdirSync(`${DIST}/rulesets`, { recursive: true });
+  let bytes = 0;
+  for (const r of resources) {
+    const from = p(`filters/generated/${r.path.replace('rulesets/', '')}`);
+    if (!existsSync(from)) throw new Error(`规则集文件缺失：${from}`);
+    copyFileSync(from, `${DIST}/${r.path}`);
+    const size = statSync(from).size;
+    bytes += size;
+    rulesetFiles.push([r.path, size]);
+  }
+
+  const manifestPath = `${DIST}/manifest.json`;
+  const m = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  m.declarative_net_request = { rule_resources: resources };
+  writeFileSync(manifestPath, JSON.stringify(m, null, 2), 'utf8');
+
+  for (const [name, size] of rulesetFiles) report.push([name, size, 'ruleset']);
+  console.log(
+    `过滤列表规则集：${resources.length} 卷、合计 ${(bytes / 1024 / 1024).toFixed(2)} MB ` +
+      `（已注入 manifest）`,
+  );
+} else {
+  console.log(
+    '未找到过滤列表规则集 —— 跳过注入。若要启用：pnpm filters && node tools/build/gen-rulesets.ts',
+  );
+}
+
 // 自检：manifest 里声明的每个文件都必须真实存在
 const manifest = JSON.parse(readFileSync(`${DIST}/manifest.json`, 'utf8'));
 const declared = [
@@ -104,6 +143,7 @@ const declared = [
   ...(manifest.content_scripts ?? []).flatMap((cs) => [...(cs.js ?? []), ...(cs.css ?? [])]),
   manifest.action?.default_popup,
   manifest.options_page,
+  ...(manifest.declarative_net_request?.rule_resources ?? []).map((r) => r.path),
 ].filter(Boolean);
 
 const missing = declared.filter((f) => !existsSync(`${DIST}/${f}`));

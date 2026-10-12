@@ -7,6 +7,8 @@
   "scripts": {
     "test": "node tests/run-all.ts",
     "typecheck": "tsc --noEmit",
+    "filters": "node tools/filters/fetch-lists.mjs",
+    "rulesets": "node tools/build/gen-rulesets.ts",
     "build": "node tools/build/build.mjs",
     "verify": "node tools/build/build.mjs && node tests/run-all.ts",
     "recon": "node tools/recon/snapshot.mjs"
