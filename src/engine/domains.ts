@@ -174,3 +174,37 @@ export function pageWideMediaDomains(root: ParentNode, pageHost: string): Set<st
   }
   return out;
 }
+
+/** 一个媒体域名要被多少个元素使用，才算"站点自己的内容 CDN"。 */
+export const CONTENT_CDN_MIN_USES = 3;
+
+/**
+ * 找出**站点自己的内容 CDN**：被多个媒体元素共同使用的跨站媒体域名。
+ *
+ * ## 为什么需要（用户报告的真实误杀）
+ *
+ * 「跨站素材」原本每张计 3 分，于是**任何脚本渲染的块只要有 2 张以上来自 CDN
+ * 的图片就够 6 分被隐藏** —— 而把缩略图放 CDN 是全网通行做法。
+ * 用户报告的视频站「推荐栏被屏蔽」、xchina.co「正文被屏蔽」都符合这个特征。
+ *
+ * 判据：**被 ≥3 个媒体元素使用的跨站域名 = 内容 CDN**（广告素材通常只有
+ * 一两张，而内容缩略图是成片的）。这些域名不再贡献"跨站素材"分。
+ *
+ * 代价方向是有意的：宁可漏掉"只靠素材域名判定"的广告（这类广告还有命名、
+ * 网络层名单兜着），也不要因为图片放 CDN 就把正文成片隐藏。
+ */
+export function frequentMediaDomains(
+  root: ParentNode,
+  pageHost: string,
+  minUses = CONTENT_CDN_MIN_USES,
+): Set<string> {
+  const counts = new Map<string, number>();
+  for (const el of Array.from(root.querySelectorAll(MEDIA_SELECTOR))) {
+    for (const d of crossSiteMediaDomains(el, pageHost)) {
+      counts.set(d, (counts.get(d) ?? 0) + 1);
+    }
+  }
+  const out = new Set<string>();
+  for (const [domain, n] of counts) if (n >= minUses) out.add(domain);
+  return out;
+}

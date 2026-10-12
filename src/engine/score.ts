@@ -24,6 +24,11 @@ export type ScoreContext = {
   viewportArea: number;
   /** 后代数量上限，超过则忽略后代信号。测试可覆盖。 */
   compactMax?: number;
+  /**
+   * 站点自己的内容 CDN 域名（**可注册域名**，如 `site.net`，不是完整主机名）。
+   * 由 `frequentMediaDomains` 产出；这些域名不贡献「跨站素材」分。
+   */
+  contentCdnDomains?: Set<string>;
 };
 
 export type ScoreResult = {
@@ -202,8 +207,12 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
         continue;
       }
       if (registrableDomain(parsed.hostname) !== pageReg) {
+        const reg = registrableDomain(parsed.hostname);
         if (isSameBrand(parsed.hostname, ctx.pageHost)) {
           reasons.add('sibling-domain-media');
+        } else if (ctx.contentCdnDomains?.has(reg)) {
+          // 站点自己的内容 CDN（被整页多个媒体元素使用）→ 不算广告证据
+          reasons.add('content-cdn-media');
         } else {
           behavior += 3;
           reasons.add('cross-site-media');

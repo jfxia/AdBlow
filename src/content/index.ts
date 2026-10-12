@@ -1,6 +1,7 @@
 import { buildPristineIndexFromHtml } from '../engine/pristine.ts';
 import { withTimeout } from '../engine/async.ts';
 import { findInvisibleClickLayers } from '../engine/clickLayer.ts';
+import { frequentMediaDomains } from '../engine/domains.ts';
 import { collectGrownElements, createGrowthTracker } from '../engine/geometry.ts';
 import type { SitePack } from '../engine/rules.ts';
 import {
@@ -219,6 +220,18 @@ async function boot(): Promise<void> {
   // 毫无意义，所以下面在 DOMContentLoaded 之后再 refresh 一次。
   const budget = createHidingBudget(document);
 
+  /**
+   * 重算"站点自己的内容 CDN"。
+   *
+   * 为什么每轮都要重算：跨站素材原本每张计 3 分，任何脚本渲染的块
+   * 只要有 2 张 CDN 图片就够 6 分被隐藏 —— 而缩略图放 CDN 是全网做法
+   * （用户报告的「推荐栏被屏蔽」「正文被屏蔽」都是这个）。
+   * 页面是渐进加载的，图片域名集合会变，所以每轮扫描前重新统计。
+   */
+  const refreshContentCdn = (): void => {
+    options.contentCdnDomains = frequentMediaDomains(document, host);
+  };
+
   // 阶段一：仅静态规则。injected 恒 false 即关闭启发式。
   let options: JudgeOptions = {
     injected: () => false,
@@ -249,6 +262,7 @@ async function boot(): Promise<void> {
 
   // sweep 会跳过已隐藏的元素，因此多次累加不会重复计数
   const sweepNow = (): number => {
+    refreshContentCdn();
     const r = sweep(document.documentElement, options);
     learn(r.hits);
     rule += r.hiddenByRule;
@@ -391,6 +405,7 @@ async function boot(): Promise<void> {
     recheckGrown();
     // 页面可能又加载出内容 → 更新预算分母（只增不减）
     budget.refresh(document);
+    refreshContentCdn();
     const farms = hideLinkFarms();
     const fakeClose = hideFakeClose();
     const layers = hideClickLayers();

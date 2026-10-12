@@ -186,11 +186,43 @@ export const NAVIGATION_MARKERS = [
   '[role="tablist"]',
 ];
 
+/**
+ * **类名类**导航标记：只保护元素自身，**不向后代传播**。
+ *
+ * 现实里绝大多数站点不用语义标签，而是 `<div class="navbar">` —— 用户报告的
+ * 「导航栏被屏蔽」就是这种。
+ *
+ * ⚠️ 但它们**绝不能**像语义标记那样传播：实测加了传播之后，
+ * `[class*="navbar"]` 命中 `.navbar-box` / `.top-navbar` 这类**页面级包装容器**，
+ * 于是整页所有后代都被"保护"起来，广告也拦不住了（6 个集成测试当场挂掉）。
+ * 所以：语义标记 = 直接声明 → 可传播；类名 = 启发式猜测 → 只保护自身。
+ */
+export const NAV_CONTAINER_MARKERS = [
+  '[class*="navbar"]',
+  '[class*="nav-bar"]',
+  '[class*="navigation"]',
+  '[class*="breadcrumb"]',
+  '[class*="pagination"]',
+  '[class*="mainmenu"]',
+  '[class*="main-menu"]',
+  '[class*="topmenu"]',
+  '[class*="top-menu"]',
+  '[class*="tabbar"]',
+  '[class*="tab-bar"]',
+];
+
 export function isNavigationLike(el: Element): boolean {
-  return el.matches(NAVIGATION_MARKERS.join(','));
+  try {
+    return (
+      el.matches(NAVIGATION_MARKERS.join(',')) ||
+      el.matches(NAV_CONTAINER_MARKERS.join(','))
+    );
+  } catch {
+    return false;
+  }
 }
 
-/** 元素位于导航内部。 */
+/** 元素位于**语义**导航内部（类名标记不参与，理由见上）。 */
 export function isInsideNavigation(el: Element): boolean {
   return el.closest(NAVIGATION_MARKERS.join(',')) !== null;
 }
@@ -291,13 +323,18 @@ export function createJudge(
   host: string,
   viewportArea: number,
   threshold: number = SCORE_THRESHOLD,
+  contentCdnDomains?: Set<string>,
 ): (el: Element) => Hit | null {
   return (el: Element): Hit | null => {
     // 语义标记优先于一切证据（事故回归保护）
     if (hasContentMarker(el)) return null;
 
     const naming = namingSignal(el).strength;
-    const { score, behavior, reasons } = scoreNode(el, { pageHost: host, viewportArea });
+    const { score, behavior, reasons } = scoreNode(el, {
+      pageHost: host,
+      viewportArea,
+      contentCdnDomains,
+    });
 
     const hit = (): Hit => ({ selector: generalizeSelector(el), score, reasons });
 
@@ -307,6 +344,10 @@ export function createJudge(
 
     // 导航是页面骨架：短标签的导航靠文字量保护不住，必须单独挡
     if (isNavigationLike(el) || isInsideNavigation(el)) return null;
+
+    // 视频/播放器：**含 `<video>` 的块不靠弱证据隐藏**（用户报告「视频窗口被屏蔽」）。
+    // 带广告命名的视频位在上面那一档已经拦掉了（验收第 10/13/14 条就是这类）。
+    if (el.matches('video') || el.querySelector('video') !== null) return null;
 
     // 文字量大 = 像正文 → **弱命名与纯行为证据不得隐藏它**
     // （这正是「正文/导航被成片误杀」的根因所在，见 hasSubstantiveText）
@@ -421,6 +462,16 @@ export const HIDDEN_ATTR = 'data-adblow-hidden';
 
 /** 隐藏原因所在属性（排查误杀用）。 */
 export const REASON_ATTR = 'data-adblow-reason';
+
+/**
+ * 判据原因所在属性（比 REASON_ATTR 更细）。
+ *
+ * `data-adblow-reason` 只说"是启发式/规则包/链接农场干的"，
+ * 但排查误杀时真正要回答的是"**凭哪条证据**判的" ——
+ * 例如 `cross-site-iframe` / `cross-site-media` / `geometry-growth`。
+ * 用户报"视频窗口被屏蔽"时，靠这个才能一眼看出是哪个信号误伤。
+ */
+export const WHY_ATTR = 'data-adblow-why';
 
 /**
  * 覆盖层检测：**独立的一趟遍历，不参与逐元素打分。**
@@ -962,6 +1013,8 @@ export type JudgeOptions = {
   threshold?: number;
   /** 页级预算兜底（见 createHidingBudget）。不传则不设兜底（测试用）。 */
   budget?: HidingBudget;
+  /** 站点自己的内容 CDN（见 frequentMediaDomains）。不传则不做这项排除。 */
+  contentCdnDomains?: Set<string>;
 };
 
 /**
@@ -1002,7 +1055,13 @@ export function judgeElement(el: Element, options: JudgeOptions): Verdict | null
     }
   }
 
-  const hit = createJudge(options.injected, options.host, options.viewportArea, threshold)(el);
+  const hit = createJudge(
+    options.injected,
+    options.host,
+    options.viewportArea,
+    threshold,
+    options.contentCdnDomains,
+  )(el);
   return hit ? { kind: 'heuristic', hit } : null;
 }
 
@@ -1021,6 +1080,10 @@ export function applyVerdict(
       : (verdict.hit?.reasons ?? []).includes('learned-selector')
         ? 'learned'
         : 'heuristic';
+  // 记下**凭哪条证据**判的（排查误杀时最关键的信息）
+  if (verdict.kind === 'heuristic' && verdict.hit.reasons.length) {
+    el.setAttribute(WHY_ATTR, verdict.hit.reasons.join(','));
+  }
   hideElement(el, reason);
   budget?.commit(el);
   return verdict;
