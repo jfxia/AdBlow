@@ -102,6 +102,56 @@ function namingScore(strength: number): { points: number; reason: string | null 
 
 export { NAMING_NONE, NAMING_SSP, NAMING_STRONG, NAMING_WEAK };
 
+/**
+ * 主机名里可以作为「品牌词」的标签：去掉数字与连字符、长度 ≥ 4。
+ */
+
+export function brandLabels(host: string): string[] {
+  return host
+    .split('.')
+    .map((label) => label.replace(/[0-9-]/g, ''))
+    .filter((label) => label.length >= 4);
+}
+
+/**
+ * 两个域名是否属于**同一品牌**（互为镜像/备用域名）。
+ *
+ * ## 为什么需要它（用户报告的真实误杀）
+ *
+ * dgav36.xyz 上有张「最新镜像网址」目录页，正文就是几十张镜像域名卡片
+ * （链到 dgav39.com / dgav40.com…）。这些链接按"可注册域名"算是**跨站**的，
+ * 于是每张卡片拿到 8 分（2 个跨站链接 × 4），超过阈值被整页隐藏 ——
+ * 而它们其实**是同一个站点自己的备用域名**，根本不是广告基础设施。
+ *
+ * ## 判据为什么必须收紧到"编号式域名"
+ *
+ * 第一版只比较"去掉数字后的品牌词"，结果把测试夹具里的
+ * `example.com` → `ads.example.net` 也算成了同品牌（都含 `example`），
+ * 直接把跨站证据抹掉、丢掉了真广告。那个口径太宽。
+ *
+ * 镜像域名的真实形态是**带编号**：`dgav36.xyz` / `dgav40.com`、
+ * `javbus1.com` / `javbus2.com`。所以额外要求**至少一方含数字**：
+ * 这样 `example.com` ↔ `example.net` 不会被误判成同品牌，
+ * 而编号式镜像能命中。
+ *
+ * 判据整体仍然偏宽（作用只是**减少**证据，不是宣布安全）：
+ * 万一漏判，代价是少扣几分、可能漏拦一个广告；而错判成同品牌才会误杀。
+ */
+export function isSameBrand(hostA: string, hostB: string): boolean {
+  const a = registrableDomain(hostA);
+  const b = registrableDomain(hostB);
+  if (a === b) return true;
+
+  const sldA = a.split('.')[0] ?? '';
+  const sldB = b.split('.')[0] ?? '';
+  const brandA = sldA.replace(/[0-9-]/g, '');
+  const brandB = sldB.replace(/[0-9-]/g, '');
+  if (brandA.length < 4 || brandA !== brandB) return false;
+
+  // 只在"编号式域名"这一种形态上认定为镜像（见上）
+  return /\d/.test(sldA) || /\d/.test(sldB);
+}
+
 export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
   const reasons = new Set<string>();
 
@@ -125,8 +175,13 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
         continue;
       }
       if (registrableDomain(parsed.hostname) !== pageReg) {
-        behavior += 4;
-        reasons.add('cross-site-link');
+        // 同品牌的镜像/备用域名不算跨站广告证据（见 isSameBrand 的说明）
+        if (isSameBrand(parsed.hostname, ctx.pageHost)) {
+          reasons.add('sibling-domain-link');
+        } else {
+          behavior += 4;
+          reasons.add('cross-site-link');
+        }
       }
       const search = parsed.search.toLowerCase();
       if (PROMO_PARAMS.some((p) => search.includes(p))) {
@@ -147,8 +202,12 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
         continue;
       }
       if (registrableDomain(parsed.hostname) !== pageReg) {
-        behavior += 3;
-        reasons.add('cross-site-media');
+        if (isSameBrand(parsed.hostname, ctx.pageHost)) {
+          reasons.add('sibling-domain-media');
+        } else {
+          behavior += 3;
+          reasons.add('cross-site-media');
+        }
       }
     }
   };
@@ -171,10 +230,14 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
         continue;
       }
       if (registrableDomain(parsed.hostname) !== pageReg) {
-        // 4 分与跨站链接同权：跨站 iframe 也可能是正常的第三方嵌入
-        // （视频、地图、评论），所以**不足以单独判定**，需要别的证据。
-        behavior += 4;
-        reasons.add('cross-site-iframe');
+        if (isSameBrand(parsed.hostname, ctx.pageHost)) {
+          reasons.add('sibling-domain-iframe');
+        } else {
+          // 4 分与跨站链接同权：跨站 iframe 也可能是正常的第三方嵌入
+          // （视频、地图、评论），所以**不足以单独判定**，需要别的证据。
+          behavior += 4;
+          reasons.add('cross-site-iframe');
+        }
       }
     }
   };

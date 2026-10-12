@@ -1,5 +1,5 @@
 import { isInjected, type PristineIndex } from '../engine/pristine.ts';
-import { scoreNode, registrableDomain } from '../engine/score.ts';
+import { scoreNode, registrableDomain, isSameBrand } from '../engine/score.ts';
 import { crossSiteResourceDomains, pageWideMediaDomains } from '../engine/domains.ts';
 import { NAMING_STRONG, NAMING_WEAK, namingSignal } from '../engine/lexicon.ts';
 import { generalizeSelector, isSelectorSafe } from '../engine/selector.ts';
@@ -627,7 +627,12 @@ export function findLinkFarms(
         const parsed = new URL(href, `https://${opts.host}`);
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
         const reg = registrableDomain(parsed.hostname);
-        if (reg && reg !== pageReg) domains.add(reg);
+        if (!reg || reg === pageReg) continue;
+        // 同品牌的镜像/备用域名不算"另一个域名" —— 实测 dgav36 的
+        // 「最新镜像网址」目录页正文就是几十个这样的域名，按跨站算会把正文
+        // 整块判成链接农场（用户报告的误杀）。
+        if (isSameBrand(parsed.hostname, opts.host)) continue;
+        domains.add(reg);
       } catch {
         /* 忽略非法 URL */
       }
@@ -955,6 +960,8 @@ export type JudgeOptions = {
   viewportArea: number;
   selectors: SelectorSet;
   threshold?: number;
+  /** 页级预算兜底（见 createHidingBudget）。不传则不设兜底（测试用）。 */
+  budget?: HidingBudget;
 };
 
 /**
@@ -1000,8 +1007,14 @@ export function judgeElement(el: Element, options: JudgeOptions): Verdict | null
 }
 
 /** 判定并应用隐藏。隐藏原因写进 `data-adblow-reason`，便于事后排查误杀。 */
-export function applyVerdict(el: Element, verdict: Verdict | null): Verdict | null {
+export function applyVerdict(
+  el: Element,
+  verdict: Verdict | null,
+  budget?: HidingBudget,
+): Verdict | null {
   if (!verdict) return null;
+  // 页级预算兜底：绝不允许把整页清空（见 createHidingBudget）
+  if (budget && !budget.canHide(el)) return null;
   const reason =
     verdict.kind === 'rule'
       ? 'rule'
@@ -1009,7 +1022,139 @@ export function applyVerdict(el: Element, verdict: Verdict | null): Verdict | nu
         ? 'learned'
         : 'heuristic';
   hideElement(el, reason);
+  budget?.commit(el);
   return verdict;
+}
+
+/** 隐藏文字 / 链接占全页的比例上限（页级兜底，宁可少拦也不能清空页面）。 */
+export const PAGE_TEXT_BUDGET_SHARE = 0.7;
+export const PAGE_LINK_BUDGET_SHARE = 0.7;
+/**
+ * 页面内容太少时**不启用**预算。
+ *
+ * ⚠️ 这是验收实测被迫加的：夹具页面上只有一个广告探针，隐藏它 = 该页 100%
+ * 的链接 → 被 70% 阈值拒绝 → 广告反而拦不住，验收从 21/21 掉到 12/21。
+ * 页级兜底的目的是"别把有内容的页面清空"，本来就**不该**作用在
+ * 内容量微不足道的页面上。
+ */
+export const BUDGET_MIN_TOTAL_LINKS = 10;
+export const BUDGET_MIN_TOTAL_TEXT = 400;
+
+export type HidingBudget = {
+  /** 还能隐藏这个元素吗（会突破页级预算就返回 false）。 */
+  canHide(el: Element): boolean;
+  /** 记入已隐藏的量（必须在真的隐藏之后调用）。 */
+  commit(el: Element): void;
+  /** 页面继续加载后重测基线（分母只增不减）。 */
+  refresh(doc: Document): void;
+  stats(): {
+    text: number;
+    links: number;
+    totalText: number;
+    totalLinks: number;
+    suppressed: number;
+    enabled: boolean;
+  };
+};
+
+const collapse = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
+/**
+ * 量一页的"内容量"，**排除 `<script>` / `<style>` 里的代码文本**。
+ *
+ * 不排除的话，内联 JS 多的页面文字总量能到十几万字符（实测 dgav36 报
+ * 110034），预算就永远碰不到、形同虚设。
+ */
+function measureContent(root: Element): { text: number; links: number } {
+  let clone: Element;
+  try {
+    clone = root.cloneNode(true) as Element;
+  } catch {
+    return { text: 0, links: 0 };
+  }
+  for (const el of Array.from(clone.querySelectorAll('script,style,noscript,template'))) {
+    el.remove();
+  }
+  return {
+    text: collapse(clone.textContent ?? '').length,
+    links: clone.querySelectorAll('a[href]').length,
+  };
+}
+
+/**
+ * 页级预算兜底：**逐元素判定之外的最后一道保险**。
+ *
+ * ## 为什么必须要有（用户报告的真实误杀）
+ *
+ * dgav36.xyz 上有一张「最新镜像网址」目录页，**整页正文就是几十张镜像卡片**。
+ * 启发式逐张判定，每张都"有证据"（跨站链接），于是把整页 96 个块全隐藏了 ——
+ * 用户看到的是"正文被误杀"。逐元素判定的根本缺陷是：**从不问
+ * "我是不是把整个页面清空了"**。
+ *
+ * ## 三个必须注意的设计点（都是踩出来的）
+ *
+ * 1. **内容太少的页面不启用**：夹具页只有一个探针，隐藏它就是该页 100% 的链接，
+ *    会反过来让广告拦不住（验收 21/21 → 12/21）。
+ * 2. **文字量要排除 `<script>`**：否则内联 JS 让分母虚高到十几万，预算永远不触发。
+ * 3. **基线在"动手前"测，且分母只增不减**：在隐藏过程中重测等于把已隐藏的
+ *    部分从分母里去掉，预算就永远用不完。页面后续加载出更多内容时，
+ *    用 `refresh` 把新增量加进分母。
+ */
+export function createHidingBudget(
+  doc: Document,
+  opts: {
+    textShare?: number;
+    linkShare?: number;
+    minLinks?: number;
+    minText?: number;
+  } = {},
+): HidingBudget {
+  const textShare = opts.textShare ?? PAGE_TEXT_BUDGET_SHARE;
+  const linkShare = opts.linkShare ?? PAGE_LINK_BUDGET_SHARE;
+  const minLinks = opts.minLinks ?? BUDGET_MIN_TOTAL_LINKS;
+  const minText = opts.minText ?? BUDGET_MIN_TOTAL_TEXT;
+
+  let text = 0;
+  let links = 0;
+  let totalText = 0;
+  let totalLinks = 0;
+  let suppressed = 0;
+
+  const enabled = (): boolean => totalLinks >= minLinks || totalText >= minText;
+
+  const initial = doc.body ?? doc.documentElement;
+  if (initial) {
+    const m = measureContent(initial);
+    totalText = m.text;
+    totalLinks = m.links;
+  }
+
+  return {
+    canHide(el: Element): boolean {
+      // 页面内容太少 → 兜底不生效（这时"少拦"比"少误杀"更重要）
+      if (!enabled()) return true;
+      const t = collapse(el.textContent ?? '').length;
+      const l = el.querySelectorAll('a[href]').length;
+      if (text + t > totalText * textShare || links + l > totalLinks * linkShare) {
+        suppressed += 1;
+        return false;
+      }
+      return true;
+    },
+    commit(el: Element): void {
+      text += collapse(el.textContent ?? '').length;
+      links += el.querySelectorAll('a[href]').length;
+    },
+    refresh(current: Document): void {
+      const root = current.body ?? current.documentElement;
+      if (!root) return;
+      const m = measureContent(root);
+      // 当前可见量 + 我们已隐藏量 = 曾经观察到的总量；分母只增不减
+      totalText = Math.max(totalText, m.text + text);
+      totalLinks = Math.max(totalLinks, m.links + links);
+    },
+    stats: () => ({ text, links, totalText, totalLinks, suppressed, enabled: enabled() }),
+  };
 }
 
 export type SweepResult = {
@@ -1025,7 +1170,7 @@ export function sweep(root: ParentNode, options: JudgeOptions): SweepResult {
   for (const el of Array.from(root.querySelectorAll('*'))) {
     // 已被祖先隐藏的整棵子树不必再判，省时也避免重复计数
     if (isHidden(el)) continue;
-    const verdict = applyVerdict(el, judgeElement(el, options));
+    const verdict = applyVerdict(el, judgeElement(el, options), options.budget);
     if (!verdict) continue;
     if (verdict.kind === 'rule') result.hiddenByRule += 1;
     else {
@@ -1041,7 +1186,7 @@ export type AddedResult = { rule: number; hits: Hit[] };
 
 /** 处理一个新增节点：先判自身，再扫子树。返回统计与自学习应记录的命中。 */
 export function processAdded(el: Element, options: JudgeOptions): AddedResult {
-  const self = applyVerdict(el, judgeElement(el, options));
+  const self = applyVerdict(el, judgeElement(el, options), options.budget);
   if (self) {
     // 自身已被隐藏 → 整棵子树已经不可见，不必再逐个判定。
     // 否则既做无用功，又会把广告内部一堆节点的泛化选择器灌进自学习库当噪声。

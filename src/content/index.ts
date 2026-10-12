@@ -5,6 +5,7 @@ import { collectGrownElements, createGrowthTracker } from '../engine/geometry.ts
 import type { SitePack } from '../engine/rules.ts';
 import {
   applyVerdict,
+  createHidingBudget,
   cosmeticCss,
   findOverlayAds,
   findFakeCloseAds,
@@ -213,12 +214,18 @@ async function boot(): Promise<void> {
     if (candidates.length > 0) void recordDomains(store, host, candidates, location.href);
   };
 
+  // 页级预算兜底：防止"整页被清空"这种灾难。
+  // ⚠️ document_start 时 body 还几乎是空的（链接数为 0），此时测出的基线
+  // 毫无意义，所以下面在 DOMContentLoaded 之后再 refresh 一次。
+  const budget = createHidingBudget(document);
+
   // 阶段一：仅静态规则。injected 恒 false 即关闭启发式。
   let options: JudgeOptions = {
     injected: () => false,
     host,
     viewportArea: innerWidth * innerHeight,
     selectors: selectorSet,
+    budget,
   };
 
   let rule = 0;
@@ -265,7 +272,7 @@ async function boot(): Promise<void> {
     for (const el of grown) {
       const verdict = judgeGrownElement(el, options);
       if (verdict) {
-        applyVerdict(el, verdict);
+        applyVerdict(el, verdict, budget);
         heuristic += 1;
         n += 1;
       }
@@ -281,14 +288,27 @@ async function boot(): Promise<void> {
    * 注入。单条跨站链接只值 4 分（低于 6 分门槛，这是故意的），
    * 容器又因后代过多不采信后代信号 —— 所以必须单独判。
    */
+/** 走页级预算兜底的隐藏（独立几趟都用它）。返回是否真的隐藏了。 */
+  const hideGuarded = (el: Element, reason: string): boolean => {
+    if (!budget.canHide(el)) {
+      console.debug(`[adblow] 页级预算兜底：拒绝隐藏 ${reason}（会清空整页）`);
+      return false;
+    }
+    hideElement(el, reason);
+    budget.commit(el);
+    return true;
+  };
+
   const hideLinkFarms = (): number => {
     const farms = findLinkFarms(document, { host });
+    let n = 0;
     for (const el of farms) {
-      hideElement(el, 'linkfarm');
+      if (!hideGuarded(el, 'linkfarm')) continue;
       heuristic += 1;
+      n += 1;
     }
-    if (farms.length) console.debug(`[adblow] 链接农场：隐藏 ${farms.length} 个块`);
-    return farms.length;
+    if (n) console.debug(`[adblow] 链接农场：隐藏 ${n} 个块`);
+    return n;
   };
 
   /**
@@ -299,13 +319,15 @@ async function boot(): Promise<void> {
    */
   const hideFakeClose = (): number => {
     const ads = findFakeCloseAds(document, { host });
+    let n = 0;
     for (const { element, hit } of ads) {
-      hideElement(element, 'fake-close');
+      if (!hideGuarded(element, 'fake-close')) continue;
       heuristic += 1;
+      n += 1;
       learn([hit]);
     }
-    if (ads.length) console.debug(`[adblow] 假关闭按钮：隐藏 ${ads.length} 个广告浮窗`);
-    return ads.length;
+    if (n) console.debug(`[adblow] 假关闭按钮：隐藏 ${n} 个广告浮窗`);
+    return n;
   };
 
   /**
@@ -319,14 +341,19 @@ async function boot(): Promise<void> {
     const layers = findInvisibleClickLayers(document, {
       viewportArea: innerWidth * innerHeight,
     });
+    let n = 0;
     for (const el of layers) {
+      // 点击层**不走预算兜底**：它是点击劫持的载体，
+      // 留着它的代价（整页点不动）比误判的代价大得多；
+      // 而且它渲染不出可见内容，隐藏它不会减少页面文字/链接。
       hideElement(el, 'click-layer');
       heuristic += 1;
+      n += 1;
     }
-    if (layers.length) {
-      console.debug(`[adblow] 已隐藏 ${layers.length} 个隐形点击层`);
+    if (n) {
+      console.debug(`[adblow] 已隐藏 ${n} 个隐形点击层`);
     }
-    return layers.length;
+    return n;
   };
 
   /**
@@ -337,12 +364,14 @@ async function boot(): Promise<void> {
    */
   const hideOverlays = (): number => {
     const ads = findOverlayAds(document, { host, viewportArea: innerWidth * innerHeight });
+    let n = 0;
     for (const { element, hit } of ads) {
-      hideElement(element, 'overlay');
+      if (!hideGuarded(element, 'overlay')) continue;
       heuristic += 1;
+      n += 1;
       learn([hit]);
     }
-    return ads.length;
+    return n;
   };
 
   // 首屏：此刻能扫到的部分。注意 document_start 时正文还没解析出来，
@@ -360,6 +389,8 @@ async function boot(): Promise<void> {
   const upkeep = (label: string): void => {
     // 先跑几何巡检：第一轮建立面积基线，后续轮次才能发现"被撑大"
     recheckGrown();
+    // 页面可能又加载出内容 → 更新预算分母（只增不减）
+    budget.refresh(document);
     const farms = hideLinkFarms();
     const fakeClose = hideFakeClose();
     const layers = hideClickLayers();
@@ -369,6 +400,7 @@ async function boot(): Promise<void> {
     // 通常发生在它自己的脚本跑完之后（实测 1024cg 的广告弹层就是这样，
     // 不复核的话整页链接都点不动，而我们还以为自己拦住了）。
     const audit = verifyHiding(document);
+    const bs = budget.stats();
     learnAdDomains();
     void writeStats(store, host, { rule, heuristic });
     console.debug(
@@ -376,7 +408,8 @@ async function boot(): Promise<void> {
         `选择器=${selectorSet.curated.length}包+${selectorSet.learned.length}学 ` +
         `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays} 点击层=${layers} ` +
         `假关闭=${fakeClose} 链接农场=${farms} ` +
-        `复核=${audit.checked}/重新隐藏=${audit.refought}` +
+        `复核=${audit.checked}/重新隐藏=${audit.refought} ` +
+        `预算=文字${bs.text}/${bs.totalText} 链接${bs.links}/${bs.totalLinks} 兜底拒绝=${bs.suppressed}` +
         (audit.stubborn.length ? ` 顽固=[${audit.stubborn.slice(0, 3).join(' ')}]` : ''),
     );
   };
@@ -410,6 +443,8 @@ async function boot(): Promise<void> {
     await new Promise<void>((resolve) => {
       document.addEventListener('DOMContentLoaded', () => resolve(), { once: true });
     });
+    // 此刻页面内容才真正解析出来 → 重测预算基线（分母只增不减）
+    budget.refresh(document);
     sweepNow();
   }
 
