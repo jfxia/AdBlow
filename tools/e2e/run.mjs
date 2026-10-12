@@ -63,6 +63,15 @@ const PROFILES = {
       'div.post-card[id^="ad-card-"]',
       '.ads-title',
       '.post-card-ads',
+      // 服务端渲染的横幅广告位。
+      // 注意不要把 `a.tjtagmanager` 也列成广告位：它是站点的**外链追踪包装**，
+      // 既包横幅广告也可能包别的东西，要求它 100% 被隐藏属于过度指定
+      // （实测因此误报过 1/107）。广告位的判定应该落在真正的容器上。
+      'div.horizontal-banner',
+      // 弹窗广告（实测从被隐藏图片的祖先链里发现的真实结构：
+      // div.ad.popup-container > popup-content > popup-picture / popup-close
+      // 关闭按钮图 /usr/themes/ads-close.png 也印证了它是广告弹窗）
+      '.popup-container',
     ],
     contentSelector: 'article[itemtype*="BlogPosting"]',
     contentImageSelector: 'article[itemtype*="BlogPosting"] img',
@@ -290,15 +299,42 @@ async function measure({ port }) {
   };
 
   // 站点偶发加载失败会伪装成「广告为零、正文为零」，从而误报成拦截失败。
-  // 实测踩过一次（1024cg.com 首轮），所以这里显式重试一次。
-  const countElements = async () => {
-    const r = await evaluate('document.querySelectorAll("*").length');
-    return typeof r === 'number' ? r : 0;
+  // 实测踩过多次（1024cg 首轮、试点站某一轮），所以这里显式重试一次。
+  // 判据要同时看「元素数」和「正文数」：有一次元素数够但没有正文，
+  // 单看元素数不会触发重试。
+  const probe = async () => {
+    const r = await evaluate(`({
+      elements: document.querySelectorAll('*').length,
+      content: document.querySelectorAll(${JSON.stringify(profile.contentSelector)}).length,
+    })`);
+    return r && typeof r.elements === 'number' ? r : { elements: 0, content: 0 };
   };
-  if ((await countElements()) < 100) {
-    console.log('  （首次导航未加载出内容，重试一次…）');
+  let seen = await probe();
+  if (seen.elements < 100 || seen.content === 0) {
+    console.log(`  （首次导航未渲染出正文：元素 ${seen.elements}、正文 ${seen.content}，重试一次…）`);
     await cdp.send('Page.navigate', { url: URL_UNDER_TEST, transitionType: 'reload' });
     await sleep(11000);
+  }
+
+  // 等页面渲染稳定：站点响应会波动（连续访问尤其明显），
+  // 若在图片还没加载完时测量，「图片加载数」会剧烈跳动并造成误报。
+  const settled = await evaluate(`(async () => {
+    const loaded = () => [...document.querySelectorAll('img')]
+      .filter((i) => i.complete && i.naturalWidth > 0).length;
+    let last = -1;
+    let stable = 0;
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 500));
+      const now = loaded();
+      if (now === last) stable += 1; else stable = 0;
+      last = now;
+      if (stable >= 3 && document.readyState === 'complete') break;
+    }
+    return { loaded: last, readyState: document.readyState };
+  })()`);
+  if (settled && settled.loaded === 0) {
+    console.log('  （等待后仍无图片加载完成，可能是站点响应慢）');
   }
 
   const dom = await evaluate(`(() => {
@@ -317,9 +353,40 @@ async function measure({ port }) {
     const cImgs = [...document.querySelectorAll(${JSON.stringify(profile.contentImageSelector)})];
     const hiddenAttr = (el) => el.hasAttribute('data-adblow-hidden') ||
       el.closest('[data-adblow-hidden]') !== null;
+
+    // ⚠️ 站点无关的图片守卫（不依赖任何选择器）。
+    // 起因：曾经用 'article[...] img' 作正文图选择器，而 1024cg 的图片根本不在
+    // article 里 → 匹配数为 0 → 断言被 total===0 跳过 → 等于没测，
+    // 结果自学习把内容图 CDN 拦掉、「所有图片都不显示」这类事故没被拦住。
+    const imgs = [...document.querySelectorAll('img')];
+    const chain = (el) => {
+      const parts = [];
+      let p = el.parentElement;
+      for (let i = 0; i < 4 && p; i++) {
+        const cls = p.getAttribute('class') ?? '';
+        const id = p.getAttribute('id') ?? '';
+        parts.push(p.tagName.toLowerCase() + (id ? '#' + id : '') +
+          (cls ? '.' + cls.trim().split(/\s+/).slice(0, 2).join('.') : ''));
+        p = p.parentElement;
+      }
+      return parts.join(' < ');
+    };
+    const hiddenImgs = imgs.filter(hiddenAttr);
+    const inAd = (el) => adSel.some((s) => {
+      try { return el.closest(s) !== null; } catch { return false; }
+    });
+    const hiddenOutsideAds = hiddenImgs.filter((i) => !inAd(i));
+    const visibleAds = uniqAds.filter(visible);
     return {
       adTotal: uniqAds.length,
-      adVisible: uniqAds.filter(visible).length,
+      adVisible: visibleAds.length,
+      visibleAdSamples: visibleAds.slice(0, 5).map((el) => ({
+        sel: adSel.find((s) => {
+          try { return el.matches(s); } catch { return false; }
+        }),
+        cls: (el.getAttribute('class') ?? '').slice(0, 40),
+        chain: chain(el),
+      })),
       adHiddenByUs: uniqAds.filter(hiddenAttr).length,
       contentTotal: contents.length,
       contentVisible: contents.filter(visible).length,
@@ -327,6 +394,14 @@ async function measure({ port }) {
       contentImgsTotal: cImgs.length,
       contentImgsVisible: cImgs.filter(visible).length,
       contentImgsHiddenByUs: cImgs.filter(hiddenAttr).length,
+      imagesTotal: imgs.length,
+      imagesLoaded: imgs.filter((i) => i.complete && i.naturalWidth > 0).length,
+      imagesHiddenByUs: hiddenImgs.length,
+      imagesHiddenOutsideAds: hiddenOutsideAds.length,
+      imagesHiddenOutsideAdSamples: hiddenOutsideAds.slice(0, 6).map((i) => ({
+        src: (i.getAttribute('src') ?? i.getAttribute('data-src') ?? '').slice(-46),
+        chain: chain(i),
+      })),
       adblowHiddenTotal: document.querySelectorAll('[data-adblow-hidden]').length,
       hasAdblowStyle: !!document.querySelector('style[data-adblow-cosmetic]'),
     };
@@ -341,6 +416,15 @@ async function measure({ port }) {
   const blockedIds = new Set(allFailed.filter((e) => e.blockedReason).map((e) => e.requestId));
   const infra = sent.filter((e) => profile.adInfra.some((p) => e.request.url.includes(p)));
   const infraServed = infra.filter((e) => !blockedIds.has(e.requestId));
+
+  /**
+   * 被拦掉的图片请求数。
+   *
+   * 这是「整站图片不显示」这类事故的直接度量：它不该发生 ——
+   * 自学习来的网络规则刻意不含 image/media 类型。
+   */
+  const imageSent = sent.filter((e) => (e.type ?? '').toLowerCase() === 'image');
+  const imageBlocked = imageSent.filter((e) => blockedIds.has(e.requestId));
 
   const popups = (cdp.events['Target.targetCreated'] ?? []).filter(
     (e) => e.targetInfo?.type === 'page' && e.targetInfo?.url && e.targetInfo.url !== 'about:blank',
@@ -374,6 +458,9 @@ async function measure({ port }) {
     infraBlocked: infra.length - infraServed.length,
     infraServed: infraServed.length,
     infraServedSamples: [...new Set(infraServed.map((e) => e.request.url))],
+    imageSent: imageSent.length,
+    imageBlocked: imageBlocked.length,
+    imageBlockedSamples: [...new Set(imageBlocked.map((e) => e.request.url))].slice(0, 5),
     blockedTotal: blockedIds.size,
     popups,
     pageConsole,
@@ -462,7 +549,12 @@ try {
   check(
     '广告元素全部不可见',
     filtered.dom.adTotal > 0 && filtered.dom.adVisible === 0,
-    `基线 ${baseline.dom.adVisible}/${baseline.dom.adTotal} → 净化后 ${filtered.dom.adVisible}/${filtered.dom.adTotal}`,
+    `基线 ${baseline.dom.adVisible}/${baseline.dom.adTotal} → 净化后 ${filtered.dom.adVisible}/${filtered.dom.adTotal}` +
+      (filtered.dom.visibleAdSamples.length
+        ? ` —— 仍可见：${filtered.dom.visibleAdSamples
+            .map((s) => `${s.sel}|class=${s.cls}|@${s.chain}`)
+            .join(' ; ')}`
+        : ''),
   );
   check(
     '误伤守卫：正文元素一个都没被我们隐藏',
@@ -484,6 +576,39 @@ try {
     filtered.dom.contentImgsHiddenByUs === 0,
     `正文图 ${filtered.dom.contentImgsTotal} 个，被隐藏 ${filtered.dom.contentImgsHiddenByUs} 个`,
   );
+
+  // ── 图片守卫（站点无关，不依赖选择器）─────────────────────────
+  // 注意：隐藏**广告位里的图片**是正确的（横幅广告、推荐位素材），
+  // 所以这里断言的是「被隐藏的图片必须都在广告位里」+「图片照常加载」，
+  // 而不是「一张图都不能隐藏」。
+  check(
+    '❗误伤守卫：被隐藏的图片全部位于取证确认的广告位内',
+    filtered.dom.imagesHiddenOutsideAds === 0,
+    `被隐藏 ${filtered.dom.imagesHiddenByUs}/${filtered.dom.imagesTotal} 张，` +
+      `其中不在广告位内的 ${filtered.dom.imagesHiddenOutsideAds} 张` +
+      (filtered.dom.imagesHiddenOutsideAdSamples.length
+        ? ` —— ${filtered.dom.imagesHiddenOutsideAdSamples
+            .map((s) => `${s.src} @ ${s.chain}`)
+            .join(' | ')}`
+        : ''),
+  );
+  check(
+    '❗误伤守卫：图片加载率不低于基线（防「整站图片不显示」）',
+    baseline.dom.imagesTotal === 0 ||
+      baseline.dom.imagesLoaded === 0 ||
+      filtered.dom.imagesLoaded / Math.max(filtered.dom.imagesTotal, 1) >=
+        baseline.dom.imagesLoaded / baseline.dom.imagesTotal - 0.1,
+    `基线 ${baseline.dom.imagesLoaded}/${baseline.dom.imagesTotal} → ` +
+      `净化后 ${filtered.dom.imagesLoaded}/${filtered.dom.imagesTotal}` +
+      `（比加载率而非绝对数：站点每次渲染的条目数会波动）`,
+  );
+  check(
+    '❗误伤守卫：没有任何图片请求被拦（自学习规则刻意不含 image 类型）',
+    filtered.imageBlocked === 0,
+    `图片请求 ${filtered.imageSent} 个，被拦 ${filtered.imageBlocked} 个` +
+      (filtered.imageBlocked ? ` —— ${filtered.imageBlockedSamples.join(', ')}` : ''),
+  );
+
   check(
     '误伤守卫：正文图片仍可见',
     filtered.dom.contentImgsTotal === 0 ||

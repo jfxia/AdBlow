@@ -1,6 +1,6 @@
 import { isInjected, type PristineIndex } from '../engine/pristine.ts';
 import { scoreNode, registrableDomain } from '../engine/score.ts';
-import { crossSiteResourceDomains } from '../engine/domains.ts';
+import { crossSiteResourceDomains, pageWideMediaDomains } from '../engine/domains.ts';
 import { NAMING_STRONG, NAMING_WEAK, namingSignal } from '../engine/lexicon.ts';
 import { generalizeSelector, isSelectorSafe } from '../engine/selector.ts';
 import { validateSitePack, type SitePack } from '../engine/rules.ts';
@@ -358,11 +358,16 @@ export function siteOwnedDomains(root: ParentNode, pageHost: string): Set<string
  *
  * 这是网络层自学习的决策核心，因此放在纯逻辑层而不是接线层。
  *
- * ⚠️ 两道安全过滤都是硬要求，且各有一条回归测试：
- *   1. 凡是**也被可见内容使用**的域名一律不学。试点站的 `pic.wvxrrip.cn`
- *      既是广告素材 CDN 又是正文缩略图 CDN（风险 A），学它会把正文图废掉。
- *   2. 站点自有域名（canonical / og / 图标所指）一律不学。试点站的
- *      `cgw666.com` 是镜像域名且托管正文图，学它同样致命。
+ * ⚠️ 三道安全过滤都是硬要求，各有回归测试：
+ *
+ *   1. **只要某域名在本页任何位置充当过图片/视频来源，就绝不学它**
+ *      （不论可见与否）。这是 2026-10-10 一次真实事故的直接产物：
+ *      1024cg 的内容缩略图与广告素材共用 `pic.jtzatly.cn`，而内容图是懒加载的，
+ *      「是否被可见内容使用」这个判断会被时序错开骗过 —— 域名被学走后
+ *      **整站图片全部不显示**。现在改成结构性判断，不再依赖时序。
+ *   2. 也被**可见内容**使用的域名不学（风险 A：试点站的 `pic.wvxrrip.cn`）。
+ *   3. **站点自有域名**（canonical / og / 图标所指）不学。试点站 canonical 指向
+ *      镜像域名 `cgw666.com`，而它托管正文图，学它同样致命。
  */
 export function learnableAdDomains(root: ParentNode, pageHost: string): string[] {
   const hidden = root.querySelectorAll(`[${HIDDEN_ATTR}]`);
@@ -378,17 +383,21 @@ export function learnableAdDomains(root: ParentNode, pageHost: string): string[]
   }
   if (adDomains.size === 0) return [];
 
-  // 可见内容的判定**不算外链**：可见内容里有个指向该域名的链接，
-  // 不构成"该域名是站点的正常资源来源"。
+  // 过滤 ①（结构性，不依赖时序）：整页媒体域名一律不学
+  const media = pageWideMediaDomains(root, pageHost);
+
+  // 过滤 ②：可见内容使用的域名。判定**不算外链**：可见内容里有个指向该域名的
+  // 链接，不构成"该域名是站点的正常资源来源"。
   const usedByVisible = new Set<string>();
   for (const el of root.querySelectorAll(RESOURCE_TAGS)) {
     if (isInsideHidden(el)) continue;
     for (const d of crossSiteResourceDomains(el, pageHost)) usedByVisible.add(d);
   }
 
+  // 过滤 ③：站点自有域名
   const owned = siteOwnedDomains(root, pageHost);
 
-  return [...adDomains].filter((d) => !usedByVisible.has(d) && !owned.has(d));
+  return [...adDomains].filter((d) => !media.has(d) && !usedByVisible.has(d) && !owned.has(d));
 }
 
 /** 生成防闪现用的样式表内容。 */

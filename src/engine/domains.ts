@@ -28,6 +28,22 @@ const RESOURCE_SELECTOR = [
   'object[data]',
 ].join(',');
 
+/**
+ * 只算「媒体」的资源选择器。
+ *
+ * 单独列出来是因为它承载一条**结构性安全保证**：只要某个域名在本页任何位置
+ * 充当过图片/视频来源，就绝不把它学成广告域名。见 learnableAdDomains。
+ */
+export const MEDIA_SELECTOR = [
+  'img[src]',
+  'img[data-src]',
+  'video[src]',
+  'video[poster]',
+  'source[src]',
+  'embed[src]',
+  'object[data]',
+].join(',');
+
 /** 从单个元素自身取出资源 URL（不递归子元素）。 */
 export function resourceUrls(el: Element): string[] {
   const urls: string[] = [];
@@ -111,4 +127,50 @@ export function crossSiteResourceDomains(
   }
 
   return [...out];
+}
+
+/**
+ * 提取元素**及其子树**里所有跨站**媒体**域名（图片/视频/嵌入）。
+ *
+ * 用途见 learnableAdDomains：这些域名一律不学。
+ */
+export function crossSiteMediaDomains(el: Element, pageHost: string): string[] {
+  const pageReg = registrableDomain(pageHost);
+  const base = `https://${pageHost}`;
+  const out = new Set<string>();
+
+  const consider = (raw: string): void => {
+    if (!isAbsoluteUrl(raw)) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(raw, base);
+    } catch {
+      return;
+    }
+    if (isIpLiteral(parsed.hostname)) return;
+    const reg = registrableDomain(parsed.hostname);
+    if (reg && reg !== pageReg) out.add(reg);
+  };
+
+  const collect = (node: Element): void => {
+    if (!node.matches(MEDIA_SELECTOR)) return;
+    for (const attr of ['src', 'data-src', 'poster', 'data']) {
+      const value = node.getAttribute(attr);
+      if (value) consider(value);
+    }
+  };
+
+  collect(el);
+  for (const child of Array.from(el.querySelectorAll(MEDIA_SELECTOR))) collect(child);
+
+  return [...out];
+}
+
+/** 整页所有跨站媒体域名（含被隐藏的部分）。 */
+export function pageWideMediaDomains(root: ParentNode, pageHost: string): Set<string> {
+  const out = new Set<string>();
+  for (const el of Array.from(root.querySelectorAll(MEDIA_SELECTOR))) {
+    for (const d of crossSiteMediaDomains(el, pageHost)) out.add(d);
+  }
+  return out;
 }

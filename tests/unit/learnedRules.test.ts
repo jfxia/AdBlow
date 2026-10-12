@@ -22,9 +22,20 @@ describe('learnedDomainRules：自学习域名 → DNR 拦截规则', () => {
     assert.ok(!SUBRESOURCE_TYPES.includes('main_frame'));
   });
 
+  it('❗❗绝不拦 image / media（事故回归：曾导致整站图片不显示）', () => {
+    // 2026-10-10 真实事故：1024cg 首页所有图片不显示。
+    // 内容缩略图与广告素材共用同一个 CDN，域名被学走后连带把正文图一起拦掉了。
+    // 结构性保证：自学习来的网络规则**永远不可能弄坏页面的图片与视频**。
+    const types = learnedDomainRules(['ads.example.com'])[0]!.condition.resourceTypes;
+    assert.ok(!types.includes('image'), '自学习规则不得拦图片');
+    assert.ok(!types.includes('media'), '自学习规则不得拦音视频');
+    assert.ok(!SUBRESOURCE_TYPES.includes('image'));
+    assert.ok(!SUBRESOURCE_TYPES.includes('media'));
+  });
+
   it('覆盖常见子资源类型', () => {
     const types = learnedDomainRules(['ads.example.com'])[0]!.condition.resourceTypes;
-    for (const t of ['script', 'image', 'xmlhttprequest', 'sub_frame', 'media', 'ping']) {
+    for (const t of ['script', 'xmlhttprequest', 'sub_frame', 'ping', 'stylesheet']) {
       assert.ok(types.includes(t as never), `缺少资源类型 ${t}`);
     }
   });

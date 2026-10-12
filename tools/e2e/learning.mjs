@@ -198,6 +198,7 @@ async function readLearning(swWsUrl) {
 
 let failures = 0;
 const rows = [];
+const imageRows = [];
 
 try {
   mkdirSync(E2E_DIR, { recursive: true });
@@ -330,6 +331,32 @@ try {
         console.log(`  ❗页面异常：\n    ${cdp.exceptions.join('\n    ')}`);
       }
 
+      // 图片健康度：这是「学完之后图片还正常吗」的直接度量。
+      // 自学习来的网络规则刻意不含 image/media 类型，因此这里不该有下降。
+      const imgRes = await cdp.send('Runtime.evaluate', {
+        expression: `(() => {
+          const imgs = [...document.querySelectorAll('img')];
+          const hidden = (el) => el.hasAttribute('data-adblow-hidden') ||
+            el.closest('[data-adblow-hidden]') !== null;
+          const broken = imgs.filter(i => !(i.complete && i.naturalWidth > 0));
+          return {
+            total: imgs.length,
+            loaded: imgs.filter(i => i.complete && i.naturalWidth > 0).length,
+            hiddenByUs: imgs.filter(hidden).length,
+            brokenSample: broken.slice(0, 5).map(i => (i.getAttribute('src') || i.getAttribute('data-src') || '').slice(0, 70)),
+          };
+        })()`,
+        returnByValue: true,
+      });
+      const img = imgRes.result?.value;
+      if (img) {
+        imageRows.push(img);
+        console.log(
+          `  图片：加载成功 ${img.loaded}/${img.total}，被我们隐藏 ${img.hiddenByUs}` +
+            (img.brokenSample.length ? `\n    未加载样本：\n      ${img.brokenSample.join('\n      ')}` : ''),
+        );
+      }
+
       cdp.close();
       await fetch(`http://127.0.0.1:${PORT}/json/close/${page.id}`);
     }
@@ -357,15 +384,30 @@ try {
   const okPromoted = last.promoted.length > 0;
   const okRules = last.dnrLearned > 0 && last.dnrLearned >= first.dnrLearned;
 
+  // 图片健康度：学会域名之后图片不该停止加载。
+  // 注意**不**断言「没有图片被隐藏」—— 隐藏广告位里的横幅/弹窗素材是正确的，
+  // 该断言曾在两个站点上都造成误报。真正要守的是「图片别坏掉」。
+  const firstImg = imageRows[0];
+  const lastImg = imageRows[imageRows.length - 1];
+  const okImagesLoaded =
+    firstImg && lastImg
+      ? lastImg.loaded >= Math.floor(firstImg.loaded * 0.9) && lastImg.loaded > 0
+      : false;
+
   console.log(`${okEntries ? 'PASS' : 'FAIL'}  学到了候选广告域名   (${last.entries.length} 个)`);
   console.log(`${okPromoted ? 'PASS' : 'FAIL'}  域名晋级为持久拦截   (${last.promoted.length} 个)`);
   console.log(
     `${okRules ? 'PASS' : 'FAIL'}  自学习域名已注册为 DNR 规则   (${first.dnrLearned} → ${last.dnrLearned} 条)`,
   );
+  console.log(
+    `${okImagesLoaded ? 'PASS' : 'FAIL'}  ❗学会域名后图片仍正常加载   ` +
+      `(${imageRows.map((r) => `${r.loaded}/${r.total}`).join(' → ')})`,
+  );
+  console.log(`  （被我们隐藏的图片是广告位素材，属预期：${lastImg ? lastImg.hiddenByUs : '?'} 张）`);
   console.log('─'.repeat(70));
 
-  if (!okEntries || !okPromoted || !okRules) failures = 1;
-  console.log(failures === 0 ? '网络层自学习验证通过' : '网络层自学习验证失败');
+  if (!okEntries || !okPromoted || !okRules || !okImagesLoaded) failures = 1;
+  console.log(failures === 0 ? '网络层自学习验证通过（且未损伤图片）' : '网络层自学习验证失败');
 } catch (error) {
   failures = 1;
   console.log(`\n执行失败：${error.message}`);
