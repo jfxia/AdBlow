@@ -338,11 +338,21 @@ async function measure({ port }) {
   }
 
   const dom = await evaluate(`(() => {
+    /**
+     * 是否真的可见。
+     *
+     * ⚠️ 必须沿祖先链检查 display/visibility。早先只检查元素自身，于是
+     * 「位于已被隐藏容器内部、且自身是 fixed/absolute」的元素会被误判为可见
+     * （因为它们的 offsetParent 本来就是 null）—— 实测因此误报过
+     * 「广告内容仍可见」。
+     */
     const visible = (el) => {
-      if (el.hasAttribute('data-adblow-hidden')) return false;
-      const s = getComputedStyle(el);
-      if (s.display === 'none' || s.visibility === 'hidden') return false;
-      return el.offsetParent !== null || s.position === 'fixed' || s.position === 'absolute';
+      if (el.closest('[data-adblow-hidden]') !== null) return false;
+      for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+        const s = getComputedStyle(n);
+        if (s.display === 'none' || s.visibility === 'hidden') return false;
+      }
+      return true;
     };
     const adSel = ${JSON.stringify(profile.adSelectors)};
     const ads = adSel.flatMap((s) => {
@@ -376,11 +386,23 @@ async function measure({ port }) {
       try { return el.closest(s) !== null; } catch { return false; }
     });
     const hiddenOutsideAds = hiddenImgs.filter((i) => !inAd(i));
+
+    /** 广告位里**还显示着东西**吗：有可见文字，或有加载成功的图片。 */
+    const showsSomething = (el) => {
+      if (!visible(el)) return false;
+      if ((el.innerText ?? '').trim().length > 0) return true;
+      return [...el.querySelectorAll('img')].some(
+        (i) => visible(i) && i.complete && i.naturalWidth > 0,
+      );
+    };
     const visibleAds = uniqAds.filter(visible);
+    const visibleAdsWithContent = visibleAds.filter(showsSomething);
     return {
       adTotal: uniqAds.length,
       adVisible: visibleAds.length,
-      visibleAdSamples: visibleAds.slice(0, 5).map((el) => ({
+      adVisibleWithContent: visibleAdsWithContent.length,
+      emptyAdShells: visibleAds.length - visibleAdsWithContent.length,
+      visibleAdSamples: visibleAdsWithContent.slice(0, 5).map((el) => ({
         sel: adSel.find((s) => {
           try { return el.matches(s); } catch { return false; }
         }),
@@ -547,11 +569,15 @@ try {
     `基线 ${baseline.dom.adVisible}/${baseline.dom.adTotal} 可见 —— 若为 0 说明画像已过期`,
   );
   check(
-    '广告元素全部不可见',
-    filtered.dom.adTotal > 0 && filtered.dom.adVisible === 0,
-    `基线 ${baseline.dom.adVisible}/${baseline.dom.adTotal} → 净化后 ${filtered.dom.adVisible}/${filtered.dom.adTotal}` +
+    '广告内容全部不可见',
+    filtered.dom.adTotal > 0 && filtered.dom.adVisibleWithContent === 0,
+    `基线 ${baseline.dom.adVisibleWithContent}/${baseline.dom.adTotal} 有内容可见 → ` +
+      `净化后 ${filtered.dom.adVisibleWithContent}/${filtered.dom.adTotal}` +
+      (filtered.dom.emptyAdShells > 0
+        ? `（另有 ${filtered.dom.emptyAdShells} 个不影响观感的空壳容器未隐藏：无文字、无已加载图片）`
+        : '') +
       (filtered.dom.visibleAdSamples.length
-        ? ` —— 仍可见：${filtered.dom.visibleAdSamples
+        ? ` —— 仍可见内容：${filtered.dom.visibleAdSamples
             .map((s) => `${s.sel}|class=${s.cls}|@${s.chain}`)
             .join(' ; ')}`
         : ''),

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  LEARNED_SCHEMA_VERSION,
   PROMOTE_AFTER,
   allEntries,
   clearSite,
@@ -8,6 +9,7 @@ import {
   hostFromLearnedKey,
   learnedKey,
   listAllSites,
+  migrateLearnedSchema,
   promotedSelectors,
   recordHit,
 } from '../../src/content/learn.ts';
@@ -91,5 +93,45 @@ describe('自学习规则库：UI 所需的枚举能力', () => {
     assert.equal(sites[0]!.entries.length, 1);
     assert.equal(sites[0]!.entries[0]!.promoted, true);
     assert.equal(sites[1]!.entries[0]!.promoted, false);
+  });
+});
+
+describe('自学习数据迁移（安全闸门收紧后作废旧数据）', () => {
+  it('首次运行时清空选择器与域名，并打上版本号', async () => {
+    const store = memoryStore({
+      'learned:a.cc': { '.post-card': { selector: '.post-card', hits: 9, promoted: true } },
+      'adDomains:a.cc': { 'ads.example.com': { host: 'ads.example.com', hits: 9, promoted: true } },
+      'adDomains:b.cc': { 'x.cc': { host: 'x.cc', hits: 3, promoted: true } },
+    });
+
+    assert.equal(await migrateLearnedSchema(store), true);
+    assert.deepEqual(await store.keys(), ['learnedSchemaVersion']);
+    assert.deepEqual(await promotedSelectors(store, 'a.cc'), []);
+  });
+
+  it('不清除非自学习数据（站点开关、统计）', async () => {
+    const store = memoryStore({
+      'disabled:x.cc': true,
+      'stats:x.cc': { rule: 3 },
+      'learned:a.cc': { '.old': { selector: '.old', hits: 9, promoted: true } },
+    });
+    await migrateLearnedSchema(store);
+    const keys = await store.keys();
+    assert.ok(keys.includes('disabled:x.cc'));
+    assert.ok(keys.includes('stats:x.cc'));
+  });
+
+  it('版本已是最新时不重复清理', async () => {
+    const store = memoryStore();
+    assert.equal(await migrateLearnedSchema(store), true);
+    // 之后又学了点东西
+    for (let i = 0; i < PROMOTE_AFTER; i++) await recordHit(store, 'a.cc', '.keep-me');
+
+    assert.equal(await migrateLearnedSchema(store), false, '不应重复清理');
+    assert.deepEqual(await promotedSelectors(store, 'a.cc'), ['.keep-me'], '新学的必须保留');
+  });
+
+  it('版本常量是预期值（改它等于清空所有用户的学习结果，需慎重）', () => {
+    assert.equal(LEARNED_SCHEMA_VERSION, 2);
   });
 });

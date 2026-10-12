@@ -64,13 +64,29 @@ const FORBIDDEN_NETWORK: { re: RegExp; why: string }[] = [
   },
 ];
 
+/**
+ * 单条选择器的禁用判定。
+ *
+ * **自学习路径也必须走这里**（2026-10-10 事故）：自学习曾推导出 `.post-card`
+ * 并写进规则库 —— 那正是 FORBIDDEN_COSMETIC 明令禁止的选择器，但
+ * `validateSitePack` 只管规则包、管不到自学习结果，于是正文卡片被整片隐藏。
+ *
+ * 返回拒绝原因；null 表示允许。
+ */
+export function forbiddenSelectorReason(selector: string): string | null {
+  const trimmed = selector.trim();
+  for (const f of FORBIDDEN_COSMETIC) {
+    if (f.re.test(trimmed)) return f.why;
+  }
+  return null;
+}
+
 export function validateSitePack(pack: SitePack): string[] {
   const problems: string[] = [];
 
   for (const sel of pack.cosmetic) {
-    for (const f of FORBIDDEN_COSMETIC) {
-      if (f.re.test(sel.trim())) problems.push(`cosmetic "${sel}" 被拒绝：${f.why}`);
-    }
+    const reason = forbiddenSelectorReason(sel);
+    if (reason) problems.push(`cosmetic "${sel}" 被拒绝：${reason}`);
   }
 
   for (const r of pack.network) {

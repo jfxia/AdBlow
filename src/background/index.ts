@@ -3,6 +3,7 @@ import { learnedDomainRules } from '../engine/learnedRules.ts';
 import { matchPattern } from '../engine/match.ts';
 import { validateSitePack, type NetworkRule } from '../engine/rules.ts';
 import { allPromotedDomains } from '../content/domainLearn.ts';
+import { migrateLearnedSchema } from '../content/learn.ts';
 import { disabledKey } from '../content/settings.ts';
 import { chromeLocal } from '../content/storage.ts';
 import { SITE_PACKS } from '../rules/sites/index.ts';
@@ -46,6 +47,15 @@ async function syncDnrRules(): Promise<void> {
   const store = chromeLocal();
 
   try {
+    // 先做数据迁移：旧的（安全闸门之前的）自学习结果不可信，一律作废重学。
+    // 必须在生成规则之前跑，否则会把作废的域名又写成 DNR 规则。
+    try {
+      const cleaned = await migrateLearnedSchema(store);
+      if (cleaned) console.log('[adblow] 自学习数据版本已更新，旧的学习结果已清空');
+    } catch (error) {
+      console.warn('[adblow] 自学习数据迁移失败', error);
+    }
+
     const packRules = toDnrRules(usableRules(), ID_BASE);
     // 用户手动关掉的站点下要豁免全部网络规则，否则「关掉本站」只停了 DOM 层
     const excluded = await disabledHosts();

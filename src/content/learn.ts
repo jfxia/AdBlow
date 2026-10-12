@@ -14,6 +14,22 @@ import type { KvStore } from './storage.ts';
 
 export const PROMOTE_AFTER = 3;
 
+/**
+ * 自学习数据的格式/信任版本。
+ *
+ * 递增它会**清空全部已学内容**，用于「旧的学出来的东西已经不可信」的场景。
+ *
+ * 版本历史：
+ *   1 → 2（2026-10-10）：选择器安全闸门收紧。此前自学习能推导出
+ *     `.post-card`（正文卡片类名）之类危险选择器并写进 document_start 的样式表，
+ *     造成整站内容与图片被隐藏。旧数据一律作废重学。
+ */
+export const LEARNED_SCHEMA_VERSION = 2;
+
+const SCHEMA_KEY = 'learnedSchemaVersion';
+const LEARNED_PREFIX = 'learned:';
+const DOMAINS_PREFIX = 'adDomains:';
+
 export type LearnedEntry = {
   selector: string;
   hits: number;
@@ -23,8 +39,6 @@ export type LearnedEntry = {
 export type LearnedMap = Record<string, LearnedEntry>;
 
 export const learnedKey = (host: string): string => `learned:${host}`;
-
-const LEARNED_PREFIX = 'learned:';
 
 export function hostFromLearnedKey(key: string): string | null {
   return key.startsWith(LEARNED_PREFIX) ? key.slice(LEARNED_PREFIX.length) : null;
@@ -53,6 +67,27 @@ export async function promotedSelectors(store: KvStore, host: string): Promise<s
     .filter((e) => e.promoted)
     .map((e) => e.selector)
     .sort();
+}
+
+/**
+ * 一次性迁移：版本不匹配时清空全部自学习结果（选择器 + 域名）并打上新版本号。
+ *
+ * 为什么必须做：安全闸门只能防止**将来**学到坏规则，管不了用户浏览器里
+ * 已经存着的历史数据。不清理的话，用户即使重载扩展也可能继续被旧规则影响。
+ *
+ * 返回是否执行了清理。
+ */
+export async function migrateLearnedSchema(store: KvStore): Promise<boolean> {
+  const current = await store.get<number>(SCHEMA_KEY);
+  if (current === LEARNED_SCHEMA_VERSION) return false;
+
+  for (const key of await store.keys()) {
+    if (key.startsWith(LEARNED_PREFIX) || key.startsWith(DOMAINS_PREFIX)) {
+      await store.remove(key);
+    }
+  }
+  await store.set(SCHEMA_KEY, LEARNED_SCHEMA_VERSION);
+  return true;
 }
 
 export async function allEntries(store: KvStore, host: string): Promise<LearnedEntry[]> {

@@ -332,11 +332,12 @@ describe('集成：快照不可信时启发式必须整体关闭', () => {
   });
 });
 
-describe('集成：规则包护栏在链路中生效', () => {
-  it('合法规则包被完整采用', () => {
-    const selectors = selectorsFrom([pilotPack], []);
-    assert.equal(selectors.length, pilotPack.cosmetic.length);
-    assert.ok(selectors.includes('[data-ssp-slot-node]'));
+describe('集成：规则包护栏与「可信 / 自学习」分离', () => {
+  it('合法规则包被完整采用为 curated', () => {
+    const set = selectorsFrom([pilotPack], []);
+    assert.equal(set.curated.length, pilotPack.cosmetic.length);
+    assert.ok(set.curated.includes('[data-ssp-slot-node]'));
+    assert.deepEqual(set.learned, []);
   });
 
   it('被护栏拒绝的规则包整包丢弃，并回报原因', () => {
@@ -346,16 +347,24 @@ describe('集成：规则包护栏在链路中生效', () => {
       cosmetic: [...pilotPack.cosmetic, '[data-ssp-container]'],
     };
     const rejected: string[] = [];
-    const selectors = selectorsFrom([bad], [], (r) => rejected.push(r.packId));
+    const set = selectorsFrom([bad], [], (r) => rejected.push(r.packId));
 
     assert.equal(validateSitePack(bad).length > 0, true);
     assert.deepEqual(rejected, ['bad-pack']);
-    assert.deepEqual(selectors, [], '整包丢弃，连它合法的选择器也不采用');
+    assert.deepEqual(set.curated, [], '整包丢弃，连它合法的选择器也不采用');
   });
 
-  it('自学习选择器与规则包选择器合并去重', () => {
-    const selectors = selectorsFrom([pilotPack], ['[data-ssp-slot-node]', '.learned-ad']);
-    assert.equal(new Set(selectors).size, selectors.length, '不应有重复');
-    assert.ok(selectors.includes('.learned-ad'));
+  it('❗自学习选择器必须与规则包分开，绝不混进 curated', () => {
+    // 事故回归：两者混在一起时，自学习选择器会被写进 document_start 的样式表，
+    // 那条路径没有任何元素级守卫。
+    const set = selectorsFrom([pilotPack], ['[data-ssp-slot-node]', '.learned-ad']);
+
+    assert.ok(
+      !set.curated.includes('.learned-ad'),
+      '自学习选择器绝不能进入 curated（它会进样式表）',
+    );
+    assert.deepEqual(set.learned, ['[data-ssp-slot-node]', '.learned-ad']);
+    // 去重
+    assert.equal(new Set(set.learned).size, set.learned.length);
   });
 });

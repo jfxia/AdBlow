@@ -3,7 +3,7 @@ import { scoreNode, registrableDomain } from '../engine/score.ts';
 import { crossSiteResourceDomains, pageWideMediaDomains } from '../engine/domains.ts';
 import { NAMING_STRONG, NAMING_WEAK, namingSignal } from '../engine/lexicon.ts';
 import { generalizeSelector, isSelectorSafe } from '../engine/selector.ts';
-import { validateSitePack, type SitePack } from '../engine/rules.ts';
+import { forbiddenSelectorReason, validateSitePack, type SitePack } from '../engine/rules.ts';
 
 /**
  * 内容脚本的逻辑核心。
@@ -29,17 +29,49 @@ export type Hit = {
 /**
  * 从命中里筛出可安全入库的选择器。
  *
- * 两道闸门：泛化器已挡住裸标签名（返回 null），这里再做宽度实测——
- * 选择器必须在当前文档里命中不超过 maxMatches 个元素，否则丢弃。
- * 自学习规则会进入静态规则集并**无条件生效**，所以入库前必须保守。
+ * 四道闸门（2–4 是 2026-10-10 事故后补的）：
+ *   1. 泛化器已挡住裸标签名（返回 null）
+ *   2. **不能是禁用选择器** —— 复用规则包那套护栏。自学习曾推导出 `.post-card`
+ *      （正文卡片类名），而 `validateSitePack` 管不到自学习路径。
+ *   3. **命中的元素里不能含正文**。
+ *   4. **命中元素含图片的总数必须很少（≤ maxImages）**。这是区分「正常广告位」
+ *      与「宽泛包装类」的关键：正常广告位只含 1–2 张素材图，而 `.tjtagmanager`
+ *      这类站点通用外链包装命中 43 个元素、含 22 张图 —— 它既包广告也包内容，
+ *      一旦入库就会在页面开头无条件隐藏一大片图片。
+ *
+ * 再加宽度实测：命中数不得超过 maxMatches（防止过宽）。
+ *
+ * 自学习规则会在后续访问中生效，所以入库前必须极度保守。
  */
 export function recordableSelector(
   hit: Hit,
   root: ParentNode,
   maxMatches = 30,
+  maxImages = 4,
 ): string | null {
   if (!hit.selector) return null;
-  return isSelectorSafe(hit.selector, root, maxMatches) ? hit.selector : null;
+  const selector = hit.selector;
+
+  if (forbiddenSelectorReason(selector)) return null;
+  if (!isSelectorSafe(selector, root, maxMatches)) return null;
+
+  let matched: Element[] = [];
+  try {
+    matched = Array.from(root.querySelectorAll(selector));
+  } catch {
+    return null;
+  }
+  if (matched.length === 0) return null;
+
+  let images = 0;
+  for (const el of matched) {
+    if (holdsRealContent(el)) return null;
+    images += el.matches(MEDIA_TAGS) ? 1 : 0;
+    images += el.querySelectorAll('img,video,picture').length;
+    if (images > maxImages) return null;
+  }
+
+  return selector;
 }
 
 export type InjectionTest = (el: Element) => boolean;
@@ -71,17 +103,29 @@ export function makeInjectionTest(index: PristineIndex, reliable: boolean): Inje
 }
 
 /**
- * 汇总要隐藏的选择器：自学习优先，规则包其次。
+ * 选择器集合：把「可信」与「自动推导」严格分开。
  *
- * 被误伤护栏拒绝的规则包整包丢弃（而不是只用它的部分选择器）——
- * 一条被拒绝的规则说明这个包本身有问题，部分采用反而更危险。
+ * 为什么必须分开（2026-10-10 事故）：自学习推导出的选择器此前与规则包混在一起，
+ * 被一并写进 `document_start` 注入的样式表 —— 那条路径**没有任何元素级守卫**，
+ * 于是自学习出来的 `.tjtagmanager`（站点外链包装类，内含 22 张图）和
+ * `.post-card`（正文卡片类名）在页面一开头就无条件隐藏了一大片内容。
+ *
+ * 现在的分工：
+ *   - `curated`：站点规则包，经取证与 fixture 回归测试，允许进样式表
+ *   - `learned`：自动推导，**一律不进样式表**，只走带守卫的逐元素判定
  */
+export type SelectorSet = {
+  curated: string[];
+  learned: string[];
+};
+
+/** 汇总选择器：规则包 → curated，自学习 → learned。 */
 export function selectorsFrom(
   packs: SitePack[],
   learned: string[],
   onReject?: (r: Rejection) => void,
-): string[] {
-  const out = new Set<string>(learned);
+): SelectorSet {
+  const curated = new Set<string>();
 
   for (const pack of packs) {
     const problems = validateSitePack(pack);
@@ -89,10 +133,10 @@ export function selectorsFrom(
       onReject?.({ packId: pack.id, problems });
       continue;
     }
-    for (const s of pack.cosmetic) out.add(s);
+    for (const s of pack.cosmetic) curated.add(s);
   }
 
-  return [...out];
+  return { curated: [...curated], learned: [...new Set(learned)] };
 }
 
 /** 弱命名要成立，至少要有这么多行为旁证（跨站链接 = 4）。 */
@@ -119,6 +163,14 @@ export const CONTENT_MARKERS = [
 export function holdsRealContent(el: Element): boolean {
   const selector = CONTENT_MARKERS.join(',');
   return el.matches(selector) || el.querySelector(selector) !== null;
+}
+
+/** 媒体选择器：图片 / 视频 / 嵌入对象。 */
+export const MEDIA_TAGS = 'img,video,source,embed,object,picture';
+
+/** 元素自身是媒体，或内部包含媒体。 */
+export function containsMedia(el: Element): boolean {
+  return el.matches(MEDIA_TAGS) || el.querySelector(MEDIA_TAGS) !== null;
 }
 
 /**
@@ -437,21 +489,49 @@ export type JudgeOptions = {
   injected: InjectionTest;
   host: string;
   viewportArea: number;
-  selectors: string[];
+  selectors: SelectorSet;
   threshold?: number;
 };
 
 /**
- * 判定单个元素：先静态规则（精确锚点），再启发式。
+ * 判定单个元素：先规则选择器，再启发式。
  *
- * 静态规则**不做**注入判定 —— 选择器本身就是精确锚点，试点站规则包里每个
- * 选择器都经过误伤护栏与真实 fixture 回归（见 tests/unit/pilot-pack.test.ts）。
+ * ⚠️ **curated 与 learned 的待遇必须不同**（2026-10-10 事故）：
+ *
+ *   - `curated`（站点规则包）：经取证与 fixture 回归测试，命中即隐藏。
+ *   - `learned`（自学习推导）：**只免去「必须证明是脚本注入」这一步**，
+ *     仍然要求元素自带命名或行为证据。这一点很关键 —— 早先的实现在这里
+ *     给了自学习选择器「无条件隐藏」的权力，于是 `.tjtagmanager`
+ *     （站点外链包装类，命中 43 个元素、含 22 张图）把图片整片隐藏了。
+ *
+ * 另外「绝不隐藏装着正文的元素」是全局不变量，对 curated 同样适用。
  */
 export function judgeElement(el: Element, options: JudgeOptions): Verdict | null {
   if (isHidden(el)) return null;
-  if (matchesAny(el, options.selectors)) return { kind: 'rule' };
+  if (holdsRealContent(el)) return null;
 
-  const hit = createJudge(options.injected, options.host, options.viewportArea, options.threshold)(el);
+  const { threshold = SCORE_THRESHOLD } = options;
+
+  if (options.selectors.curated.length > 0 && matchesAny(el, options.selectors.curated)) {
+    return { kind: 'rule' };
+  }
+
+  if (options.selectors.learned.length > 0 && matchesAny(el, options.selectors.learned)) {
+    // 自学习规则只加速，不授予特权：仍需命名或行为证据
+    const naming = namingSignal(el).strength;
+    const { behavior, score, reasons } = scoreNode(el, {
+      pageHost: options.host,
+      viewportArea: options.viewportArea,
+    });
+    if (naming >= NAMING_WEAK || behavior >= threshold) {
+      return {
+        kind: 'heuristic',
+        hit: { selector: null, score, reasons: [...reasons, 'learned-selector'] },
+      };
+    }
+  }
+
+  const hit = createJudge(options.injected, options.host, options.viewportArea, threshold)(el);
   return hit ? { kind: 'heuristic', hit } : null;
 }
 

@@ -285,7 +285,9 @@ try {
       await cdp.send('Page.enable');
       await cdp.send('Runtime.enable');
       await cdp.send('Page.navigate', { url: URL_UNDER_TEST });
-      await sleep(9000);
+      // 内容脚本的收尾有一轮在 DOMContentLoaded + 12s。若在此之前关掉标签页，
+      // 那一轮就不会跑，域名命中数会少一次 —— 实测因此导致「已晋级 0 个」误报。
+      await sleep(15000);
 
       const countElements = async () => {
         const r = await cdp.send('Runtime.evaluate', {

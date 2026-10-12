@@ -91,12 +91,17 @@ async function boot(): Promise<void> {
 
   const packs = await loadPacks(location.href);
   const learned = await promotedSelectors(store, host);
-  const selectors = selectorsFrom(packs, learned, (r) =>
+  const selectorSet = selectorsFrom(packs, learned, (r) =>
     console.warn('[adblow] 规则包被误伤护栏拒绝，整包丢弃', r.packId, r.problems),
   );
 
-  // 第一道防线：防闪现样式表，早于广告 SDK 注入就位
-  installCosmeticStyle(selectors);
+  // ⚠️ 只有**规则包**选择器可以进防闪现样式表。
+  //
+  // 样式表在 document_start 生效，**没有任何元素级守卫**；而自学习选择器是
+  // 自动推导的、未经取证。实测事故：自学习推导出 `.tjtagmanager`（站点外链
+  // 包装类，内含 22 张图）与 `.post-card`（正文卡片类名）被写进样式表后，
+  // 页面一开头就隐藏了一大片内容与图片。自学习选择器只走带守卫的逐元素判定。
+  installCosmeticStyle(selectorSet.curated);
 
   // 只记录经宽度检查的泛化选择器；不合格的只隐藏、不建规则
   const learn = (hits: Hit[]): void => {
@@ -123,7 +128,7 @@ async function boot(): Promise<void> {
     injected: () => false,
     host,
     viewportArea: innerWidth * innerHeight,
-    selectors,
+    selectors: selectorSet,
   };
 
   let rule = 0;
@@ -184,7 +189,8 @@ async function boot(): Promise<void> {
     learnAdDomains();
     void writeStats(store, host, { rule, heuristic });
     console.debug(
-      `[adblow] ${label} host=${host} 规则包=${packs.length} 选择器=${selectors.length} ` +
+      `[adblow] ${label} host=${host} 规则包=${packs.length} ` +
+        `选择器=${selectorSet.curated.length}包+${selectorSet.learned.length}学 ` +
         `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays}`,
     );
   };

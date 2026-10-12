@@ -46,7 +46,7 @@ function optionsFor(doc: Document, host: string, selectors: string[]): JudgeOpti
     injected: makeInjectionTest(index, true),
     host,
     viewportArea: 1920 * 1080,
-    selectors,
+    selectors: { curated: selectors, learned: [] },
   };
 }
 
@@ -171,7 +171,7 @@ describe('learnableAdDomains：只学「被隐藏广告独占」的域名', () =
 describe('learnableAdDomains：跑在真实 fixture 上', () => {
   it('试点站：跑完清扫后，学到的域名里不含镜像域与素材 CDN', () => {
     const doc = docFor(pilotFixture, PILOT);
-    sweep(doc.documentElement, optionsFor(doc, PILOT, selectorsFrom([pilotPack], [])));
+    sweep(doc.documentElement, optionsFor(doc, PILOT, selectorsFrom([pilotPack], []).curated));
 
     // 确认清扫确实隐藏了东西（否则这条测试没有意义）
     assert.ok(doc.querySelectorAll('[data-adblow-hidden]').length > 0, '清扫未隐藏任何元素');
