@@ -198,10 +198,9 @@ Stated plainly, because a README that only lists wins is not useful:
 Filter lists are the work of their maintainers and are **not** part of this repository; they
 are fetched at build time:
 
-| List | License |
-|---|---|
-| [EasyList](https://easylist.to/), [EasyList China](https://easylist.to/), [EasyPrivacy](https://easylist.to/) | GPLv3 / CC BY-SA 3.0 |
-| [uBlock Origin assets](https://github.com/uBlockOrigin/uAssets) (filters, privacy, badware) | GPLv3 |
+- EasyList、EasyList China、EasyPrivacy： GPL v3 / CC BY-SA 3.0 
+
+- uBlock Origin assets（filters、privacy、badware）：  GPL v3 
 
 Please respect those licenses when redistributing anything built from this repository.
 
