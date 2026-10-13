@@ -16,17 +16,17 @@ AdBlow 是 Edge / Chrome 上的自研广告过滤器。网络层内置 EasyList 
 
 ## English
 
-AdBlow is a self-developed ad blocker for Edge and Chrome. Network filtering uses the
-EasyList/EasyPrivacy family of lists; on top of that a runtime behaviour engine judges
-whether an element *behaves* like an ad — script-injected overlays, cross-site media and
-links, sudden geometry growth, click hijacking and pop-unders all fall inside it, and ads
-hidden behind a site's own redirect endpoint or a base64-wrapped CDN URL are unwrapped and
-recognised. Self-learning remembers the stubborn ads on each site, activates a rule only
-after three hits, and lets you revoke any of them individually; learned rules apply only to
-the site that taught them and never block images, video, stylesheets or scripts — better to
-miss one ad than to break a page.
+AdBlow is an independently developed ad blocker for Edge and Chrome. Its network layer comes
+with mainstream lists such as EasyList, and on top of that sits a runtime behaviour engine
+that asks whether an element *looks like* an ad: script-injected overlays, cross-site media,
+sudden jumps in geometry and click hijacking are all within its reach. Ads hidden behind a
+site's own redirect endpoint or wrapped in a CDN's base64 encoding are unwrapped and caught
+too. Self-learning remembers the stubborn ads that keep coming back, takes effect only after
+three hits, and lets you revoke any of them one by one in the rule manager; what it learns
+applies only to the site that taught it, and it never blocks images, video, stylesheets or
+scripts — better to miss an ad than to break a page.
 
-Main differences from AdBlock Plus and similar tools: no paid "Acceptable Ads" whitelist, so
-nothing is unblocked for money; decisions are driven by page behaviour rather than list
-matching alone; and every site has a one-click off switch. Everything runs locally — no
-data is collected or uploaded.
+Unlike AdBlock Plus and similar tools: there is no paid "Acceptable Ads" whitelist, so
+nothing is let through for money; it judges by behaviour rather than only matching lists;
+and every site has a one-click off switch. Everything runs locally — no data is collected or
+uploaded.
