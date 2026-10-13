@@ -49,6 +49,9 @@ python tools/release/compose-store-shots.py   # 商店截图合成（需先跑 _
 
 - **名称**：AdBlow（`_locales/*/messages.json` 的 `extName`，各语言一致）
 - **简介**：取 `extDesc`（各语言都有，≤132 字符）
+- **详细说明**：见 [`store/listing.md`](../store/listing.md)——中文 300 字 + 英文版。
+  改动功能后请同步更新，并跑 `node _probe/verify-listing.mjs` 核对字数与
+  "每条功能主张是否有代码依据"
 - **类别**：隐私与安全 / Productivity
 - **语言**：中文（简体）、English、日本語、Français、Español
   —— 界面语言由浏览器 UI 语言决定，扩展内已内置这 5 套 `_locales`
