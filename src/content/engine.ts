@@ -356,11 +356,52 @@ export function createJudge(
     // ② 弱命名 + 行为旁证
     if (naming === NAMING_WEAK && behavior >= WEAK_NAMING_MIN_BEHAVIOR) return hit();
 
-    // ③ 纯行为证据：必须先证明是脚本注入
-    if (injected(el) && behavior >= threshold) return hit();
+    // ③ 纯行为证据：必须先证明是脚本注入，且**必须不像内容区块**
+    //
+    // ⚠️ 这一档是"没有任何命名线索、只能靠行为推断"，本来就最弱；
+    // 实测（用户报告 dgav40 播放器/推荐栏被过滤，且在真实浏览器里确认是我们）：
+    // 视频播放器与推荐栏都是**脚本运行时创建**（injected=true），
+    // 而它们的封面/视频流来自跨站 CDN → 于是被这一档拦掉。
+    // 没有命名证据时，广告的形态是"小、素材少"；又大又满是缩略图的块是内容。
+    if (injected(el) && behavior >= threshold && !looksLikeContentBlock(el, viewportArea)) {
+      return hit();
+    }
 
     return null;
   };
+}
+
+/** 纯行为档允许隐藏的最大面积（占视口比例）：再大就不是广告，是内容区块。 */
+export const BEHAVIOR_ONLY_MAX_AREA_RATIO = 0.25;
+/** 纯行为档允许的最大素材数量：广告素材通常 1–2 张，内容列表是成片的。 */
+export const BEHAVIOR_ONLY_MAX_MEDIA = 2;
+
+/**
+ * 「像内容区块吗」—— 纯行为档（没有命名证据）的额外门槛。
+ *
+ * 依据（2026-10-13，用户在真实浏览器里确认是我们造成的 dgav40 误杀）：
+ *   - 视频播放器：脚本创建、含 `<video>`/播放器容器、封面来自跨站 CDN
+ *   - 推荐栏：脚本创建、成片 CDN 缩略图、面积很大
+ * 这两类在旧实现里都会拿到 6 分以上被隐藏。
+ *
+ * 判据刻意保守（只在**没有命名证据**时生效）：带 `.ad-slot` 这类强命名的
+ * 大块仍然照拦（验收第 10/13/14 条的整屏视频广告就靠命名）。
+ */
+export function looksLikeContentBlock(el: Element, viewportArea: number): boolean {
+  // ① 面积大
+  if (viewportArea > 0) {
+    const r = el.getBoundingClientRect();
+    if ((r.width * r.height) / viewportArea > BEHAVIOR_ONLY_MAX_AREA_RATIO) return true;
+  }
+  // ② 素材成片（内容列表 / 缩略图墙）
+  if (el.querySelectorAll('img,picture,video,source,canvas').length > BEHAVIOR_ONLY_MAX_MEDIA) {
+    return true;
+  }
+  // ③ 视频 / 播放器容器
+  if (el.matches('video,iframe') || el.querySelector('video') !== null) return true;
+  if (el.matches('[class*="player"],[id*="player"],[class*="video-"],[id*="video-"]')) return true;
+  if (el.querySelector('[class*="player"],[id*="player"]') !== null) return true;
+  return false;
 }
 
 /**

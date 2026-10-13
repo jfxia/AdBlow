@@ -127,6 +127,48 @@
     if (sels.length) console.log('    前 5 条：' + JSON.stringify(sels.slice(0, 5)));
   }
 
-  console.log('\n%c把以上输出（含展开的表格）截图或复制发给我即可。', 'font-weight:bold');
+  // ── ⑤ 汇总成一段精简结论并**复制到剪贴板** ──
+  //
+  // 为什么要有这一步：前几版只打印表格，用户很容易只复制到最后一节表格，
+  // 而最关键的信息（被隐藏元素按原因/凭哪条证据）反而漏了。
+  // 复制的是纯文本，直接把整段粘回来即可。
+  const summary = [
+    '=== AdBlow 诊断 ===',
+    'URL: ' + location.href,
+    '页面文字量: ' + textOf(document.body).length,
+    'AdBlow 隐藏元素总数: ' + hidden.length,
+    '被隐藏元素（按原因 + 凭哪条证据）:',
+    JSON.stringify(
+      [...byReason].map(([reason, items]) => ({
+        reason,
+        count: items.length,
+        // 每条都带上 reason/why/大小/文字量，足以定位机制
+        items: items.slice(0, 15),
+      })),
+      null,
+      1,
+    ),
+    '正文/导航类被隐藏: ' + contentHidden.length,
+    JSON.stringify(contentHidden.slice(0, 20), null, 1),
+    'AdBlow 注入的样式表:',
+    JSON.stringify(
+      styles.map((s) => ({
+        kind: s.getAttribute('data-adblow-list-cosmetic') !== null ? '列表cosmetic' : '站点规则包',
+        selectors: ((s.textContent || '').split('}').map((x) => x.split('{')[0]).filter(Boolean)).slice(0, 30),
+      })),
+      null,
+      1,
+    ),
+    '可见链接 ' + links.length + '，被遮挡 ' + blocked,
+    '（以上已复制到剪贴板）',
+  ].join('\n');
+
+  try {
+    copy(summary);
+    console.log('%c✔ 结论已复制到剪贴板 —— 直接粘贴发给我即可（不要只复制表格）', 'font-weight:bold;color:green');
+  } catch {
+    console.log('%c（自动复制失败：请手动全选上面的文本发我）', 'font-weight:bold;color:orange');
+  }
+  console.log(summary);
   return '诊断完成';
 })();
