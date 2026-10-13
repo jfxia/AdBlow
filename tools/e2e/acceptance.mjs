@@ -377,6 +377,69 @@ export const FIXTURES = [
     ),
     hoverTarget: '#rb',
   },
+
+  // ── 六、包装型广告 ────────────────────────────────────────────
+  //
+  // 2026-10-13 用户实测站点（dgav40）发现的形态：站点把广告"洗"过，
+  // 让所有基于"跨站"的判据失效 —— 实测它广告被漏拦、用户反馈"尺度过松"。
+  // 这两类必须进验收标准，否则以后改引擎会悄悄退化。
+  {
+    id: 22,
+    cat: '六、包装型广告',
+    name: '自家域名跳转包装的广告块（载荷声明 kind=ad）',
+    mode: 'dom',
+    probe: '#wrapped-ad-block',
+    html: page(
+      '',
+      // 广告链接全部指向**本站自己**的跳转端点，载荷是 base64 JSON：
+      //   {"kind":"ad","url":"<广告落地页>"}
+      // 跨站判据看不到它；必须解包载荷才能识别（见 score.ts 的 unwrapAdRedirect）。
+      `<div class="text-center">
+         <ul class="streamer-box2" id="wrapped-ad-block" style="display:flex;gap:8px;list-style:none;padding:0;margin:20px auto;width:640px">
+           ${[1, 2, 3, 4]
+             .map(
+               (i) =>
+                 `<li><a href="${BASE}/traffic/go?t=${Buffer.from(
+                   JSON.stringify({ kind: 'ad', id: i, url: `${AD}/landed?from=wrapped${i}` }),
+                   'utf8',
+                 ).toString('base64')}"><img src="${IMG}" width="140" height="90"></a></li>`,
+             )
+             .join('')}
+         </ul>
+       </div>`,
+    ),
+  },
+  {
+    id: 23,
+    cat: '六、包装型广告',
+    name: 'CDN base64 包装的广告素材（真实来源跨站）',
+    mode: 'dom',
+    probe: '#cdn-wrapped-ads',
+    html: page(
+      '',
+      // 素材走**跨站 CDN 的 base64 代理**：/base/<base64 of 真实广告图地址>
+      // 于是它与"站点自己的内容图"看起来同域；必须解包才能分出真实来源。
+      // 容器由脚本创建（无命名证据）→ 走"纯行为档"，因此也回归了
+      // "素材数量门槛不能把广告轮播当内容列表"这条修正。
+      `<div id="cdn-mount"></div>
+       <script>(function(){
+         var hosts=['ads-1.net','ads-2.net','ads-3.net'];
+         var box=document.createElement('div');
+         box.id='cdn-wrapped-ads';
+         box.style.cssText='width:600px;margin:20px auto;display:flex;gap:8px';
+         hosts.forEach(function(h){
+           var real='https://'+h+'/creatives/a.png';
+           var a=document.createElement('a');
+           a.href='${AD}/landed?from=cdnwrap';
+           var img=document.createElement('img');
+           img.width=180; img.height=120;
+           img.src='${AD}/base/'+btoa(real)+'.cache';
+           a.appendChild(img); box.appendChild(a);
+         });
+         document.getElementById('cdn-mount').appendChild(box);
+       })();</script>`,
+    ),
+  },
 ];
 
 // ── 服务端 ───────────────────────────────────────────────────────
