@@ -1,0 +1,64 @@
+{
+  "extName": {
+    "message": "AdBlow",
+    "description": "Product name — kept identical in every language."
+  },
+  "extDesc": {
+    "message": "Blocks pop-ups, overlays, video ads and click hijacking via behavior detection, self-learning rules and EasyList lists.",
+    "description": "Store / extension-management blurb (max 132 characters)."
+  },
+
+  "popupReading": { "message": "Loading…" },
+  "popupNotApplicable": { "message": "Not applicable to this page" },
+  "popupInternalNotice": {
+    "message": "Browser-internal and extension pages cannot be filtered. Use AdBlow on a regular web page."
+  },
+  "popupToggleLabel": { "message": "Enable filtering on this site" },
+  "popupToggleAria": { "message": "Enable or disable filtering on this site" },
+  "popupStatRule": { "message": "Rule blocks" },
+  "popupStatHeuristic": { "message": "Detected" },
+  "popupStatLearned": { "message": "Learned rules" },
+  "popupHintDisabled": { "message": "Disabled here — filtering and learning are stopped." },
+  "popupHintLearning": {
+    "message": "A learned rule activates after 3 hits (currently $1 active)."
+  },
+  "popupHintNoStats": { "message": "No statistics for this page yet. Reload to see them." },
+  "popupOpenOptions": { "message": "Manage rules" },
+  "popupClearSite": { "message": "Clear learned" },
+  "popupConfirmClear": {
+    "message": "Clear all rules AdBlow learned on $1?"
+  },
+
+  "optionsTitle": { "message": "AdBlow rule manager" },
+  "optionsLede": {
+    "message": "Hiding rules AdBlow learned on its own, site by site. You can revoke any of them individually."
+  },
+  "optionsWarn": {
+    "message": "Once a learned rule is promoted it applies unconditionally on later visits, so it takes 3 hits to promote. If a site breaks, disable filtering for that site in the popup first, then come back and delete the suspicious rule."
+  },
+  "optionsExport": { "message": "Export all rules (JSON)" },
+  "optionsRefresh": { "message": "Refresh" },
+  "optionsEmpty": {
+    "message": "No rules learned yet. AdBlow accumulates them automatically while you browse."
+  },
+  "optionsSummary": {
+    "message": "$1 selector(s) active / $2 total · $3 domain(s) blocked / $4 total"
+  },
+  "optionsPillActive": { "message": "Active" },
+  "optionsPillObserving": { "message": "Observing" },
+  "optionsPillBlocked": { "message": "Blocked" },
+  "optionsHits": { "message": "$1 hits" },
+  "optionsSeen": { "message": "seen $1×" },
+  "optionsDelete": { "message": "Delete" },
+  "optionsUnblock": { "message": "Stop blocking" },
+  "optionsClearSite": { "message": "Clear site" },
+  "optionsClearGroup": { "message": "Clear group" },
+  "optionsConfirmClearSite": { "message": "Clear all rules learned on $1?" },
+  "optionsConfirmClearGroup": { "message": "Clear all domains learned on $1?" },
+  "optionsCountSelectors": { "message": "$1 active / $2 total" },
+  "optionsCountDomains": { "message": "$1 blocked / $2 total" },
+  "optionsDomainHeader": { "message": "Network · learned on $1" },
+  "optionsDomainHint": {
+    "message": "A domain is blocked automatically after appearing in ads 3 times. Domains also used by normal content are never learned."
+  }
+}

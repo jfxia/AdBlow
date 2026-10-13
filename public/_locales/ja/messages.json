@@ -1,0 +1,72 @@
+{
+  "extName": {
+    "message": "AdBlow",
+    "description": "製品名。全言語で同一。"
+  },
+  "extDesc": {
+    "message": "動作検出と自己学習ルール、EasyList 系フィルタで、ポップアップ・オーバーレイ・動画広告・クリックハイジャックを遮断します。",
+    "description": "ストアと拡張機能管理画面に表示される説明（132 文字以内）。"
+  },
+
+  "popupReading": { "message": "読み込み中…" },
+  "popupNotApplicable": { "message": "このページでは利用できません" },
+  "popupInternalNotice": {
+    "message": "ブラウザの内部ページや拡張機能のページはフィルタできません。通常の Web ページでご利用ください。"
+  },
+  "popupToggleLabel": { "message": "このサイトでフィルタを有効にする" },
+  "popupToggleAria": { "message": "このサイトのフィルタを有効／無効にする" },
+  "popupStatRule": { "message": "ルール遮断" },
+  "popupStatHeuristic": { "message": "動作検出" },
+  "popupStatLearned": { "message": "学習済みルール" },
+  "popupHintDisabled": {
+    "message": "このサイトでは無効です。フィルタと学習を停止しました。"
+  },
+  "popupHintLearning": {
+    "message": "学習したルールは 3 回ヒットしてから有効になります（現在 $1 件が有効）。"
+  },
+  "popupHintNoStats": {
+    "message": "このページの統計はまだありません。再読み込みすると表示されます。"
+  },
+  "popupOpenOptions": { "message": "ルール管理" },
+  "popupClearSite": { "message": "学習内容を消去" },
+  "popupConfirmClear": {
+    "message": "$1 で AdBlow が学習したすべてのルールを消去しますか？"
+  },
+
+  "optionsTitle": { "message": "AdBlow ルール管理" },
+  "optionsLede": {
+    "message": "AdBlow が各サイトで自動的に学習した非表示ルールの一覧です。1 件ずつ取り消せます。"
+  },
+  "optionsWarn": {
+    "message": "学習したルールは有効になると、以降の閲覧で無条件に適用されます。そのため 3 回のヒットで有効化されます。誤適用が起きたサイトでは、まずポップアップでそのサイトのフィルタを切り、ここに戻って疑わしいルールを削除してください。"
+  },
+  "optionsExport": { "message": "すべてのルールを書き出す（JSON）" },
+  "optionsRefresh": { "message": "更新" },
+  "optionsEmpty": {
+    "message": "まだルールを学習していません。Web を閲覧すると、AdBlow が必要に応じて自動的に蓄積します。"
+  },
+  "optionsSummary": {
+    "message": "セレクタ $1 件が有効 / 全 $2 件 · ドメイン $3 件を遮断 / 全 $4 件"
+  },
+  "optionsPillActive": { "message": "有効" },
+  "optionsPillObserving": { "message": "観察中" },
+  "optionsPillBlocked": { "message": "遮断中" },
+  "optionsHits": { "message": "ヒット $1" },
+  "optionsSeen": { "message": "$1 回出現" },
+  "optionsDelete": { "message": "削除" },
+  "optionsUnblock": { "message": "遮断を解除" },
+  "optionsClearSite": { "message": "このサイトを消去" },
+  "optionsClearGroup": { "message": "このグループを消去" },
+  "optionsConfirmClearSite": {
+    "message": "$1 の学習ルールをすべて消去しますか？"
+  },
+  "optionsConfirmClearGroup": {
+    "message": "$1 で学習したドメインをすべて消去しますか？"
+  },
+  "optionsCountSelectors": { "message": "$1 件が有効 / 全 $2 件" },
+  "optionsCountDomains": { "message": "$1 件を遮断 / 全 $2 件" },
+  "optionsDomainHeader": { "message": "ネットワーク層 · $1 で学習" },
+  "optionsDomainHint": {
+    "message": "ドメインは広告内に 3 回出現すると自動的に遮断されます。通常のコンテンツでも使われているドメインは学習しません。"
+  }
+}

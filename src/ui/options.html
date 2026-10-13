@@ -1,68 +1,67 @@
 <!doctype html>
-<html lang="zh-CN">
+<html>
   <head>
     <meta charset="utf-8" />
-    <title>AdBlow 规则管理</title>
+    <title data-i18n="optionsTitle">AdBlow</title>
+    <link rel="stylesheet" href="ui.css" />
     <style>
-      :root {
-        color-scheme: light dark;
-        --line: #e5e7eb;
-        --muted: #6b7280;
-        --accent: #0f766e;
-        --danger: #b91c1c;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --line: #2a2f36;
-          --muted: #9aa4b2;
-          --accent: #2dd4bf;
-          --danger: #f87171;
-        }
-      }
-      * {
-        box-sizing: border-box;
-      }
+      /* options 专属布局：内容宽度、段落节奏。设计令牌一律来自 ui.css */
       body {
-        margin: 0;
-        padding: 26px 22px 60px;
-        font: 14px/1.6 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
-        max-width: 880px;
+        padding: 26px 22px 64px;
+        background: var(--bg-soft);
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+      }
+      header.brand {
+        padding-bottom: 4px;
+      }
+      header.brand img {
+        width: 30px;
+        height: 30px;
+      }
+      header.brand b {
+        font-size: 18px;
       }
       h1 {
-        font-size: 19px;
-        margin: 0 0 4px;
+        font-size: 15px;
+        font-weight: 600;
+        margin: 14px 0 4px;
+        color: var(--fg);
       }
       .lede {
         color: var(--muted);
-        margin: 0 0 22px;
+        margin: 0 0 18px;
+        max-width: 62ch;
+      }
+      .warn {
+        border-left: 3px solid var(--accent);
+        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+        padding: 10px 13px;
+        color: var(--muted);
+        margin-bottom: 18px;
+        background: var(--accent-soft);
+        max-width: 78ch;
       }
       .bar {
         display: flex;
         gap: 8px;
         align-items: center;
-        margin-bottom: 18px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
       }
-      button {
-        font: inherit;
-        padding: 6px 12px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: transparent;
-        color: inherit;
-        cursor: pointer;
-      }
-      button:hover {
-        border-color: var(--accent);
-        color: var(--accent);
-      }
-      button.danger:hover {
-        border-color: var(--danger);
-        color: var(--danger);
+      .bar .count {
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
       }
       section {
         border: 1px solid var(--line);
-        border-radius: 9px;
-        margin-bottom: 14px;
+        border-radius: var(--radius);
+        background: var(--card);
+        box-shadow: var(--shadow);
+        margin-bottom: 12px;
         overflow: hidden;
       }
       section > header {
@@ -71,84 +70,53 @@
         gap: 10px;
         padding: 10px 13px;
         border-bottom: 1px solid var(--line);
+        background: var(--bg-soft);
       }
       section > header strong {
-        font-size: 14px;
+        font-size: 13.5px;
+        word-break: break-all;
+      }
+      section > header button {
+        margin-left: auto;
+        padding: 4px 10px;
+        font-size: 12.5px;
       }
       .count {
         color: var(--muted);
         font-size: 12px;
+        font-variant-numeric: tabular-nums;
       }
-      section > header button {
-        margin-left: auto;
-        padding: 4px 9px;
-        font-size: 12.5px;
-      }
-      ul {
-        list-style: none;
+      .section-hint {
+        padding: 7px 13px 0;
         margin: 0;
-        padding: 0;
-      }
-      li {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 7px 13px;
-        border-top: 1px solid var(--line);
-      }
-      li:first-child {
-        border-top: none;
-      }
-      code {
-        font: 12.5px/1.5 ui-monospace, Consolas, monospace;
-        word-break: break-all;
-      }
-      .meta {
-        margin-left: auto;
-        color: var(--muted);
-        font-size: 12px;
-        white-space: nowrap;
-      }
-      .pill {
-        font-size: 11px;
-        padding: 1px 7px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        color: var(--muted);
-      }
-      .pill.on {
-        color: var(--accent);
-        border-color: currentColor;
       }
       .empty {
-        padding: 30px 4px;
+        padding: 34px 6px;
         color: var(--muted);
-      }
-      .warn {
-        border-left: 3px solid var(--accent);
-        padding: 9px 13px;
-        color: var(--muted);
-        margin-bottom: 20px;
-        background: color-mix(in srgb, var(--accent) 7%, transparent);
+        text-align: center;
       }
     </style>
   </head>
   <body>
-    <h1>AdBlow 规则管理</h1>
-    <p class="lede">这里列出 AdBlow 在各站点上自己学到的隐藏规则，可逐条撤销。</p>
+    <div class="wrap">
+      <header class="brand">
+        <img src="icons/icon-128.png" alt="" aria-hidden="true" />
+        <b>AdBlow</b>
+      </header>
 
-    <div class="warn">
-      自学习规则一旦晋级就会在后续访问中<strong>无条件生效</strong>。因此命中需累计 3 次才晋级；
-      若某个站点出现误伤，先在该站点用弹窗关掉过滤，再回来删除可疑规则。
+      <h1 data-i18n="optionsTitle"></h1>
+      <p class="lede" data-i18n="optionsLede"></p>
+
+      <div class="warn" data-i18n="optionsWarn"></div>
+
+      <div class="bar">
+        <button id="export" data-i18n="optionsExport"></button>
+        <button id="refresh" data-i18n="optionsRefresh"></button>
+        <span class="count" id="summary"></span>
+      </div>
+
+      <div id="sites"></div>
     </div>
-
-    <div class="bar">
-      <button id="export">导出全部规则（JSON）</button>
-      <button id="refresh">刷新</button>
-      <span class="count" id="summary"></span>
-    </div>
-
-    <div id="sites"></div>
 
     <script src="options.js"></script>
   </body>

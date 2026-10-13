@@ -1,16 +1,18 @@
 {
   "name": "adblow",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
-  "description": "自研通用 Edge (MV3) 广告过滤器：行为检测 + 自学习规则，不依赖第三方过滤列表。",
+  "description": "AdBlow —— 自研 MV3 广告过滤器：行为检测 + 自学习规则 + EasyList 系过滤列表。",
   "scripts": {
     "test": "node tests/run-all.ts",
     "typecheck": "tsc --noEmit",
     "filters": "node tools/filters/fetch-lists.mjs",
     "rulesets": "node tools/build/gen-rulesets.ts",
+    "icons": "python tools/build/gen-icons.py",
     "build": "node tools/build/build.mjs",
     "verify": "node tools/build/build.mjs && node tests/run-all.ts",
+    "package": "node tools/release/package.mjs",
     "recon": "node tools/recon/snapshot.mjs"
   },
   "devDependencies": {

@@ -1,0 +1,64 @@
+{
+  "extName": {
+    "message": "AdBlow",
+    "description": "产品名，所有语言保持一致，不翻译。"
+  },
+  "extDesc": {
+    "message": "自研广告过滤器：行为检测 + 自学习规则，配合 EasyList 系列表拦截弹窗、浮层、视频广告与点击劫持。",
+    "description": "应用商店与扩展管理页显示的简介（≤132 字符）。"
+  },
+
+  "popupReading": { "message": "读取中…" },
+  "popupNotApplicable": { "message": "当前页面不适用" },
+  "popupInternalNotice": {
+    "message": "浏览器内部页面、扩展页面无法过滤。请在普通网页上使用。"
+  },
+  "popupToggleLabel": { "message": "在本站启用过滤" },
+  "popupToggleAria": { "message": "在本站启用或关闭过滤" },
+  "popupStatRule": { "message": "规则拦截" },
+  "popupStatHeuristic": { "message": "行为检测" },
+  "popupStatLearned": { "message": "已学习规则" },
+  "popupHintDisabled": { "message": "本站已关闭，过滤与学习都已停止。" },
+  "popupHintLearning": {
+    "message": "已学习规则在累计 3 次命中后才生效（当前晋级 $1 条）。"
+  },
+  "popupHintNoStats": { "message": "本页尚未产生统计，刷新后可见。" },
+  "popupOpenOptions": { "message": "规则管理" },
+  "popupClearSite": { "message": "清空本站学习" },
+  "popupConfirmClear": {
+    "message": "清空 $1 上 AdBlow 学到的全部规则？"
+  },
+
+  "optionsTitle": { "message": "AdBlow 规则管理" },
+  "optionsLede": {
+    "message": "这里列出 AdBlow 在各站点上自己学到的隐藏规则，可逐条撤销。"
+  },
+  "optionsWarn": {
+    "message": "自学习规则一旦晋级，就会在后续访问中无条件生效，因此需累计 3 次命中才晋级。若某个站点出现误伤，先在该站点用弹窗关掉过滤，再回来删除可疑规则。"
+  },
+  "optionsExport": { "message": "导出全部规则（JSON）" },
+  "optionsRefresh": { "message": "刷新" },
+  "optionsEmpty": {
+    "message": "还没有学到任何规则。浏览网页后，AdBlow 会在需要时自动积累。"
+  },
+  "optionsSummary": {
+    "message": "选择器 $1 条生效 / 共 $2 条 · 域名 $3 个已拦截 / 共 $4 个"
+  },
+  "optionsPillActive": { "message": "已生效" },
+  "optionsPillObserving": { "message": "观察中" },
+  "optionsPillBlocked": { "message": "已拦截" },
+  "optionsHits": { "message": "命中 $1" },
+  "optionsSeen": { "message": "出现 $1 次" },
+  "optionsDelete": { "message": "删除" },
+  "optionsUnblock": { "message": "不再拦截" },
+  "optionsClearSite": { "message": "清空本站" },
+  "optionsClearGroup": { "message": "清空本组" },
+  "optionsConfirmClearSite": { "message": "清空 $1 上的全部学习规则？" },
+  "optionsConfirmClearGroup": { "message": "清空在 $1 上学到的全部域名？" },
+  "optionsCountSelectors": { "message": "$1 条生效 / 共 $2 条" },
+  "optionsCountDomains": { "message": "$1 个已拦截 / 共 $2 个" },
+  "optionsDomainHeader": { "message": "网络层 · 在 $1 上学到" },
+  "optionsDomainHint": {
+    "message": "域名累计在广告里出现 3 次后自动拦截。凡是也被正常内容使用的域名一律不学。"
+  }
+}

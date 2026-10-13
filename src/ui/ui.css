@@ -1,0 +1,322 @@
+/**
+ * AdBlow 界面设计系统（popup 与 options 共用）。
+ *
+ * ## 为什么用一份共享样式表
+ *
+ * popup 与 options 是两个独立的扩展页面，但**可以**外链同一个 CSS 文件 ——
+ * 这样设计令牌只有一份，改一处两边一起变。之前两边各写一份内联样式，
+ * 已经出现了「改了一边忘了另一边」的漂移（强调色都不一样）。
+ *
+ * ## 品牌色与图标一致
+ *
+ * `--brand-1/--brand-2` 就是图标里那组紫罗兰渐变（#7C5CFF → #3B2FD1），
+ * 界面与图标是同一套视觉语言。刻意避开同类扩展的红/绿主色。
+ *
+ * ## 深色模式
+ *
+ * 用 `prefers-color-scheme`，跟浏览器主题走；`color-scheme` 让原生控件
+ * （滚动条、复选框）也跟着变，否则深色下会出现一块白。
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* 品牌色（与图标同一组渐变） */
+  --brand-1: #7c5cff;
+  --brand-2: #3b2fd1;
+
+  --bg: #ffffff;
+  --bg-soft: #f6f7fb;
+  --fg: #16181d;
+  --muted: #5f6672;
+  --line: #e6e8ef;
+  --card: #ffffff;
+  --accent: #5b45e0;
+  --accent-soft: #efeaff;
+  --danger: #c0392b;
+  --danger-soft: #fdeceb;
+  --ok: #1a7f5a;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgba(16, 18, 25, 0.06), 0 8px 24px rgba(16, 18, 25, 0.06);
+  --focus: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15161a;
+    --bg-soft: #1b1d23;
+    --fg: #eceef3;
+    --muted: #9aa1ad;
+    --line: #2a2d36;
+    --card: #1b1d23;
+    --accent: #a795ff;
+    --accent-soft: #241f3d;
+    --danger: #ff8a80;
+    --danger-soft: #3a1f1e;
+    --ok: #5fd0a0;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.35);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.55 system-ui, "Segoe UI", "Microsoft YaHei", "Hiragino Sans", "Noto Sans JP",
+    "Noto Sans SC", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 品牌头部 ─────────────────────────────────────────────── */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.brand img {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+.brand b {
+  font-size: 14.5px;
+  letter-spacing: 0.2px;
+}
+
+.version {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+/* ── 按钮 ────────────────────────────────────────────────── */
+
+button {
+  font: inherit;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+button:focus-visible,
+input:focus-visible + .switch {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.primary {
+  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+  border-color: transparent;
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  color: #fff;
+  filter: brightness(1.06);
+}
+
+button.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* ── 卡片 / 区块 ─────────────────────────────────────────── */
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* ── 开关（真实 checkbox + 样式化滑块）──────────────────── */
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+}
+
+.switch-row label {
+  cursor: pointer;
+  user-select: none;
+}
+
+.switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+  transition: background 0.18s;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.18s;
+}
+
+input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+input[type="checkbox"]:checked + .switch {
+  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+}
+
+input[type="checkbox"]:checked + .switch::after {
+  transform: translateX(16px);
+}
+
+input[type="checkbox"]:disabled + .switch {
+  opacity: 0.5;
+}
+
+/* ── 统计 ────────────────────────────────────────────────── */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.stat {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  padding: 8px 10px;
+}
+
+.stat dt {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat dd {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+}
+
+/* ── 徽标 / 药丸 ─────────────────────────────────────────── */
+
+.pill {
+  font-size: 11px;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pill.on {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+/* ── 列表 ────────────────────────────────────────────────── */
+
+ul.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.rows > li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 13px;
+  border-top: 1px solid var(--line);
+}
+
+ul.rows > li:first-child {
+  border-top: none;
+}
+
+code {
+  font: 12.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  word-break: break-all;
+}
+
+.meta {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

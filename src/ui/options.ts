@@ -6,6 +6,7 @@ import {
   type DomainEntry,
 } from '../content/domainLearn.ts';
 import { chromeLocal } from '../content/storage.ts';
+import { applyI18n, t } from './i18n.ts';
 
 /**
  * Options：自学习结果的审阅与撤销。
@@ -15,6 +16,7 @@ import { chromeLocal } from '../content/storage.ts';
  * 一个看得见、删得掉的入口。
  *
  * 注意：这是**可选的审阅入口，不是必填配置**。普通用户不需要打开它。
+ * 文案一律走 i18n（见 ui/i18n.ts），站点域名来自页面 → 只用 textContent。
  */
 
 const store = chromeLocal();
@@ -23,6 +25,13 @@ function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (!node) throw new Error(`缺少元素 #${id}`);
   return node as T;
+}
+
+function button(labelKey: string, className = ''): HTMLButtonElement {
+  const b = document.createElement('button');
+  if (className) b.className = className;
+  b.textContent = t(labelKey);
+  return b;
 }
 
 function renderEntry(host: string, entry: LearnedEntry): HTMLLIElement {
@@ -34,17 +43,15 @@ function renderEntry(host: string, entry: LearnedEntry): HTMLLIElement {
 
   const pill = document.createElement('span');
   pill.className = entry.promoted ? 'pill on' : 'pill';
-  pill.textContent = entry.promoted ? '已生效' : '观察中';
+  pill.textContent = t(entry.promoted ? 'optionsPillActive' : 'optionsPillObserving');
   li.appendChild(pill);
 
   const meta = document.createElement('span');
   meta.className = 'meta';
-  meta.textContent = `命中 ${entry.hits}`;
+  meta.textContent = t('optionsHits', [entry.hits]);
   li.appendChild(meta);
 
-  const del = document.createElement('button');
-  del.className = 'danger';
-  del.textContent = '删除';
+  const del = button('optionsDelete', 'danger');
   del.addEventListener('click', async () => {
     await forgetSelector(store, host, entry.selector);
     await render();
@@ -64,14 +71,15 @@ function renderSite(host: string, entries: LearnedEntry[]): HTMLElement {
 
   const count = document.createElement('span');
   count.className = 'count';
-  count.textContent = `${entries.filter((e) => e.promoted).length} 条生效 / 共 ${entries.length} 条`;
+  count.textContent = t('optionsCountSelectors', [
+    entries.filter((e) => e.promoted).length,
+    entries.length,
+  ]);
   header.appendChild(count);
 
-  const clear = document.createElement('button');
-  clear.className = 'danger';
-  clear.textContent = '清空本站';
+  const clear = button('optionsClearSite', 'danger');
   clear.addEventListener('click', async () => {
-    if (!confirm(`清空 ${host} 上的全部学习规则？`)) return;
+    if (!confirm(t('optionsConfirmClearSite', [host]))) return;
     await clearSite(store, host);
     await render();
   });
@@ -80,7 +88,75 @@ function renderSite(host: string, entries: LearnedEntry[]): HTMLElement {
   section.appendChild(header);
 
   const list = document.createElement('ul');
+  list.className = 'rows';
   for (const entry of entries) list.appendChild(renderEntry(host, entry));
+  section.appendChild(list);
+
+  return section;
+}
+
+function renderDomainEntry(pageHost: string, entry: DomainEntry): HTMLLIElement {
+  const li = document.createElement('li');
+
+  const code = document.createElement('code');
+  code.textContent = entry.host;
+  li.appendChild(code);
+
+  const pill = document.createElement('span');
+  pill.className = entry.promoted ? 'pill on' : 'pill';
+  pill.textContent = t(entry.promoted ? 'optionsPillBlocked' : 'optionsPillObserving');
+  li.appendChild(pill);
+
+  const meta = document.createElement('span');
+  meta.className = 'meta';
+  meta.textContent = t('optionsSeen', [entry.hits]);
+  li.appendChild(meta);
+
+  const del = button('optionsUnblock', 'danger');
+  del.addEventListener('click', async () => {
+    await forgetDomain(store, pageHost, entry.host);
+    await render();
+  });
+  li.appendChild(del);
+
+  return li;
+}
+
+/** 网络层：在某站点上学到的广告域名。 */
+function renderDomainSite(pageHost: string, entries: DomainEntry[]): HTMLElement {
+  const section = document.createElement('section');
+
+  const header = document.createElement('header');
+  const name = document.createElement('strong');
+  name.textContent = t('optionsDomainHeader', [pageHost]);
+  header.appendChild(name);
+
+  const count = document.createElement('span');
+  count.className = 'count';
+  count.textContent = t('optionsCountDomains', [
+    entries.filter((e) => e.promoted).length,
+    entries.length,
+  ]);
+  header.appendChild(count);
+
+  const clear = button('optionsClearGroup', 'danger');
+  clear.addEventListener('click', async () => {
+    if (!confirm(t('optionsConfirmClearGroup', [pageHost]))) return;
+    await clearDomains(store, pageHost);
+    await render();
+  });
+  header.appendChild(clear);
+
+  section.appendChild(header);
+
+  const hint = document.createElement('p');
+  hint.className = 'count section-hint';
+  hint.textContent = t('optionsDomainHint');
+  section.appendChild(hint);
+
+  const list = document.createElement('ul');
+  list.className = 'rows';
+  for (const entry of entries) list.appendChild(renderDomainEntry(pageHost, entry));
   section.appendChild(list);
 
   return section;
@@ -102,13 +178,13 @@ async function render(): Promise<void> {
 
   el('summary').textContent =
     sites.length || domainSites.length
-      ? `选择器 ${active} 条生效 / 共 ${total} 条 · 域名 ${domainActive} 个已拦截 / 共 ${domainTotal} 个`
+      ? t('optionsSummary', [active, total, domainActive, domainTotal])
       : '';
 
   if (sites.length === 0 && domainSites.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'empty';
-    empty.textContent = '还没有学到任何规则。浏览网页后，AdBlow 会在需要时自动积累。';
+    empty.textContent = t('optionsEmpty');
     container.appendChild(empty);
     return;
   }
@@ -120,81 +196,13 @@ async function render(): Promise<void> {
   for (const site of sites) container.appendChild(renderSite(site.host, site.entries));
 }
 
-function renderDomainEntry(pageHost: string, entry: DomainEntry): HTMLLIElement {
-  const li = document.createElement('li');
-
-  const code = document.createElement('code');
-  code.textContent = entry.host;
-  li.appendChild(code);
-
-  const pill = document.createElement('span');
-  pill.className = entry.promoted ? 'pill on' : 'pill';
-  pill.textContent = entry.promoted ? '已拦截' : '观察中';
-  li.appendChild(pill);
-
-  const meta = document.createElement('span');
-  meta.className = 'meta';
-  meta.textContent = `出现 ${entry.hits} 次`;
-  li.appendChild(meta);
-
-  const del = document.createElement('button');
-  del.className = 'danger';
-  del.textContent = '不再拦截';
-  del.addEventListener('click', async () => {
-    await forgetDomain(store, pageHost, entry.host);
-    await render();
-  });
-  li.appendChild(del);
-
-  return li;
-}
-
-/** 网络层：在某站点上学到的广告域名。 */
-function renderDomainSite(pageHost: string, entries: DomainEntry[]): HTMLElement {
-  const section = document.createElement('section');
-
-  const header = document.createElement('header');
-  const name = document.createElement('strong');
-  name.textContent = `网络层 · 在 ${pageHost} 上学到`;
-  header.appendChild(name);
-
-  const count = document.createElement('span');
-  count.className = 'count';
-  count.textContent = `${entries.filter((e) => e.promoted).length} 个已拦截 / 共 ${entries.length} 个`;
-  header.appendChild(count);
-
-  const clear = document.createElement('button');
-  clear.className = 'danger';
-  clear.textContent = '清空本组';
-  clear.addEventListener('click', async () => {
-    if (!confirm(`清空在 ${pageHost} 上学到的全部域名？`)) return;
-    await clearDomains(store, pageHost);
-    await render();
-  });
-  header.appendChild(clear);
-
-  section.appendChild(header);
-
-  const hint = document.createElement('p');
-  hint.className = 'count';
-  hint.style.padding = '6px 13px 0';
-  hint.textContent =
-    '域名累计在广告里出现 3 次后自动拦截。凡是也被正常内容使用的域名一律不学。';
-  section.appendChild(hint);
-
-  const list = document.createElement('ul');
-  for (const entry of entries) list.appendChild(renderDomainEntry(pageHost, entry));
-  section.appendChild(list);
-
-  return section;
-}
-
 el('refresh').addEventListener('click', () => void render());
 
 el('export').addEventListener('click', async () => {
   const sites = await listAllSites(store);
   const payload = {
     product: 'AdBlow',
+    productVersion: chrome.runtime.getManifest().version,
     exportedAt: new Date().toISOString(),
     sites,
   };
@@ -207,4 +215,5 @@ el('export').addEventListener('click', async () => {
   URL.revokeObjectURL(url);
 });
 
+applyI18n();
 void render();

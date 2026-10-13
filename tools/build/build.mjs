@@ -65,7 +65,37 @@ const ASSETS = [
   { from: 'public/cosmetic.css', to: 'cosmetic.css' },
   { from: 'src/ui/popup.html', to: 'popup.html' },
   { from: 'src/ui/options.html', to: 'options.html' },
+  { from: 'src/ui/ui.css', to: 'ui.css' },
 ];
+
+/** 需要整目录拷贝的静态资源（图标、语言包）。 */
+const ASSET_DIRS = [
+  { from: 'public/icons', to: 'icons' },
+  { from: 'public/_locales', to: '_locales' },
+];
+
+/** 递归拷贝目录（保持相对结构）。 */
+function copyDir(fromAbs, toAbs, report, label) {
+  let count = 0;
+  let bytes = 0;
+  const walk = (src, dst) => {
+    mkdirSync(dst, { recursive: true });
+    for (const entry of readdirSync(src)) {
+      const s = `${src}/${entry}`;
+      const d = `${dst}/${entry}`;
+      if (statSync(s).isDirectory()) {
+        walk(s, d);
+        continue;
+      }
+      copyFileSync(s, d);
+      count += 1;
+      bytes += statSync(d).size;
+    }
+  };
+  walk(fromAbs, toAbs);
+  report.push([`${label}/ (${count} 个文件)`, bytes, 'copy']);
+  return count;
+}
 
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(DIST, { recursive: true });
@@ -103,6 +133,79 @@ for (const asset of ASSETS) {
   if (!existsSync(from)) throw new Error(`缺少静态资源 ${asset.from}`);
   copyFileSync(from, `${DIST}/${asset.to}`);
   report.push([asset.to, statSync(`${DIST}/${asset.to}`).size, 'copy']);
+}
+
+for (const dir of ASSET_DIRS) {
+  const from = p(dir.from);
+  if (!existsSync(from)) throw new Error(`缺少静态资源目录 ${dir.from}`);
+  copyDir(from, `${DIST}/${dir.to}`, report, dir.to);
+}
+
+/**
+ * 版本号单一来源：package.json。
+ *
+ * 之前 manifest 里的版本是手写的，很容易与 package.json 漂移
+ * （发布时改了这里忘了那里 → 商店里显示旧版本）。现在构建期注入，
+ * 并强制校验是 x.y.z 形式 —— 商店只接受这种格式。
+ */
+const pkg = JSON.parse(readFileSync(p('package.json'), 'utf8'));
+if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
+  console.error(`package.json 的 version 必须是 x.y.z 形式，实际：${pkg.version}`);
+  process.exit(1);
+}
+{
+  const manifestPath = `${DIST}/manifest.json`;
+  const m = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  m.version = pkg.version;
+  writeFileSync(manifestPath, JSON.stringify(m, null, 2), 'utf8');
+  console.log(`版本号：${pkg.version}（注入自 package.json）`);
+}
+
+/**
+ * 语言包自检：manifest 与界面里用到的每个 `__MSG_key__` / data-i18n key
+ * 都必须在默认语言包里存在，且**五种语言键集一致**。
+ *
+ * 为什么必须校验：缺 key 时商店页面会直接显示 `__MSG_extDesc__` 这种原始
+ * 占位符，而这是**提交后才会发现**的问题（本地加载看不出）。
+ */
+{
+  const localesDir = `${DIST}/_locales`;
+  const defaultLocale = JSON.parse(readFileSync(`${DIST}/manifest.json`, 'utf8')).default_locale;
+  const locales = readdirSync(localesDir);
+  if (!locales.includes(defaultLocale)) {
+    console.error(`默认语言 ${defaultLocale} 在 _locales 里不存在`);
+    process.exit(1);
+  }
+  const catalogs = new Map();
+  for (const loc of locales) {
+    catalogs.set(loc, JSON.parse(readFileSync(`${localesDir}/${loc}/messages.json`, 'utf8')));
+  }
+
+  const manifestRaw = readFileSync('public/manifest.json', 'utf8') + readFileSync('src/ui/popup.html', 'utf8') + readFileSync('src/ui/options.html', 'utf8');
+  const used = new Set([...manifestRaw.matchAll(/__MSG_([A-Za-z0-9_]+)__/g)].map((m) => m[1]));
+  // 界面里 data-i18n / data-i18n-* 用到的 key
+  for (const m of [...readFileSync('src/ui/popup.html', 'utf8').matchAll(/data-i18n(?:-[a-z]+)?="([^"]+)"/g)]) used.add(m[1]);
+  for (const m of [...readFileSync('src/ui/options.html', 'utf8').matchAll(/data-i18n(?:-[a-z]+)?="([^"]+)"/g)]) used.add(m[1]);
+  // JS 里 t('key') 调用的 key
+  for (const file of ['src/ui/popup.ts', 'src/ui/options.ts']) {
+    for (const m of [...readFileSync(file, 'utf8').matchAll(/\bt\('([A-Za-z0-9_]+)'/g)]) used.add(m[1]);
+  }
+
+  const base = catalogs.get(defaultLocale);
+  const problems = [];
+  for (const key of used) if (!(key in base)) problems.push(`${defaultLocale} 缺少 ${key}`);
+  for (const [loc, cat] of catalogs) {
+    for (const key of used) if (!(key in cat)) problems.push(`${loc} 缺少 ${key}`);
+    for (const key of Object.keys(cat)) if (!(key in base)) problems.push(`${loc} 多出 ${key}`);
+  }
+  if (problems.length) {
+    console.error(`语言包校验失败：\n  ${problems.join('\n  ')}`);
+    process.exit(1);
+  }
+  console.log(
+    `语言包：${locales.length} 种（${locales.sort().join(', ')}），默认 ${defaultLocale}，` +
+      `界面共用 ${used.size} 个 key，全部一致`,
+  );
 }
 
 /**
@@ -211,6 +314,8 @@ const declared = [
   ...(manifest.content_scripts ?? []).flatMap((cs) => [...(cs.js ?? []), ...(cs.css ?? [])]),
   manifest.action?.default_popup,
   manifest.options_page,
+  ...Object.values(manifest.icons ?? {}),
+  ...Object.values(manifest.action?.default_icon ?? {}),
   ...(manifest.declarative_net_request?.rule_resources ?? []).map((r) => r.path),
 ].filter(Boolean);
 
@@ -218,6 +323,26 @@ const missing = declared.filter((f) => !existsSync(`${DIST}/${f}`));
 if (missing.length) {
   console.error(`manifest 声明了不存在的文件：${missing.join(', ')}`);
   process.exit(1);
+}
+
+// 自检：两个界面的 HTML 里引用的本地资源也必须存在
+// （manifest 不会声明 ui.css —— 它是被 HTML 引用的，最容易漏拷）
+{
+  const htmlRefs = new Set();
+  for (const file of ['popup.html', 'options.html']) {
+    const html = readFileSync(`${DIST}/${file}`, 'utf8');
+    for (const m of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
+      const ref = m[1];
+      if (/^(?:https?:|data:|#|\/)/.test(ref)) continue;
+      htmlRefs.add(ref);
+    }
+  }
+  const missingRefs = [...htmlRefs].filter((f) => !existsSync(`${DIST}/${f}`));
+  if (missingRefs.length) {
+    console.error(`界面 HTML 引用了不存在的资源：${missingRefs.join(', ')}`);
+    process.exit(1);
+  }
+  console.log(`界面引用的 ${htmlRefs.size} 个本地资源全部存在`);
 }
 
 console.log('dist/ 构建完成：');

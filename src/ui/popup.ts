@@ -1,12 +1,15 @@
 import { allEntries, clearSite } from '../content/learn.ts';
 import { isSiteDisabled, readStats, setSiteDisabled } from '../content/settings.ts';
 import { chromeLocal } from '../content/storage.ts';
+import { applyI18n, t } from './i18n.ts';
 
 /**
  * Popup：站点开关 + 运行统计 + 清空本站学习结果。
  *
  * 站点开关是**安全阀**：任何会在某站点上出错的过滤器都必须能单站关掉，
  * 否则用户只能整个禁用扩展。
+ *
+ * 界面文案一律走 i18n（`t()` / `data-i18n`），不写死中文 —— 见 ui/i18n.ts。
  */
 
 const store = chromeLocal();
@@ -30,13 +33,14 @@ async function currentHost(): Promise<string | null> {
   }
 }
 
-function showNotice(text: string): void {
+function showNotice(text: string, hostLabel = false): void {
   const notice = el('notice');
   notice.textContent = text;
   notice.hidden = false;
   el('toggle-row').hidden = true;
   el('stats').hidden = true;
   el('stats-hint').hidden = true;
+  if (hostLabel) el('host').textContent = t('popupNotApplicable');
 }
 
 async function render(): Promise<void> {
@@ -44,8 +48,8 @@ async function render(): Promise<void> {
 
   const host = await currentHost();
   if (!host) {
-    el('host').textContent = '当前页面不适用';
-    showNotice('浏览器内部页面、扩展页面无法过滤。请在普通网页上使用。');
+    el('host').textContent = t('popupNotApplicable');
+    showNotice(t('popupInternalNotice'));
     el<HTMLButtonElement>('clear-site').disabled = true;
     return;
   }
@@ -68,11 +72,11 @@ async function render(): Promise<void> {
   const hint = el('stats-hint');
   hint.hidden = false;
   if (disabled) {
-    hint.textContent = '本站已关闭，过滤与学习都已停止。';
+    hint.textContent = t('popupHintDisabled');
   } else if (stats) {
-    hint.textContent = `已学习规则在累计 3 次命中后才生效（当前晋级 ${promoted} 条）。`;
+    hint.textContent = t('popupHintLearning', [promoted]);
   } else {
-    hint.textContent = '本页尚未产生统计，刷新后可见。';
+    hint.textContent = t('popupHintNoStats');
   }
 }
 
@@ -87,7 +91,7 @@ el<HTMLInputElement>('enabled').addEventListener('change', async (event) => {
 el('clear-site').addEventListener('click', async () => {
   const host = await currentHost();
   if (!host) return;
-  if (!confirm(`清空 ${host} 上 AdBlow 学到的全部规则？`)) return;
+  if (!confirm(t('popupConfirmClear', [host]))) return;
   await clearSite(store, host);
   await render();
 });
@@ -96,4 +100,5 @@ el('open-options').addEventListener('click', () => {
   void chrome.runtime.openOptionsPage();
 });
 
+applyI18n();
 void render();

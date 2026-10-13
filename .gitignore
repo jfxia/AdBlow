@@ -1,4 +1,4 @@
-﻿node_modules/
+node_modules/
 dist/
 coverage/
 
@@ -15,3 +15,10 @@ _probe/
 # 写成 filters/ 会匹配任意层级的同名目录，于是 tools/filters/（抓取脚本本身）
 # 一直被静默忽略、从未进入版本控制 —— 真实踩过的坑。
 /filters/
+
+# 发布产物：zip 可由 `pnpm package` 随时重建，不入库
+# （store/ 里的图标与商店截图相反：它们是**素材**，应当入库）
+/release/
+
+# 商店截图的 2 倍原图是中间产物，只有合成后的 1280×800 才入库
+/store/raw-*
