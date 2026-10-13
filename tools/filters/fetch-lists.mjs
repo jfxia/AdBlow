@@ -1,21 +1,15 @@
-/**
- * 构建期抓取过滤列表。
- *
- * ⚠️ 列表**不提交进版本库**：`filters/` 在 .gitignore 里。原因见
- * docs/plans/2026-10-11-filter-list-integration.md 的「许可证」一节 ——
- * EasyList 系列表是 GPLv3 / CC BY-SA 3.0 双许可，随包分发会带来 copyleft 义务。
- * 这里只做构建期下载，产物留在本地。
- *
- * 只收录**无付费白名单**的列表：不含 Adblock Plus 的「可接受广告」名单。
- *
- * 用法：node tools/filters/fetch-lists.mjs [--force]
- */
+// Fetches the filter lists at build time. The lists are NOT committed (filters/
+// is in .gitignore): the EasyList family is GPLv3 / CC BY-SA 3.0 dual licensed,
+// so shipping them in the package would carry copyleft duties (see
+// docs/plans/2026-10-11-filter-list-integration.md, "License").
+// Only lists without a paid allowlist are included -- no Acceptable Ads list.
+// Run: node tools/filters/fetch-lists.mjs [--force]
 import { mkdirSync, writeFileSync, existsSync, statSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const OUT_DIR = fileURLToPath(new URL('../../filters/', import.meta.url));
 
-/** 列表来源。order 决定预算裁剪时的取舍优先级（小的、专的排前面）。 */
+/** List sources. Order sets the trimming priority (small, specific first). */
 export const LIST_SOURCES = [
   {
     id: 'easylist-china',
@@ -64,31 +58,25 @@ export const LIST_SOURCES = [
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36 Edg/128.0';
 
-/**
- * ❗付费白名单拦截名单（目标硬要求：**列表来源只限无付费白名单者**）。
- *
- * 背景：EasyList 等列表本身**不含**付费白名单，但"Acceptable Ads"（可接受广告）
- * 是**另一份订阅**（`exceptionrules.txt`）—— 广告主付费后进入该列表被放行。
- * 各种"免费版 adblock"后来变味，往往就是从默认勾选这份订阅开始的。
- *
- * 这里把它变成**代码里的强制检查**，而不是文档里的一句承诺：
- * 一旦有人往 LIST_SOURCES 里加了这类来源，抓取直接失败。
- */
+// Paid-allowlist denylist (hard requirement: only lists without a paid allowlist
+// may be sources). EasyList itself has none, but "Acceptable Ads" is a separate
+// subscription (exceptionrules.txt) that lets paying advertisers through -- the
+// usual way a "free adblocker" goes bad.
+// Enforced in code rather than promised in docs: adding such a source to
+// LIST_SOURCES makes the fetch fail.
 const FORBIDDEN_SOURCE_PATTERNS = [
-  'exceptionrules', // Acceptable Ads 的规则文件
-  'acceptableads', // 官方域名
+  'exceptionrules', // Acceptable Ads rules file
+  'acceptableads', // official domain
   'acceptable-ads',
   '/aa.txt',
   'allowlist',
   'whitelist',
 ];
 
-/** 列表头部若出现这些字样，说明它来自付费白名单体系。 */
+/** Header markers that betray a paid-allowlist lineage. */
 const FORBIDDEN_HEADER_MARKERS = ['acceptable ads', 'acceptableads', 'exceptionrules'];
 
-/**
- * 校验来源配置里没有付费白名单列表。返回问题列表（空 = 通过）。
- */
+/** Validate the source config; returns problems (empty means pass). */
 export function checkNoPaidWhitelist(sources = LIST_SOURCES) {
   const problems = [];
   for (const s of sources) {
@@ -102,15 +90,13 @@ export function checkNoPaidWhitelist(sources = LIST_SOURCES) {
   return problems;
 }
 
-/**
- * 校验抓到的列表正文里没有付费白名单体系的痕迹。
- *
- * 不能只看 URL —— 万一上游把 AA 合并进主列表（历史上发生过争议），
- * 这里能在本地发现。只看注释行，避免把正文里的普通词误判。
- */
+// Check the fetched bodies for traces of the paid-allowlist system. URLs alone
+// are not enough -- upstream could merge AA into a main list (controversial in
+// the past) and this finds it locally. Comment lines only, so ordinary words in
+// the body are never flagged.
 export function scanTextForPaidWhitelist(text) {
   const findings = [];
-  const lines = text.split(/\r?\n/, 400); // 头部足够
+  const lines = text.split(/\r?\n/, 400); // the header is enough
   for (const raw of lines) {
     const line = raw.trim().toLowerCase();
     if (!line.startsWith('!') && !line.startsWith('[')) continue;
@@ -124,7 +110,7 @@ export function scanTextForPaidWhitelist(text) {
   return findings;
 }
 
-/** 统计一份列表的构成（用于覆盖率报告与预算规划）。 */
+/** Composition stats of one list (coverage report + budget planning). */
 export function summarizeList(text) {
   const lines = text.split(/\r?\n/);
   let comments = 0;
@@ -200,7 +186,7 @@ async function main() {
   const force = process.argv.includes('--force');
   mkdirSync(OUT_DIR, { recursive: true });
 
-  // ❗先校验来源配置本身（目标硬要求：只限无付费白名单者）
+  // validate the source config first (hard requirement: no paid allowlist)
   const sourceProblems = checkNoPaidWhitelist();
   if (sourceProblems.length) {
     console.error('❌ 来源配置包含付费白名单列表，已中止：');
@@ -229,10 +215,8 @@ async function main() {
   const meta = {
     fetchedAt: new Date().toISOString(),
     note: '构建期下载，不入版本库。许可证与义务见 docs/plans/2026-10-11-filter-list-integration.md',
-    /**
-     * ❗付费白名单检查结果（目标硬要求）。
-     * 记录在 meta 里，便于每次抓取后**可审计**：来源配置无付费列表、正文无 AA 痕迹。
-     */
+    // Paid-allowlist results, kept in meta so every fetch stays auditable: no
+    // paid sources in the config, no Acceptable Ads traces in the bodies.
     noPaidWhitelist: {
       sourceConfigChecked: true,
       forbiddenPatterns: FORBIDDEN_SOURCE_PATTERNS,
@@ -273,7 +257,8 @@ async function main() {
   console.log(`已写入 filters/meta.json（${results.length} 份列表）`);
 }
 
-// 直接执行时才跑（Windows 上必须用 pathToFileURL 比较，字符串比较会失配）
+// only when run directly; on Windows compare via pathToFileURL, plain string
+// comparison mismatches
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main();
 }

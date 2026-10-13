@@ -1,11 +1,7 @@
 /**
- * 持久化弹窗状态清理。
- *
- * 依据（设计文档 §1.4）：试点站页面内联脚本自称「本地降级体系」，注释写明
- *   // 对齐：pending持久化 / 刷新重连 / 超时补偿 / beacon重试
- *   // / pagehide beacon / visibilitychange / 充值页刷新
- * 并用 localStorage + sessionStorage + window.name 三处持久化弹窗状态。
- * 只拦 window.open 会被「刷新后自动重开」绕过，所以必须清状态。
+ * Persistent popup-state scrubbing (design doc §1.4): the pilot site's inline
+ * script keeps popup state in localStorage, sessionStorage and window.name, so
+ * blocking window.open alone is bypassed by "reopen after refresh".
  */
 
 const SCRUB_PATTERNS = [/^__ai_float_pending/, /^__ai_float_beacon/, /^__ai_float_popup/];

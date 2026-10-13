@@ -16,13 +16,9 @@ import {
   splitTopLevel,
 } from '../../src/engine/filterList/cosmetic.ts';
 
-/**
- * cosmetic 规则解析与编译。
- *
- * 范围决定（有依据）：uBOL 默认不启用**通用** cosmetic 规则（只在"完全模式"开），
- * 因为无域名限定的选择器会套用到全网站、误伤风险高。本实现采纳同样取舍：
- * 域名专用规则启用，通用规则只解析统计、默认不注入。
- */
+// Cosmetic rule parsing and compilation. Scope decision, following uBOL: generic (domain-less)
+// cosmetic rules are risky and stay off by default, so domain-specific rules are applied while
+// generic ones are only parsed and counted.
 
 const parse = (line: string) => {
   const f = parseCosmeticLine(line);
@@ -227,7 +223,7 @@ describe('分片投递：生成端与运行端必须一致', () => {
 
   it('❗分片数可控（运行端只取需要的几片，代价是每页几次本地文件读）', () => {
     const shards = shardsForHost('a.b.example.com');
-    // 每级后缀最多再带一个通配形式，所以上界约为后缀数的 2 倍
+    // Each suffix level adds at most one wildcard form, so the bound is ~2x the suffix count.
     assert.ok(shards.length >= 1 && shards.length <= 8, `实际取 ${shards.length} 片`);
     assert.deepEqual(shards, [...shards].sort((a, b) => a - b), '应升序');
     assert.equal(new Set(shards).size, shards.length, '应去重');
@@ -242,11 +238,11 @@ describe('分片投递：生成端与运行端必须一致', () => {
     ]);
     const shards = shardIndex(index);
 
-    // 运行端：按主机名取出需要的分片，再解析
+    // Runtime side: pick the shards for the host, then parse them.
     const loaded = shardsForHost('sub.example.com').map((i) => shards[i]!);
     assert.deepEqual(selectorsFromShards(loaded, 'sub.example.com'), ['.sub-ad']);
 
-    // other.com 的规则应落在别的分片里，不受影响
+    // other.com's rules live in other shards and must be unaffected.
     const loadedOther = shardsForHost('other.com').map((i) => shards[i]!);
     assert.deepEqual(selectorsFromShards(loadedOther, 'other.com'), ['.other-ad']);
   });
@@ -257,13 +253,13 @@ describe('分片投递：生成端与运行端必须一致', () => {
 
   it('❗通配 TLD 键（`amazon.*`）也能命中 —— 实测 250 个这种键', () => {
     const wild = buildCosmeticIndex([parse('amazon.*##.wild-ad'), parse('example.com##.plain-ad')]);
-    // ABP 语义：amazon.* 对任意 TLD 生效
+    // ABP semantics: amazon.* applies to any TLD.
     assert.deepEqual(selectorsForHost(wild, 'www.amazon.com'), ['.wild-ad']);
     assert.deepEqual(selectorsForHost(wild, 'www.amazon.co.jp'), ['.wild-ad']);
     assert.deepEqual(selectorsForHost(wild, 'amazon.de'), ['.wild-ad']);
     assert.deepEqual(selectorsForHost(wild, 'notamazon.com'), []);
 
-    // 分片路径也必须一致
+    // The shard path must agree.
     const shards = shardIndex(wild);
     const loaded = shardsForHost('www.amazon.co.uk').map((i) => shards[i]!);
     assert.deepEqual(selectorsFromShards(loaded, 'www.amazon.co.uk'), ['.wild-ad']);

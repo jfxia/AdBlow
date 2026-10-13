@@ -1,47 +1,45 @@
 /**
- * 过滤列表语法解析（EasyList / Adblock Plus 语法 → 中间模型）。
+ * Filter-list syntax parsing (EasyList / Adblock Plus → intermediate model).
  *
- * ⚠️ 核心安全原则：**遇到不认识的选项就丢弃整条规则**，绝不"忽略选项继续拦"。
- * 例如 `||x.com^$csp=...`：我们表达不了 `$csp`，如果忽略它就变成"拦 x.com 的全部"，
- * 比原规则**范围更宽** —— 这类静默放宽正是最容易造成站点损坏的地方。
- *
- * 本模块浏览器无关，可在 Node 里直接单测。
+ * ⚠️ An unrecognized option drops the whole rule, never "ignore it and block
+ * anyway": for `||x.com^$csp=...` ignoring `$csp` would block all of x.com —
+ * wider than the original, and exactly what breaks sites. Browser-agnostic.
  */
 import type { ResourceType } from '../rules.ts';
 
-/** 一条解析成功的网络规则。 */
+/** One successfully parsed network rule. */
 export type ParsedFilter = {
   raw: string;
-  /** 来源列表 id（由 parseList 填入，用于"多列表共识"排序）。 */
+  /** Source list id (set by parseList; drives consensus ranking). */
   source?: string;
-  /** `@@` 开头（例外规则）。 */
+  /** `@@` prefix (exception rule). */
   exception: boolean;
-  /** 模式部分（已去掉选项）。 */
+  /** Pattern part (options stripped). */
   pattern: string;
-  /** 模式是否为正则形式 `/.../ `。 */
+  /** Pattern is the `/.../ ` regex form. */
   regex: boolean;
-  /** `$badfilter`：抵消同模式的规则。 */
+  /** `$badfilter`: cancels the matching rule. */
   badfilter: boolean;
   important: boolean;
   matchCase: boolean;
-  /** 未指定类型 → undefined（表示"除 main_frame 外的全部"，见 compile 的说明）。 */
+  /** Unset means "all types except main_frame" (see compile.ts). */
   resourceTypes?: ResourceType[];
   excludedResourceTypes?: ResourceType[];
-  /** `$domain=` 的肯定部分 → DNR initiatorDomains。 */
+  /** Positive half of `$domain=` → DNR initiatorDomains. */
   initiatorDomains?: string[];
-  /** `$domain=` 的否定部分（`~b.com`）→ DNR excludedInitiatorDomains。 */
+  /** Negated half of `$domain=` (`~b.com`) → DNR excludedInitiatorDomains. */
   excludedInitiatorDomains?: string[];
-  /** `$third-party` → 'thirdParty'；`~third-party`/`$first-party` → 'firstParty'。 */
+  /** `$third-party` / `$first-party` (and their `~` forms) → DNR domainType. */
   domainType?: 'firstParty' | 'thirdParty';
 };
 
-/** 解析结果：要么是一条网络规则，要么被跳过（附原因，用于覆盖率报告）。 */
+/** Parse outcome: either a network rule, or a skip with a reason for the report. */
 export type ParseOutcome =
   | { kind: 'network'; filter: ParsedFilter }
   | { kind: 'cosmetic'; raw: string; flavor: 'basic' | 'extended' | 'scriptlet' | 'html' | 'style' }
   | { kind: 'skip'; raw: string; reason: string };
 
-/** 类型选项 → DNR 资源类型。 */
+/** Type option → DNR resource type. */
 const TYPE_MAP: Record<string, ResourceType> = {
   script: 'script',
   image: 'image',
@@ -62,7 +60,7 @@ const TYPE_MAP: Record<string, ResourceType> = {
   webrtc: 'other',
 };
 
-/** 无法表达、必须丢弃整条规则的选项（丢弃而不是忽略 —— 见文件头）。 */
+/** Options we cannot express: drop the whole rule rather than ignore them (see header). */
 const UNSUPPORTED_OPTIONS = new Set([
   'csp',
   'redirect',
@@ -99,27 +97,25 @@ const UNSUPPORTED_OPTIONS = new Set([
   'network',
 ]);
 
-/** 无参数、直接跳过（语义上是"不拦这类请求"，我们当作不支持处理）。 */
+/** Argument-less options to skip (semantically "do not block this type"). */
 const NEGATED_ONLY_OPTIONS = new Set(['~document', '~subdocument', '~popup', '~all']);
 
-/** 用于剔除纯通配的模式，避免"匹配一切"。 */
+/** Pure-wildcard patterns, which would match everything. */
 const MATCHES_EVERYTHING = new Set(['*', '**', '|', '||', '^', '/', '/*']);
 
 /**
- * 解析一行过滤规则。
- *
- * 非网络规则（注释、cosmetic、脚本注入、HTML 过滤）会被分类返回，
- * 交给第二、三期处理，而不是当作失败。
+ * Parse one filter line. Non-network rules (comments, cosmetic, scriptlets, HTML
+ * filters) are classified for later phases rather than treated as failures.
  */
 export function parseFilterLine(rawLine: string): ParseOutcome {
   const raw = rawLine.trim();
 
   if (!raw) return { kind: 'skip', raw, reason: 'empty' };
   if (raw.startsWith('!') || raw.startsWith('[')) return { kind: 'skip', raw, reason: 'comment' };
-  // uBlock 的元数据行
+  // uBlock metadata line
   if (/^#(if|endif|include|@include)/.test(raw)) return { kind: 'skip', raw, reason: 'directive' };
 
-  // ── cosmetic 家族（第二、三期）──
+  // cosmetic family (phases 2-3)
   if (raw.includes('##+js(') || raw.includes('#@#+js(')) {
     return { kind: 'cosmetic', raw, flavor: 'scriptlet' };
   }
@@ -128,7 +124,6 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
   if (raw.includes('#$#')) return { kind: 'cosmetic', raw, flavor: 'style' };
   if (raw.includes('##') || raw.includes('#@#')) return { kind: 'cosmetic', raw, flavor: 'basic' };
 
-  // ── 网络规则 ──
   let body = raw;
   let exception = false;
   if (body.startsWith('@@')) {
@@ -150,7 +145,6 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
     matchCase: false,
   };
 
-  // 选项解析
   if (optionText) {
     const positive = new Set<ResourceType>();
     const negative = new Set<ResourceType>();
@@ -174,7 +168,7 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
         continue;
       }
       if (opt === 'all') {
-        // $all 表示"全部类型"，与不写类型等价
+        // `$all` means "every type", same as omitting types
         continue;
       }
       if (opt === 'third-party' || opt === '3p') {
@@ -200,8 +194,8 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
       }
 
       const negated = opt.startsWith('~');
-      // 选项可能带值（`csp=...` / `domain=...` / `redirect=...`），
-      // 判断"是否支持"必须只看等号前的名字
+      // Options may carry values (`csp=...`, `domain=...`, `redirect=...`); support
+      // is decided on the name before the equals sign only.
       const name = (negated ? opt.slice(1) : opt).split('=')[0]!.trim();
 
       const mapped = TYPE_MAP[name];
@@ -214,7 +208,7 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
         return { kind: 'skip', raw, reason: `unsupported-option:${name}` };
       }
 
-      // 完全不认识的选项：丢弃整条（安全默认）
+      // Completely unknown option: drop the whole rule (safe default)
       return { kind: 'skip', raw, reason: `unknown-option:${name}` };
     }
 
@@ -224,14 +218,13 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
     if (excludedInitiators.length) filter.excludedInitiatorDomains = excludedInitiators;
   }
 
-  // 纯通配模式没有意义，且会变成"匹配一切"
   if (MATCHES_EVERYTHING.has(pattern)) return { kind: 'skip', raw, reason: 'match-everything' };
   if (!pattern) return { kind: 'skip', raw, reason: 'no-pattern' };
 
   return { kind: 'network', filter };
 }
 
-/** 统计一批行的解析结果，用于覆盖率报告。 */
+/** Aggregate the parse outcomes of a batch of lines, for coverage reporting. */
 export function parseList(
   text: string,
   source?: string,

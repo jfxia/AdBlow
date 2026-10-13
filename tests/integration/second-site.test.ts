@@ -12,21 +12,11 @@ import {
   type JudgeOptions,
 } from '../../src/content/engine.ts';
 
-/**
- * 第二站点回归（1024cg.com）。
- *
- * 存在的原因：用户反馈「换了个网站（1024cg.com）就拦不住了」。取证后发现
- * 旧实现有两个真实缺陷，本文件把它们钉死：
- *
- *   1. 词库用子串匹配 + 小词表，`ad-item` / `ads-title` / `post-card-ads` /
- *      `id="ad-card-N"` 这些最直白的命名一个都认不出。
- *   2. 判定只有「脚本注入」一档，而本站在**服务端 HTML 里就直接渲染广告**
- *      （`<article class="ad-item">`、`<div class="post-card" id="ad-card-N">`），
- *      于是广告被那道闸门整个排除在外，一个都拦不住。
- *
- * ⚠️ 本文件**刻意不加载任何站点规则包** —— 要验证的是通用路径本身。
- * 如果哪天有人为了「让这个站变干净」加规则包，这个测试就失去意义了。
- */
+// Second-site regression (1024cg.com), filed after "filtering stopped working on another
+// site". Two real defects: the lexicon's substring matching over a tiny word list missed
+// `ad-item` / `ads-title` / `post-card-ads` / `id="ad-card-N"`, and the only judging tier
+// was script injection while this site renders its ads into the server HTML — so no ad
+// was caught. No site rule pack is loaded on purpose: the generic path is under test.
 
 const HOST = '1024cg.com';
 const fixture = readFileSync(new URL('../fixtures/1024cg-home.html', import.meta.url), 'utf8');
@@ -43,7 +33,7 @@ function freshDoc(): Document {
   return new JSDOM(fixture, { url: `https://${HOST}/` }).window.document;
 }
 
-/** 无规则包 —— 只用通用路径。 */
+/** No rule pack — generic path only. */
 function options(reliable = true): JudgeOptions {
   return {
     injected: makeInjectionTest(pristineIndex, reliable),
@@ -119,8 +109,8 @@ describe('第二站点：无规则包时通用路径必须拦住服务端渲染�
   });
 
   it('20 个正文卡片 div.post-card#post-card-N 一个都没被隐藏（误伤守卫）', () => {
-    // 这条最容易被忽略：正文与广告用的是同一个 class，只有 id 前缀不同。
-    // 任何按 class 下手的规则都会把正文一起抹掉。
+    // Content and ads share a class and differ only by id prefix, so any rule keyed on
+    // the class would wipe the content out too.
     const doc = freshDoc();
     sweep(doc.documentElement, options());
 
@@ -143,8 +133,8 @@ describe('第二站点：无规则包时通用路径必须拦住服务端渲染�
 
 describe('第二站点：命名档不依赖快照（架构修复的回归保护）', () => {
   it('快照不可信时，广告卡仍被拦住 —— 因为这靠命名而不是行为', () => {
-    // 关键：本站广告是服务端渲染的，纯行为档（要求脚本注入）对它们无效。
-    // 若命名档也被绑上注入条件，这个站就彻底失效——这正是用户反馈的 bug。
+    // This site's ads are server-rendered, so the behaviour-only tier (which requires
+    // script injection) never applies — binding the naming tier to injection was the bug.
     const doc = freshDoc();
     sweep(doc.documentElement, options(false));
 

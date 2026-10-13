@@ -3,17 +3,14 @@ import assert from 'node:assert/strict';
 import { LIST_COSMETIC_ATTR, applyListCosmetic } from '../../src/content/listCosmetic.ts';
 import { holdsRealContent } from '../../src/content/engine.ts';
 
-/**
- * 列表 cosmetic 的注入与**内容守卫**（第二期）。
- *
- * 这一层来自社区列表、覆盖上万域名，安全上唯一依赖就是内容守卫：
- * - 会隐藏正文的选择器必须剔除（本项目不变量：任何来源都不得隐藏正文）
- * - 非法选择器必须剔除（一条非法会让**整张样式表**被浏览器丢弃）
- */
+// Injection and content-guard coverage for the community-list cosmetic layer, which
+// spans tens of thousands of domains and relies solely on the content guard: selectors
+// that would hide content, and invalid selectors, must be dropped — one invalid selector
+// makes the browser discard the entire stylesheet.
 
 function docWith(html: string): Document {
   document.body.innerHTML = html;
-  // 测试隔离：清掉上一个用例留下的样式元素（用的是全局 document）
+  // Test isolation: drop the styles element left by the previous case (global document).
   for (const s of Array.from(document.querySelectorAll(`style[${LIST_COSMETIC_ATTR}]`))) {
     s.remove();
   }

@@ -1,28 +1,26 @@
 /**
- * 自学习规则库。
+ * Storage layer of the learned-rule growth loop.
  *
- * 「完全自研不用第三方列表」这条路线下，普通网站的覆盖只能靠引擎自己长规则。
- * 这就是那个增长闭环的存储层。
+ * Anti-pollution: persisting a selector on its first hit would freeze
+ * misjudgements forever, so a generic selector must accumulate PROMOTE_AFTER
+ * hits to become persistent (below that it still applies on the current page).
+ * forgetSelector backs the one-click undo in the UI.
  *
- * 抗污染（关键）：命中一次就入库会让误判永久固化。因此同一泛化选择器必须
- * 累计命中 PROMOTE_AFTER 次才晋级为持久规则；未晋级的仍在本页面即时生效。
- * 另外提供 forgetSelector 供 UI 一键撤销。
- *
- * 存储通过注入的 KvStore 访问，因此本模块不依赖 chrome.*，可在 Node 里直接测。
+ * Storage is an injected KvStore, so this module needs no chrome.* and is
+ * directly testable under Node.
  */
 import type { KvStore } from './storage.ts';
 
 export const PROMOTE_AFTER = 3;
 
 /**
- * 自学习数据的格式/信任版本。
+ * Format/trust version of the learned data.
  *
- * 递增它会**清空全部已学内容**，用于「旧的学出来的东西已经不可信」的场景。
+ * Bumping it wipes everything learned, for when old data is no longer trustworthy.
  *
- * 版本历史：
- *   1 → 2（2026-10-10）：选择器安全闸门收紧。此前自学习能推导出
- *     `.post-card`（正文卡片类名）之类危险选择器并写进 document_start 的样式表，
- *     造成整站内容与图片被隐藏。旧数据一律作废重学。
+ * History: 1 → 2 (2026-10-10) tightened the selector safety gates. Earlier data
+ * could contain content-card selectors that went into the document_start
+ * stylesheet and hid whole pages, so it is discarded and relearned.
  */
 export const LEARNED_SCHEMA_VERSION = 2;
 
@@ -70,12 +68,11 @@ export async function promotedSelectors(store: KvStore, host: string): Promise<s
 }
 
 /**
- * 一次性迁移：版本不匹配时清空全部自学习结果（选择器 + 域名）并打上新版本号。
+ * One-shot migration: on version mismatch, wipe all learned data (selectors and
+ * domains) and stamp the new version.
  *
- * 为什么必须做：安全闸门只能防止**将来**学到坏规则，管不了用户浏览器里
- * 已经存着的历史数据。不清理的话，用户即使重载扩展也可能继续被旧规则影响。
- *
- * 返回是否执行了清理。
+ * Safety gates only prevent *future* bad rules; data already in a browser
+ * survives extension reloads and would keep misfiring. Returns whether a wipe ran.
  */
 export async function migrateLearnedSchema(store: KvStore): Promise<boolean> {
   const current = await store.get<number>(SCHEMA_KEY);
@@ -110,7 +107,7 @@ export async function clearSite(store: KvStore, host: string): Promise<void> {
   await store.remove(learnedKey(host));
 }
 
-/** 列出所有有自学习规则的站点及其条目。 */
+/** Every site with learned rules, plus its entries. */
 export async function listAllSites(
   store: KvStore,
 ): Promise<{ host: string; entries: LearnedEntry[] }[]> {

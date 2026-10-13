@@ -13,25 +13,12 @@ import {
   mustNotHide,
 } from '../../src/content/engine.ts';
 
-/**
- * 内容守卫 —— 「正文/导航被成片误杀」的根因修复（用户报告 xchina.co）。
- *
- * ## 事故
- *
- * 原先 `holdsRealContent` 只认 schema.org 的文章标记
- * （`article[itemprop]` / `[itemprop="articleBody"]` / `main article`）。
- * 那是**针对试点站调的** —— 它恰好带这些标注。换成普通站点，
- * `<div class="content">`、`<nav>`、`<ul class="menu">`、纯 `<p>` 段落
- * 一律不被保护，守卫形同虚设。
- *
- * ## 修复的分层（关键设计）
- *
- *   - 语义标记 = 直接证据 → **绝对保护**（任何证据都推翻不了）
- *   - 文字量   = 代理指标 → **强先验**：弱命名与纯行为证据不得隐藏，
- *                但强命名（`.ad-slot` 之类）可以
- *
- * 这样既堵住成片误杀，又没有放弃「带文字的广告位」这一类。
- */
+// Content guard — the root-cause fix for "content and navigation wiped out in bulk"
+// (reported on xchina.co). `holdsRealContent` only recognised schema.org article markers,
+// tuned to the pilot site, so on an ordinary site `<div class="content">`, `<nav>`,
+// `<ul class="menu">` and plain `<p>` paragraphs went unprotected and the guard was useless.
+// Layering: semantic markers are direct evidence (absolute protection), text volume is a
+// proxy (weak naming and behaviour-only evidence cannot override it, strong naming can).
 
 const HOST = 'www.example.com';
 
@@ -41,7 +28,7 @@ function root(html: string): HTMLElement {
   return d;
 }
 
-/** 造一段够长的文字（必须真的超过门槛，否则测的是别的东西）。 */
+/** Builds text long enough to clear the threshold; otherwise the test proves nothing. */
 const prose = (n = SUBSTANTIVE_TEXT_MIN + 60): string => {
   const base = '这是一段用于测试的正文内容，用来模拟真实文章里的段落文字。';
   let out = '';
@@ -59,7 +46,7 @@ describe('hasContentMarker：语义标记（绝对保护）', () => {
       hasContentMarker(root('<article itemtype="https://schema.org/BlogPosting"></article>')),
       true,
     );
-    // ❗普通站点的正文容器**不是**语义标记 —— 这正是原先的漏洞
+    // An ordinary site's content container is not a semantic marker — that was the hole.
     assert.equal(hasContentMarker(root('<div class="content"><p>正文</p></div>')), false);
     assert.equal(hasContentMarker(root('<nav><ul><li>首页</li></ul></nav>')), false);
   });
@@ -98,7 +85,7 @@ describe('holdsRealContent：语义标记或实质文字量', () => {
   it('❗导航列表被结构性保护（短标签达不到文字门槛）', () => {
     const items = Array.from({ length: 12 }, (_, i) => `<li><a href="/c/${i}">分类${i}</a></li>`).join('');
     const nav = root(`<nav><ul>${items}</ul></nav>`).firstElementChild!;
-    // 12 项导航合计才 ~40 字，靠文字量保护不住 —— 必须靠 nav 这个显式声明
+    // 12 nav items total ~40 chars, so text volume cannot protect them: the nav marker must.
     assert.equal(hasSubstantiveText(nav), false, '前提：文字量确实不够');
     assert.equal(mustNotHide(nav), true, 'nav 是显式声明的导航 → 绝对保护');
     assert.equal(isNavigationLike(nav), true);

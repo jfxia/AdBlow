@@ -8,12 +8,12 @@ import {
 import { looksLikeTrackingListener, shouldAllowOpen } from './guards.ts';
 
 /**
- * MAIN world 注入。
+ * MAIN world injection.
  *
- * 必须在 MAIN world：`window.open` 与事件捕获都只能在页面自身上下文里改。
- * 因此这里**不能**用任何 chrome.* API（MAIN world 拿不到）。
+ * Must be MAIN world: `window.open` and event capture can only be patched in the page's own
+ * context, which is why no chrome.* API may be used here (unavailable in MAIN world).
  *
- * 依据：设计文档 §1.4（持久化弹窗状态）与点击劫持拦截。
+ * See design doc §1.4 (persisted popup state) and the click-hijack interception.
  */
 
 const HIDDEN_ATTR = 'data-adblow-hidden';
@@ -23,7 +23,7 @@ for (const type of ['pointerdown', 'keydown', 'touchstart'] as const) {
   addEventListener(type, () => { hadUserGesture = true; }, { capture: true, passive: true });
 }
 
-/** 立刻隐藏（与内容脚本用同一套标记与样式，便于统计与排查）。 */
+/** Hide immediately, using the same marker and styles as the content script. */
 function hideNow(el: Element): void {
   el.setAttribute(HIDDEN_ATTR, '1');
   const style = (el as HTMLElement).style;
@@ -34,7 +34,7 @@ function hideNow(el: Element): void {
   style.setProperty('padding', '0', 'important');
 }
 
-// ── 1) window.open 守卫 ──────────────────────────────────────────
+// window.open guard
 const rawOpen = window.open.bind(window);
 
 Object.defineProperty(window, 'open', {
@@ -50,12 +50,12 @@ Object.defineProperty(window, 'open', {
   },
 });
 
-// ── 2) 点击劫持拦截 ──────────────────────────────────────────────
+// Click-hijack interception.
 //
-// 现象（用户反馈）：页面加载后随便点哪里都会跳到别的网站。
-// 手法是覆盖一个看不见的全屏层，或用一个文档级点击处理函数把点击导流走。
-// 这里在**捕获相**、且注册得比页面脚本早（document_start），因此页面自己的
-// 处理函数不会被执行。
+// Reported symptom: after page load, clicking anywhere navigated off-site. The tricks are
+// an invisible full-viewport overlay, or a document-level click handler that redirects the
+// click. We run in the capture phase and register before page scripts (document_start), so
+// the page's own handlers never execute.
 
 function pointOf(ev: Event): { x: number; y: number } | null {
   const mouse = ev as MouseEvent;
@@ -67,7 +67,7 @@ function pointOf(ev: Event): { x: number; y: number } | null {
   return t ? { x: t.clientX, y: t.clientY } : null;
 }
 
-/** 取元素所属链接的信息（href 与是否不可见）。 */
+/** Link info for an element: href plus whether the anchor is invisible. */
 function linkInfo(el: Element | null): { href: string | null; invisible: boolean } {
   const anchor = el?.closest?.('a[href]') ?? null;
   if (!anchor) return { href: null, invisible: false };
@@ -104,7 +104,8 @@ function clickGuard(ev: Event): void {
 
   if (!verdict.block) return;
 
-  // 三重阻断：阻止默认导航 + 阻止同一节点上的其它监听器 + 阻止继续传播
+  // All three are needed: preventDefault kills the navigation, stopImmediatePropagation
+  // beats sibling listeners on the same node, stopPropagation stops the rest.
   ev.preventDefault();
   ev.stopImmediatePropagation();
   ev.stopPropagation();
@@ -116,40 +117,36 @@ function clickGuard(ev: Event): void {
 
 const CLICK_EVENTS = ['click', 'mousedown', 'mouseup', 'auxclick', 'pointerdown', 'touchstart'] as const;
 for (const type of CLICK_EVENTS) {
-  // window 捕获相最早触发；页面若也在同一相位注册，我们因为 document_start 而排在前面。
-  // passive: false 是必须的 —— 否则 touchstart 上不能 preventDefault。
+  // passive: false is mandatory — otherwise preventDefault is a no-op on touchstart.
+  // Capture phase on window fires first; document_start already puts us ahead of any
+  // handler the page registers in the same phase.
   window.addEventListener(type, clickGuard, { capture: true, passive: false });
   document.addEventListener(type, clickGuard, { capture: true, passive: false });
 }
 
-// ── 3) 持久化弹窗状态清理 ────────────────────────────────────────
+// Persisted popup-state cleanup
 function scrub(): void {
   for (const holder of [localStorage, sessionStorage]) {
     try {
       for (const key of keysToScrub(Object.keys(holder))) holder.removeItem(key);
     } catch {
-      // 某些上下文禁用 storage，忽略
+      // storage is disabled in some contexts
     }
   }
   try {
     window.name = scrubWindowName(window.name);
   } catch {
-    // 忽略
+    // ignore
   }
 }
 
 scrub();
 setInterval(scrub, 2000);
 
-// ── 4) 拦截文档级「点击即跳转」处理函数 ──────────────────────────
-//
-// 实测踩到的第三种点击劫持手法：
-//   document.addEventListener('click', () => { location.href = 广告地址 }, true)
-// 这种点击的目标是**正常内容**，所以事件层没法拦（拦了就是拦正常点击）；
-// 而 `location.href` 的赋值本身**无法被拦截**。唯一可行的位置是在注册时拒绝它。
-//
-// 只在文档级监听器、且源码里确实做了导航操作时才拒绝 —— 元素级监听器不受影响，
-// 因此正常的按钮/链接行为不会被破坏。
+// Refuse document-level "click navigates away" handlers at registration time. The click
+// target is normal content, so the event layer cannot block it, and assigning
+// `location.href` cannot be intercepted either. See looksLikeNavigationHijack in
+// clickGuard.ts. Element-level listeners are untouched, so buttons/links keep working.
 const rawAddEventListener = EventTarget.prototype.addEventListener;
 
 EventTarget.prototype.addEventListener = function patched(

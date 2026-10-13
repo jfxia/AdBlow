@@ -8,12 +8,9 @@ import {
   parseScriptletRule,
 } from '../../src/engine/filterList/scriptlet.ts';
 
-/**
- * 脚本注入规则的解析与编译（第三期）。
- *
- * 取舍依据是实测频率：2,807 条规则、50 个脚本名，**前 5 名覆盖 61%、前 10 名 81%**。
- * 所以"实现常用子集"是有据可依的，不是偷懒。
- */
+// Parsing and compilation of scriptlet-injection rules (third phase). The supported subset is
+// chosen on measured frequency: across 2,807 rules with 50 script names, the top 5 cover 61%
+// and the top 10 cover 81%, so implementing the common subset is evidence-based, not laziness.
 
 const parse = (line: string) => {
   const r = parseScriptletRule(line);
@@ -88,7 +85,7 @@ describe('别名表与支持子集的一致性', () => {
   it('每个支持的名字都必须能被某个别名解析到（否则永远用不上）', () => {
     const reachable = new Set(Object.values(SCRIPTLET_ALIASES));
     const unreachable = [...SUPPORTED_SCRIPTLETS].filter((c) => !reachable.has(c));
-    // `set-local-storage-item` / `remove-cookie` 等以规范名直接出现，也算可达
+    // `set-local-storage-item` / `remove-cookie` appear under their canonical name, so they count too.
     const selfNamed = unreachable.filter((c) => !SCRIPTLET_ALIASES[c]);
     assert.deepEqual(
       selfNamed,
@@ -113,10 +110,10 @@ describe('buildScriptletIndex：域名索引与统计', () => {
     parse('a.com##+js(aopr, x)'),
     parse('a.com##+js(set, y, false)'),
     parse('b.com##+js(nostif, /ad/)'),
-    parse('c.com##+js(acs, document.createElement, admiral)'), // 未支持
-    parse('d.com##+js(totally-unknown, x)'), // 未知
-    parse('~e.com##+js(aopr, x)'), // 排除型
-    parse('##+js(aopr, x)'), // 无域名限定 → 不做
+    parse('c.com##+js(acs, document.createElement, admiral)'), // unsupported
+    parse('d.com##+js(totally-unknown, x)'), // unknown
+    parse('~e.com##+js(aopr, x)'), // excluded form
+    parse('##+js(aopr, x)'), // no domain qualifier → skipped
   ];
   const index = buildScriptletIndex(rules);
 

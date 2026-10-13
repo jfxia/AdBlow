@@ -1,21 +1,18 @@
 /**
- * 界面文案的多语言（chrome.i18n）。
+ * UI text via chrome.i18n.
  *
- * ## 为什么单独一个模块
+ * Why a dedicated module: the same strings appear in two pages plus the manifest, each with
+ * its own lookup path — manifest `__MSG_key__` (replaced by the browser), HTML `data-i18n*`
+ * attributes filled by this module, and JS-built strings via `t('key', [subs])` — all backed
+ * by one `_locales/<lang>/messages.json`, so the manifest cannot end up translated while the
+ * UI is not.
  *
- * 文案出现在两个页面（popup / options）与 manifest 里，而取文案的方式各不相同：
- *   - manifest：`__MSG_key__`（浏览器直接替换）
- *   - HTML：靠 `data-i18n*` 属性 + 本模块统一填充
- *   - JS 动态拼的字符串：`t('key', [替换值])`
- * 三者共用同一份 `_locales/<lang>/messages.json`，避免"manifest 翻译了、界面没翻"。
- *
- * ## 为什么用 textContent 而不是 innerHTML
- *
- * 文案里可能带站点域名（用户可访问任意站点，域名来自页面）。用 `innerHTML`
- * 填充等于把页面可控字符串塞进扩展页面 —— 那是 XSS 面。一律 `textContent`。
+ * Why textContent instead of innerHTML: substitutions can contain site domains, and domains
+ * come from arbitrary pages. innerHTML would push page-controlled strings into an extension
+ * page — an XSS surface. Always textContent.
  */
 
-/** 取一条文案；缺失时回落到 key（便于一眼看出漏翻的项）。 */
+/** Fetch one message; falls back to the key, so missing translations are obvious. */
 export function t(key: string, substitutions?: (string | number)[]): string {
   const subs = substitutions?.map((s) => String(s));
   const msg = chrome.i18n.getMessage(key, subs);
@@ -23,9 +20,7 @@ export function t(key: string, substitutions?: (string | number)[]): string {
 }
 
 /**
- * 把 `data-i18n*` 属性填成对应语言的文案。
- *
- * 支持的属性：
+ * Fill `data-i18n*` attributes with the text for the current language:
  *   data-i18n             → textContent
  *   data-i18n-title       → title
  *   data-i18n-aria        → aria-label
@@ -53,7 +48,7 @@ export function applyI18n(root: ParentNode = document): void {
     (el as HTMLInputElement).placeholder = v;
   });
 
-  // 让 `<html lang>` 反映实际语言（影响字体回退、断行、无障碍朗读）
+  // Keep `<html lang>` accurate: it affects font fallback, line breaking and screen readers.
   const uiLang = chrome.i18n.getUILanguage?.() ?? 'zh-CN';
   document.documentElement.lang = uiLang;
 }

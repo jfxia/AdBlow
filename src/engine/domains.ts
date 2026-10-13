@@ -1,20 +1,15 @@
 /**
- * 从 DOM 元素里提取「跨站资源域名」。
+ * Extract cross-site resource domains from DOM elements — input to the self-learning
+ * network layer, where domains used by hidden ads are promoted to DNR block rules.
  *
- * 这是**自学习网络层**的输入：我们在 DOM 层把某个元素判定为广告并隐藏之后，
- * 把它用到的跨站域名记下来；同一个域名反复出现在被隐藏的广告里，就晋级为
- * DNR 拦截规则。这样未知站点从第 N 次访问起也能拿到**网络层**保护，
- * 而且完全不需要用户配置，也不需要任何第三方过滤列表。
- *
- * ⚠️ 安全前提（由调用方负责，见 src/content/index.ts）：
- * 本模块只负责"提取"，不负责"判断该不该学"。**必须排除那些同时被可见内容
- * 使用的域名** —— 试点站的 `pic.wvxrrip.cn` 既是广告素材 CDN 又是正文缩略图
- * CDN，学它就会把正文图全废掉。
+ * ⚠️ The caller decides what may be learned (src/content/index.ts) and must exclude
+ * domains visible content uses too: the pilot site's `pic.wvxrrip.cn` serves both ad
+ * assets and body thumbnails.
  */
 
 import { isIpLiteral, registrableDomain, unwrapCdnUrl } from './score.ts';
 
-/** 带外链的资源选择器（不含 a[href]：那是点击目标，不是加载资源）。 */
+/** Resource selectors with an off-site URL (a[href] is a click target, not a resource). */
 const RESOURCE_SELECTOR = [
   'img[src]',
   'img[data-src]',
@@ -29,10 +24,8 @@ const RESOURCE_SELECTOR = [
 ].join(',');
 
 /**
- * 只算「媒体」的资源选择器。
- *
- * 单独列出来是因为它承载一条**结构性安全保证**：只要某个域名在本页任何位置
- * 充当过图片/视频来源，就绝不把它学成广告域名。见 learnableAdDomains。
+ * Media-only selectors, kept separate for a structural safety guarantee: a domain
+ * that ever serves an image/video here is never learned as an ad domain.
  */
 export const MEDIA_SELECTOR = [
   'img[src]',
@@ -44,7 +37,7 @@ export const MEDIA_SELECTOR = [
   'object[data]',
 ].join(',');
 
-/** 从单个元素自身取出资源 URL（不递归子元素）。 */
+/** Resource URLs from the element itself (does not recurse into children). */
 export function resourceUrls(el: Element): string[] {
   const urls: string[] = [];
   if (!el.matches(RESOURCE_SELECTOR)) return urls;
@@ -55,7 +48,6 @@ export function resourceUrls(el: Element): string[] {
   return urls;
 }
 
-/** 从单个元素自身取出外链 URL（`a[href]`）。 */
 export function linkUrls(el: Element): string[] {
   if (!el.matches('a[href]')) return [];
   const href = el.getAttribute('href');
@@ -68,22 +60,17 @@ function isAbsoluteUrl(u: string): boolean {
 
 export type DomainScope = {
   /**
-   * 是否把 `a[href]` 也算进去。
-   *
-   * 为什么需要这个开关：**学习**广告域名时应该算上外链——那些域名是广告落地页，
-   * 学会后拦掉它们的**子资源**可以挡住弹窗与强制跳转；而拦截子资源并不影响
-   * `<a href>` 导航本身（DNR 规则排除了 main_frame），所以不会妨碍用户点击。
-   *
-   * 而判断「某域名是否被可见内容使用」时不该算外链——可见内容里出现一个指向
-   * 该域名的链接，不构成"该域名是站点的正常资源来源"。
+   * Whether `a[href]` counts. Learning **should** include outbound links (ad
+   * landing pages whose subresources we block; main_frame is never blocked, so
+   * navigation still works), but judging "used by visible content" must not: a
+   * mere link does not make a domain a normal resource source.
    */
   includeLinks?: boolean;
 };
 
 /**
- * 提取元素**及其子树**里所有跨站域名。
- *
- * 返回值已排除：相对地址、与页面同可注册域名的地址、以及无法解析的地址。
+ * All cross-site domains in the element and its subtree; relative URLs,
+ * same-registrable-domain URLs and unparseable URLs are already excluded.
  */
 export function crossSiteResourceDomains(
   el: Element,
@@ -103,11 +90,10 @@ export function crossSiteResourceDomains(
       return;
     }
     /**
-     * ⚠️ 跳过 IP 字面量。
-     *
-     * 实测踩过：站点把追踪端点放在裸 IP 上（`https://54.169.219.76:15212/...`），
-     * 而裸 IP 往往是**共享基础设施**（CDN 边缘）；按 `||ip^` 拦截既不够精确，
-     * 命中范围又可能波及无关服务。收益小、风险实在，因此不学。
+     * ⚠️ Skip IP literals: the site's tracking endpoint sat on a bare IP
+     * (`https://54.169.219.76:15212/...`), and bare IPs are shared CDN
+     * infrastructure — a `||ip^` block is imprecise and spills onto unrelated
+     * services. Small upside, real risk, so never learned.
      */
     if (isIpLiteral(parsed.hostname)) return;
 
@@ -130,9 +116,7 @@ export function crossSiteResourceDomains(
 }
 
 /**
- * 提取元素**及其子树**里所有跨站**媒体**域名（图片/视频/嵌入）。
- *
- * 用途见 learnableAdDomains：这些域名一律不学。
+ * All cross-site **media** domains in the element and its subtree; these are never learned.
  */
 export function crossSiteMediaDomains(el: Element, pageHost: string): string[] {
   const pageReg = registrableDomain(pageHost);
@@ -166,7 +150,7 @@ export function crossSiteMediaDomains(el: Element, pageHost: string): string[] {
   return [...out];
 }
 
-/** 整页所有跨站媒体域名（含被隐藏的部分）。 */
+/** All cross-site media domains page-wide (including hidden parts). */
 export function pageWideMediaDomains(root: ParentNode, pageHost: string): Set<string> {
   const out = new Set<string>();
   for (const el of Array.from(root.querySelectorAll(MEDIA_SELECTOR))) {
@@ -175,23 +159,16 @@ export function pageWideMediaDomains(root: ParentNode, pageHost: string): Set<st
   return out;
 }
 
-/** 一个媒体域名要被多少个元素使用，才算"站点自己的内容 CDN"。 */
+/** How many elements must use a media domain before it counts as the site's own content CDN. */
 export const CONTENT_CDN_MIN_USES = 3;
 
 /**
- * 找出**站点自己的内容 CDN**：被多个媒体元素共同使用的跨站媒体域名。
+ * Find the site's own content CDN: a cross-site media domain used by >=3 media
+ * elements (ad assets are 1-2 images; content thumbnails come in bulk). Those stop
+ * counting as cross-site assets.
  *
- * ## 为什么需要（用户报告的真实误杀）
- *
- * 「跨站素材」原本每张计 3 分，于是**任何脚本渲染的块只要有 2 张以上来自 CDN
- * 的图片就够 6 分被隐藏** —— 而把缩略图放 CDN 是全网通行做法。
- * 用户报告的视频站「推荐栏被屏蔽」、xchina.co「正文被屏蔽」都符合这个特征。
- *
- * 判据：**被 ≥3 个媒体元素使用的跨站域名 = 内容 CDN**（广告素材通常只有
- * 一两张，而内容缩略图是成片的）。这些域名不再贡献"跨站素材"分。
- *
- * 代价方向是有意的：宁可漏掉"只靠素材域名判定"的广告（这类广告还有命名、
- * 网络层名单兜着），也不要因为图片放 CDN 就把正文成片隐藏。
+ * Why: at 3 points per asset, any block with 2 CDN images hit the 6-point threshold
+ * and was hidden, while CDN thumbnails are universal practice.
  */
 export function frequentMediaDomains(
   root: ParentNode,

@@ -1,22 +1,21 @@
 /**
- * 脚本注入引擎的 MAIN world 入口（构建期由 Rollup 打成 `scriptlets-engine.js`）。
+ * MAIN world entry of the scriptlet engine (Rollup emits it as `scriptlets-engine.js`).
  *
- * 设计要点：**引擎与数据分离**。
- *   - 本文件（引擎）随 manifest 声明为 `<all_urls>`，只负责实现与分发
- *   - 构建期生成的 `scriptlets/bundle-N.js` 只含**该组域名的规则表**，
- *     由 manifest 声明为匹配那批域名 —— 浏览器保证只在相关站点注入
+ * Engine and data are separate: this file is declared `<all_urls>` in the manifest and only
+ * implements and dispatches, while the build-generated `scriptlets/bundle-N.js` contains the
+ * rule table for one group of domains and is declared for those domains — so the browser
+ * injects it only where it is relevant.
  *
- * 为什么这样分：脚本必须在 `document_start`、**页面脚本之前**执行完毕。
- * 如果靠内容脚本向 SW 取数据再执行，就会与页面脚本产生竞态（SW 消息是异步的）。
- * 由 manifest 声明匹配域名、浏览器直接注入，就没有竞态。
- * uBlock Origin Lite 用的是同一套机制。
+ * Why: scriptlets must finish at `document_start`, before page scripts. Asking the service
+ * worker for data from the content script would race the page (SW messages are async);
+ * manifest-driven injection does not race. uBlock Origin Lite uses the same mechanism.
  */
 import { domainKeysForHost } from '../engine/filterList/cosmetic.ts';
 import { runScriptlets, type Invocation } from './scriptlets.ts';
 
 export type ScriptletTable = Record<string, Invocation[]>;
 
-/** 解码单个条目体（`名字下标 \x01 参数… \x02 …`）。 */
+/** Decode one entry body (`nameIndex \x01 args… \x02 …`). */
 export function decodeEntry(names: string[], body: string): Invocation[] {
   const invocations: Invocation[] = [];
   for (const raw of body.split('\x02')) {
@@ -29,7 +28,7 @@ export function decodeEntry(names: string[], body: string): Invocation[] {
   return invocations;
 }
 
-/** 全量解码（测试与可读性用；运行期走 runPacked 的惰性路径）。 */
+/** Full decode (for tests and readability; runtime uses runPacked's lazy path). */
 export function decodePacked(namesJoined: string, data: string): Map<string, Invocation[]> {
   const map = new Map<string, Invocation[]>();
   if (!data) return map;
@@ -45,10 +44,12 @@ export function decodePacked(namesJoined: string, data: string): Map<string, Inv
 }
 
 /**
- * 纯查表：按主机名从紧凑表里选出调用（不做任何执行）。
+ * Pure lookup: pick the invocations for a host from the packed table, without executing
+ * anything.
  *
- * 单独抽出来是为了**可测**：执行部分要用到 `window`，而查表逻辑
- * （尤其是边界字符防误命中）是这套编码里最容易出错的地方。
+ * Split out to stay testable — execution needs `window`, and the lookup logic (especially
+ * the boundary-character guard against false hits) is the most error-prone part of this
+ * encoding.
  */
 export function selectPacked(namesJoined: string, data: string, host: string): Invocation[] {
   const names = namesJoined ? namesJoined.split('\x01') : [];
@@ -68,24 +69,22 @@ export function selectPacked(namesJoined: string, data: string, host: string): I
 }
 
 /**
- * 按主机名从紧凑表里取调用并执行；返回实际执行的条数。
+ * Look up the invocations for a host in the packed table and run them; returns how many ran.
  *
- * ## 为什么是"惰性查表"而不是先建 Map
+ * Lazy lookup rather than building a Map first: the table is 277 KB, so decoding it fully on
+ * every page (and every iframe) would create 2,800+ strings and objects — on an ad-heavy page
+ * with a dozen iframes that turns "one stall at extension load" into "a stall on every page",
+ * only moving the problem.
  *
- * 数据表 277 KB。如果每个页面（而且是每个 iframe）都先全量解码成 Map，
- * 就要建 2,800 多个字符串与对象 —— 广告重的页面有十几个 iframe 时，
- * 这个开销会从"加载扩展时卡死一次"变成"每个页面都卡一下"，
- * 只是把问题搬了个地方。
- *
- * 所以：用原生 `indexOf` 带**边界字符**在字符串里定位（几十微秒），
- * 只有真的命中该主机名时才解码那一条。
- * 边界字符（`\x04` 前导、`\x03` 收尾）保证 `a.com` 不会命中 `b.a.com`。
+ * Instead native `indexOf` locates the host with boundary characters (tens of microseconds)
+ * and only a hit gets decoded. The `\x04` prefix and `\x03` suffix keep `a.com` from matching
+ * `b.a.com`.
  */
 export function runPacked(namesJoined: string, data: string, host: string): number {
   return execute(selectPacked(namesJoined, data, host));
 }
 
-/** 按主机名从规则表里取出要执行的调用并执行。 */
+/** Look up and run the invocations for a host from an object table. */
 export function runTable(table: ScriptletTable, host: string): number {
   const invocations: Invocation[] = [];
   for (const key of domainKeysForHost(host)) {
@@ -111,12 +110,12 @@ function execute(invocations: Invocation[]): number {
           : ''),
     );
   } catch {
-    /* console 不可用也要静默 */
+    /* stay silent even when console is unavailable */
   }
   return result.applied.length;
 }
 
-// 暴露给构建期生成的 bundle 文件调用
+// Consumed by the build-generated bundle files.
 (window as unknown as Record<string, unknown>).__adblowScriptlets = {
   run: runTable,
   runPacked,

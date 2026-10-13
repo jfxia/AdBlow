@@ -1,8 +1,8 @@
 /**
- * 最小键值存储抽象。
+ * Minimal key/value store.
  *
- * 自学习规则、站点开关、统计都走它；`chrome.*` 只出现在适配器里，
- * 因此这三块逻辑都能在 Node + jsdom 里直接测。
+ * Learned rules, site switches and stats all go through it. `chrome.*` appears
+ * only in the adapter, so all three work under Node + jsdom.
  */
 
 export interface KvStore {
@@ -12,7 +12,7 @@ export interface KvStore {
   keys(): Promise<string[]>;
 }
 
-/** chrome.storage.local 适配器（浏览器侧）。 */
+/** chrome.storage.local adapter (browser side). */
 export function chromeLocal(): KvStore {
   return {
     async get<T>(key: string): Promise<T | undefined> {
@@ -31,7 +31,7 @@ export function chromeLocal(): KvStore {
   };
 }
 
-/** 内存实现，供测试使用。 */
+/** In-memory implementation for tests. */
 export function memoryStore(initial: Record<string, unknown> = {}): KvStore {
   const data: Record<string, unknown> = { ...initial };
   return {

@@ -5,15 +5,12 @@ import { findLinkFarms, sweep, type JudgeOptions } from '../../src/content/engin
 import { selectorsFrom } from '../../src/content/engine.ts';
 import { dgavPack } from '../../src/rules/sites/dgav.ts';
 
-/**
- * dgav37 系列站点的结构化回归（用中立标签复刻真实结构，不含任何站点内容）。
- *
- * 复刻的是**结构特征**，这才是判据依赖的东西：
- *   - 页脚一个容器里挂着 5 个以上**不同跨站域名**的链接（真实页面实测 39 个）
- *   - 广告图片条：`div.streamer-container2 > ul.streamer-box2 > li > a > img`
- *     （真实页面 10 张图，图片在站点自己的 CDN 上，外链指向本站 —— 零通用信号）
- *   - 正文列表：`div.posts > div.post > a.img > img.thumb`（**绝不能碰**）
- */
+// Structural regression for the dgav37 series, rebuilt with neutral markup (no site
+// content). Only the shapes matter: a footer container holding 5+ links to distinct
+// cross-site domains (39 on the real page), an image strip
+// `.streamer-container2 > ul.streamer-box2 > li > a > img` whose images sit on the
+// site's own CDN (zero generic signal), and the post list `div.posts > div.post`
+// which must never be touched.
 
 const HOST = 'javeve-2026085.dgav37.com';
 const URL_UNDER_TEST = `https://${HOST}/ja/list/44247.html`;

@@ -23,9 +23,8 @@ describe('learnedDomainRules：自学习域名 → DNR 拦截规则', () => {
   });
 
   it('❗❗绝不拦 image / media（事故回归：曾导致整站图片不显示）', () => {
-    // 2026-10-10 真实事故：1024cg 首页所有图片不显示。
-    // 内容缩略图与广告素材共用同一个 CDN，域名被学走后连带把正文图一起拦掉了。
-    // 结构性保证：自学习来的网络规则**永远不可能弄坏页面的图片与视频**。
+    // Incident 2026-10-10: every image on 1024cg vanished — content thumbnails and ad
+    // creatives shared one CDN, so learning the domain blocked the content images too.
     const types = learnedDomainRules(['ads.example.com'])[0]!.condition.resourceTypes;
     assert.ok(!types.includes('image'), '自学习规则不得拦图片');
     assert.ok(!types.includes('media'), '自学习规则不得拦音视频');
@@ -34,14 +33,10 @@ describe('learnedDomainRules：自学习域名 → DNR 拦截规则', () => {
   });
 
   it('❗❗绝不拦 script / stylesheet / font（事故回归：曾让整页渲染崩掉）', () => {
-    // 2026-10-13 真实事故：用户报告某视频站开启过滤后"播放器、推荐栏被屏蔽"。
-    // 取证：服务端 HTML 只有 18 个 <img>，开启过滤后页面恰好只剩这 18 个
-    //（未开启时 67 个，多出的全是页面 JS 运行时创建的）；
-    // 播放器库 Hls 未定义、播放器容器 690x0。
-    // 该站的关键脚本（jquery / common.js / owl.carousel）与播放器库（plyr / hls.js）
-    // 全部来自它自己的 CDN —— 自学习把该 CDN 域名学成广告域名后，
-    // 整站的 CSS/JS 被拦，页面渲染与功能一起崩。
-    // 结构性保证：**自学习永远不可能弄坏页面自身的样式与脚本。**
+    // Incident 2026-10-13: a video site's player and recommendation rail vanished. Its own
+    // CDN served the site's CSS/JS and player libs; learning it as an ad domain blocked them
+    // and broke rendering. Structural guarantee: learned rules can never break a page's own
+    // styles or scripts.
     const types = learnedDomainRules(['ads.example.com'])[0]!.condition.resourceTypes;
     for (const t of ['script', 'stylesheet', 'font']) {
       assert.ok(!types.includes(t as never), `自学习规则不得拦 ${t}`);
@@ -57,8 +52,8 @@ describe('learnedDomainRules：自学习域名 → DNR 拦截规则', () => {
   });
 
   it('❗爆炸半径：只在教会它的站点上生效', () => {
-    // "这个域名在本站是广告域名"不等于"它在别的站点也是"：
-    // 第三方 CDN 被多站共用时，A 站学到的域名很可能正是 B 站自己的资源来源。
+    // "This domain is an ad domain here" does not mean "there too": a third-party CDN shared
+    // by many sites can be A's ad host and B's own resource host.
     const rules = learnedDomainRules([
       { domain: 'ads.example.com', initiators: ['a.com', 'b.com', 'a.com'] },
     ]);
@@ -85,7 +80,7 @@ describe('learnedDomainRules：自学习域名 → DNR 拦截规则', () => {
     const ids = rules.map((r) => r.id);
     assert.equal(new Set(ids).size, ids.length);
     assert.ok(ids.every((id) => id >= LEARNED_DOMAIN_ID_BASE));
-    // 与站点规则包的区间（10000 起）不重叠
+    // Must not overlap the site-pack id range (starts at 10000).
     assert.ok(Math.min(...ids) > 19999);
   });
 

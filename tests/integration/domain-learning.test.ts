@@ -14,13 +14,10 @@ import { buildPristineIndexFromHtml } from '../../src/engine/pristine.ts';
 import { selectorsFrom } from '../../src/content/engine.ts';
 import { pilotPack } from '../../src/rules/sites/pilot.ts';
 
-/**
- * 网络层自学习的**安全过滤**回归。
- *
- * 这里守的是两起「学错一个域名就把整站搞坏」的事故：
- *   风险 A：pic.wvxrrip.cn 既是广告素材 CDN 又是正文缩略图 CDN
- *   镜像域：cgw666.com 是试点站的 canonical 域名且托管正文图
- */
+// Safety-filter regression for network-layer domain learning, covering two incidents
+// where learning one domain broke a whole site: risk A (pic.wvxrrip.cn served both ad
+// creatives and content thumbnails) and mirror domains (cgw666.com is the pilot site's
+// canonical host and also hosts content images).
 
 const PILOT = 'afford.gjvrohros.cc';
 const PILOT2 = '1024cg.com';
@@ -63,7 +60,7 @@ describe('siteOwnedDomains：识别站点自有域名', () => {
     const owned = siteOwnedDomains(doc, PILOT);
     assert.ok(owned.has('cgw666.com'), JSON.stringify([...owned]));
     assert.ok(owned.has('example.net'));
-    // 同站图标不应被算成"自有跨站域名"，但算进去也无害
+    // A same-site icon is not an owned cross-site domain, but counting it is harmless.
     assert.ok(owned.size <= 3);
   });
 
@@ -76,7 +73,7 @@ describe('siteOwnedDomains：识别站点自有域名', () => {
 
 describe('learnableAdDomains：只学「被隐藏广告独占」的域名', () => {
   it('被隐藏广告引用的跨站脚本域名会被学到', () => {
-    // 用 script 而不是 img：媒体域名一律不学（见上面的事故回归用例）
+    // Uses script rather than img: media domains are never learned (see incident case below).
     const doc = docFor(
       `<html><head></head><body>
         <div data-adblow-hidden><script src="https://adserver.example.com/s.js"></script></div>
@@ -156,8 +153,8 @@ describe('learnableAdDomains：只学「被隐藏广告独占」的域名', () =
   });
 
   it('只有 a[href] 的广告**会**产出可学域名（落地页域名，用于挡弹窗）', () => {
-    // 拦截子资源不影响 <a href> 导航（DNR 规则排除 main_frame），
-    // 所以学落地页域名是安全的，而且能挡住弹窗与强制跳转。
+    // DNR rules exclude main_frame, so blocking a subresource cannot break <a href>
+    // navigation: learning landing-page domains is safe and stops popups/forced redirects.
     const doc = docFor(
       `<html><head></head><body>
         <div data-adblow-hidden><a href="https://00076049.com/landing"></a></div>
@@ -173,7 +170,7 @@ describe('learnableAdDomains：跑在真实 fixture 上', () => {
     const doc = docFor(pilotFixture, PILOT);
     sweep(doc.documentElement, optionsFor(doc, PILOT, selectorsFrom([pilotPack], []).curated));
 
-    // 确认清扫确实隐藏了东西（否则这条测试没有意义）
+    // Guard: the sweep must actually hide something, or this test proves nothing.
     assert.ok(doc.querySelectorAll('[data-adblow-hidden]').length > 0, '清扫未隐藏任何元素');
 
     const learnable = learnableAdDomains(doc, PILOT);
@@ -183,12 +180,10 @@ describe('learnableAdDomains：跑在真实 fixture 上', () => {
   });
 
   it('❗❗ 事故回归：内容图尚未懒加载出来时，共用 CDN 绝不能被学走', () => {
-    // 这是 1024cg 首页「所有图片都不显示」的直接原因：
-    //   - 内容缩略图与广告素材共用同一个 CDN（pic.jtzatly.cn 之类）
-    //   - 内容缩略图是**懒加载**的，检查时它的 src/data-src 还没填上
-    //   - 于是「是否被可见内容使用」这一判断被骗过，域名被学走并晋级，
-    //     随后网络层把该 CDN 全部拦掉 —— 整站图片不显示
-    // 现在改成结构性判断：只要某域名在本页充当过**媒体来源**，一律不学。
+    // Regression: every image on 1024cg's home page vanished. Content thumbnails and
+    // ad creatives shared one CDN, and the lazy-loading thumbnails had no src yet when
+    // the "used by visible content" check ran, so the CDN was learned and then blocked
+    // wholesale. Now any domain that has served media on the page is never learned.
     const doc = docFor(
       `<html><head></head><body>
         <div data-adblow-hidden><img src="https://pic.jtzatly.cn/ad-creative.jpeg"></div>
@@ -248,7 +243,7 @@ describe('learnableAdDomains：跑在真实 fixture 上', () => {
       learnable.length > 0,
       '第二站点的广告卡里有一批随机跨站落地页域名，应当学到它们',
     );
-    // 学到的域名必须是跨站的，且不能是站点自己
+    // Learned domains must be cross-site and must not be the site's own.
     for (const d of learnable) {
       assert.ok(!d.endsWith('1024cg.com'), `学到了站点自己的域名 ${d}`);
     }

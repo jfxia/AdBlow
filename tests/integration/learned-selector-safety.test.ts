@@ -10,19 +10,10 @@ import {
   type JudgeOptions,
 } from '../../src/content/engine.ts';
 
-/**
- * 自学习**选择器**的安全闸门回归。
- *
- * 事故发生经过（2026-10-10，用户反馈「1024cg 首页所有图片都不显示」）：
- *   1. 自学习从被隐藏元素推导出 `.post-card` —— 正是规则包明令禁止的正文卡片类名，
- *      而 `validateSitePack` 只校验规则包，管不到自学习路径；
- *   2. 又推导出 `.tjtagmanager` —— 站点通用外链包装类，命中 43 个元素、含 22 张图；
- *   3. 而这两条都被**直接写进 document_start 注入的样式表**，那条路径没有任何
- *      元素级守卫，于是页面一开头就隐藏了一大片内容与图片。
- *
- * 此前所有 E2E 都用全新 profile、没有累积的学习结果，因此这个类别的 bug
- * 在测试里永远不出现。本文件专门补上这一层。
- */
+// Safety-gate regression for learned selectors. Incident (2026-10-10, "all images on
+// 1024cg vanished"): learning emitted `.post-card` (content cards) and `.tjtagmanager`
+// (43 elements, 22 images) straight into the document_start stylesheet, which had no
+// element-level guard. Earlier E2E runs used a fresh profile, so it never surfaced.
 
 const HOST = 'afford.gjvrohros.cc';
 const VIEWPORT = 1920 * 1080;
@@ -57,7 +48,7 @@ describe('recordableSelector：自学习入库前的四道闸门', () => {
   });
 
   it('❗拒绝会横扫大量图片的宽泛包装类（.tjtagmanager 形态）', () => {
-    // 43 个元素、其中 22 张图 —— 这正是事故里的形态
+    // 43 elements including 22 images — the shape seen in the incident.
     const many = Array.from(
       { length: 22 },
       (_, i) => `<a class="tjtagmanager"><img src="/banner-${i}.png"></a>`,
@@ -100,7 +91,7 @@ describe('recordableSelector：自学习入库前的四道闸门', () => {
 
 describe('judgeElement：自学习选择器不授予「无条件隐藏」特权', () => {
   it('❗宽泛包装类即使已被学过，也不会隐藏含图片的元素（已污染存储的兜底）', () => {
-    // 用户浏览器里可能已经存了 .tjtagmanager；这是重载扩展后不再误伤的保证
+    // A user's browser may already have `.tjtagmanager` stored; guards extension reloads.
     const doc = root(
       '<div><a class="tjtagmanager"><img src="/usr/themes/Mirages/images/banner.png"></a></div>',
     );
@@ -163,10 +154,10 @@ describe('真实 fixture：自学习在第二站点上不会产出危险选择�
     const fixture = readFileSync(new URL('../fixtures/1024cg-home.html', import.meta.url), 'utf8');
     const doc = new JSDOM(fixture, { url: 'https://1024cg.com/' }).window.document;
 
-    // 事故中实际出现过的两条危险选择器
+    // Dangerous selectors produced by the incident.
     for (const dangerous of ['.post-card', '.tjtagmanager', '.adspop']) {
       const accepted = recordableSelector(hitFor(dangerous), doc);
-      if (dangerous === '.adspop') continue; // 该站在 fixture 里没有此元素，跳过
+      if (dangerous === '.adspop') continue; // not present in this fixture
       assert.equal(accepted, null, `${dangerous} 不应被接受为自学习规则`);
     }
   });

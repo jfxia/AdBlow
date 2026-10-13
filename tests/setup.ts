@@ -1,11 +1,10 @@
 /**
- * 测试环境引导：把 jsdom 的 DOM 挂到 Node 全局。
+ * Test bootstrap: installs jsdom's DOM onto Node globals.
  *
- * 为什么不用 Vitest：本沙箱禁止命名管道，Vite 在 Windows 上会调
- * exec('net use') 探测网络驱动器（optimizeSafeRealPathSync），
- * 该 exec 因管道受限抛 spawn EPERM，导致 Vite/Vitest 配置加载阶段即失败。
- * 同理 `node --test` 会为每个测试文件 spawn 子进程，也不可用。
- * 因此测试走「单进程内 `node tests/run-all.ts`」路线：零子进程。
+ * No Vitest: the sandbox forbids named pipes, and Vite's network-drive probe
+ * (`exec('net use')` in optimizeSafeRealPathSync) fails with spawn EPERM on Windows,
+ * so config loading dies. `node --test` is unusable for the same reason (one child
+ * process per test file), hence the single-process `node tests/run-all.ts` route.
  */
 import { JSDOM } from 'jsdom';
 
@@ -48,7 +47,6 @@ for (const key of KEYS) {
   try {
     target[key] = value;
   } catch {
-    // Node 24 的 navigator/location 是只读 getter，跳过即可；
-    // 这些全局在本阶段的纯引擎测试里用不到。
+    // Node 24 exposes navigator/location as read-only getters; these tests don't need them.
   }
 }

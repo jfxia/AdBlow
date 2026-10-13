@@ -3,14 +3,11 @@ import assert from 'node:assert/strict';
 import { parseFilterLine, parseList } from '../../src/engine/filterList/parse.ts';
 import { compileFilters, simplifyRegex, PRIORITY } from '../../src/engine/filterList/compile.ts';
 
-/**
- * 过滤列表语法解析与编译 —— 集成 EasyList 系列表的核心。
- *
- * 最重要的两组断言：
- *   1. **不认识/表达不了的选项必须丢弃整条规则**，绝不静默放宽拦截范围
- *      （`||x.com^$csp=...` 忽略 $csp 就变成"拦 x.com 全部"，比原意更宽）
- *   2. **预算裁剪时优先保住例外规则** —— 例外是防站点损坏的主力
- */
+// Filter-list syntax parsing and compilation — the core of integrating the EasyList family.
+// The two assertions that matter most: an option the parser cannot understand or express must
+// drop the whole rule rather than silently widen blocking (`||x.com^$csp=...` with $csp
+// ignored would become "block all of x.com"), and budget trimming must spare exception rules
+// first, since exceptions are the main defence against breaking sites.
 
 const net = (line: string) => {
   const r = parseFilterLine(line);
@@ -203,7 +200,7 @@ describe('compileFilters：编译与预算', () => {
       rulesetSize: 100,
       regexBudget: 10,
     });
-    // MAX_DOMAINS_PER_RULE 是 2000，25 个域名不会触发切分
+    // MAX_DOMAINS_PER_RULE is 2000, so 25 domains don't trigger splitting.
     assert.equal(rulesets.flat().length, 1);
   });
 
@@ -225,7 +222,8 @@ describe('compileFilters：编译与预算', () => {
     const rules = rulesets.flat();
     const plain = rules.find((r) => r.condition.requestDomains?.includes('a.com'))!;
     const explicit = rules.find((r) => r.condition.requestDomains?.includes('b.com'))!;
-    // 不写 resourceTypes = DNR 的默认「除主文档外全部」，正是我们要的语义
+    // Omitting resourceTypes means DNR's default "everything but the main frame",
+    // which is exactly the semantics we want.
     assert.equal(
       plain.condition.resourceTypes,
       undefined,
@@ -278,7 +276,7 @@ describe('compileFilters：编译与预算', () => {
       rulesetSize: 10,
       regexBudget: 0,
     });
-    // 打包规则优先占预算：1 个域名打包成 1 条，正好用满
+    // Packed rules take budget first: one domain packed into one rule uses it up exactly.
     assert.deepEqual(rulesets.flat()[0]!.condition.requestDomains, ['valuable.com']);
   });
 
@@ -292,7 +290,7 @@ describe('compileFilters：编译与预算', () => {
   it('按 rulesetSize 分卷', () => {
     const lines = Array.from({ length: 20 }, (_, i) => `||s${i}.com^`);
     const { rulesets } = compileFilters(parseAll(lines), { budget: 100, rulesetSize: 4, regexBudget: 1 });
-    // 20 个同条件域名 → 1 条打包规则；分卷按"规则条数"而不是域名数
+    // 20 same-condition domains → one packed rule; rulesets split by rule count, not domain count.
     assert.equal(rulesets.flat().length, 1);
   });
 

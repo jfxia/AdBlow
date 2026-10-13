@@ -1,11 +1,8 @@
 /**
- * 站点规则包的 match pattern 匹配。
- *
- * 支持 MV3 match pattern 的最小子集：`*://host/path`、`*://*.host/path`，
- * 其中 host 与 path 可用 `*` 通配。
- *
- * 只对 pathname 做路径匹配（不并入 query）。本项目自有规则包一律用 `/*`，
- * 因此这个简化不影响行为；若将来需要区分 query，必须在此处显式处理。
+ * Match-pattern matching for site rule packs: the minimal MV3 subset
+ * `*://host/path` and `*://*.host/path`, with `*` wildcards in host and path.
+ * Paths match pathname only (no query) — every in-repo pack uses `/*`, so that is
+ * behavior-neutral; distinguishing query would have to be done here.
  */
 
 const PATTERN_RE = /^(\*|https?|file|ftp):\/\/([^/]*)(\/.*)$/;

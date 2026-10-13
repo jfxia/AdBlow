@@ -1,13 +1,11 @@
 /**
- * 自研规则模型。
- *
- * 本项目的核心决策之一是**不引入任何第三方过滤列表**，因此这里刻意不实现
- * ABP/EasyList 语法兼容——规则只由我们自己写（站点规则包）或引擎自学习产生。
+ * Our own rule model: ABP/EasyList syntax is deliberately not implemented, because
+ * rules come only from our own site packs or from engine self-learning.
  */
 
 /**
- * DNR 资源类型。刻意使用自有联合类型而非 chrome.* 类型，
- * 目的是让整个 src/engine/ 保持浏览器无关，可在 Node 里直接单测。
+ * DNR resource types. Deliberately our own union rather than chrome.* types, so all
+ * of src/engine/ stays browser-agnostic and unit-testable in Node.
  */
 export type ResourceType =
   | 'main_frame'
@@ -27,7 +25,7 @@ export type ResourceType =
   | 'other';
 
 export type NetworkRule = {
-  /** domain → `||host^`；path → 原样子串；regex → 原样正则。 */
+  /** domain → `||host^`; path → raw substring; regex → raw regex. */
   kind: 'domain' | 'path' | 'regex';
   value: string;
   resourceTypes: ResourceType[];
@@ -41,10 +39,8 @@ export type SitePack = {
 };
 
 /**
- * 误伤护栏（设计文档 §2，2026-10-10 实测取证）。
- *
- * 命中即视为规则包非法。这些改动的共同点是**会让网站直接不可用**，
- * 比漏拦广告严重得多。
+ * False-positive guardrails (design doc §2): a hit makes the pack invalid. These
+ * all make a site unusable outright, which is far worse than missing an ad.
  */
 const FORBIDDEN_COSMETIC: { re: RegExp; why: string }[] = [
   {
@@ -65,13 +61,10 @@ const FORBIDDEN_NETWORK: { re: RegExp; why: string }[] = [
 ];
 
 /**
- * 单条选择器的禁用判定。
- *
- * **自学习路径也必须走这里**（2026-10-10 事故）：自学习曾推导出 `.post-card`
- * 并写进规则库 —— 那正是 FORBIDDEN_COSMETIC 明令禁止的选择器，但
- * `validateSitePack` 只管规则包、管不到自学习结果，于是正文卡片被整片隐藏。
- *
- * 返回拒绝原因；null 表示允许。
+ * Verdict for a single selector. **The self-learning path must run through this
+ * too** (2026-10-10): it derived the banned `.post-card`, which `validateSitePack`
+ * only checked for packs, so whole article card lists were hidden.
+ * Returns the reason, or null when allowed.
  */
 export function forbiddenSelectorReason(selector: string): string | null {
   const trimmed = selector.trim();

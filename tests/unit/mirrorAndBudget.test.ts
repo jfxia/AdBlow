@@ -8,22 +8,11 @@ import {
 } from '../../src/content/engine.ts';
 import { brandLabels, isSameBrand, scoreNode } from '../../src/engine/score.ts';
 
-/**
- * 「整页被清空」这类误杀的回归 —— 用户报告 dgav36.xyz。
- *
- * ## 事故
- *
- * 该站有张「最新镜像网址」目录页，**整页正文就是几十张镜像域名卡片**
- * （链到 dgav39.com / dgav40.com…）。启发式逐张判定，每张都"有证据"
- * （跨站链接 2 个 = 8 分 > 阈值 6），于是 96 个块全被隐藏 ——
- * 用户看到"正文被误杀"。
- *
- * ## 两个修复
- *
- *   1. **同品牌域名软化**：镜像/备用域名不算跨站广告证据
- *   2. **页级预算兜底**：累计隐藏超过全页七成就停手 ——
- *      补上"从不问自己是不是把整页清空了"这个缺陷
- */
+// Regression for "whole page wiped out" false positives (reported on dgav36.xyz). That site has
+// a "latest mirror URLs" directory whose body is dozens of mirror-domain cards (dgav39.com,
+// dgav40.com, ...); each card was judged separately and each had evidence (2 cross-site links
+// = 8 points > threshold 6), so all 96 blocks were hidden. Two fixes: same-brand domains are
+// softened (mirrors are not ad evidence) and a page-level budget stops after ~70% is hidden.
 
 function root(html: string): HTMLElement {
   const d = document.createElement('div');
@@ -39,8 +28,8 @@ describe('isSameBrand：镜像/备用域名的识别', () => {
   });
 
   it('边界：编号在**子域**上、二级域名相同但 TLD 不同 → 不认', () => {
-    // 判据只看二级域名（registrableDomain 的定义）。这一条是有意为之：
-    // 把范围放宽到子域会重新引入 example.com ↔ ads.example.net 的误判。
+    // Only the registrable domain is compared, deliberately: widening to subdomains would
+    // reintroduce the example.com ↔ ads.example.net false positive.
     assert.equal(isSameBrand('mirror-3.example.com', 'mirror7.example.net'), false);
   });
 
@@ -50,8 +39,8 @@ describe('isSameBrand：镜像/备用域名的识别', () => {
   });
 
   it('❗无编号的同名不同 TLD **不算**同品牌（否则会丢真广告）', () => {
-    // 第一版判据在这里翻车：example.com ↔ ads.example.net 共享 "example"，
-    // 于是一条真广告的跨站证据被抹掉，验收用例直接挂掉。
+    // The first version failed here: example.com ↔ ads.example.net share "example", so a real
+    // ad's cross-site evidence was erased and the acceptance case failed.
     assert.equal(isSameBrand('example.com', 'ads.example.net'), false);
     assert.equal(isSameBrand('news.com', 'news.net'), false);
   });
@@ -133,7 +122,7 @@ describe('❗createHidingBudget：页级兜底，不许清空整页', () => {
     assert.ok(hidden < items.length, `不应把整页全隐藏，实际隐藏 ${hidden}/${items.length}`);
     const s = budget.stats();
     assert.ok(s.suppressed > 0, '应记录被兜底拒绝的次数');
-    // 隐藏的链接比例不超过上限（允许等于）
+    // Hidden-link ratio must stay within the cap (equality allowed).
     assert.ok(
       s.links <= s.totalLinks * PAGE_LINK_BUDGET_SHARE + 1,
       `隐藏链接 ${s.links}/${s.totalLinks} 超过上限`,
@@ -173,8 +162,8 @@ describe('❗createHidingBudget：页级兜底，不许清空整页', () => {
   });
 
   it('❗内容太少的页面不启用兜底（否则广告反而拦不住）', () => {
-    // 这是验收实测被迫加的：夹具页只有一个广告探针，隐藏它 = 该页 100% 的链接，
-    // 会被 70% 阈值拒绝，验收从 21/21 掉到 12/21。
+    // Added because acceptance forced it: the fixture page holds a single ad probe, hiding it is
+    // 100% of that page's links, the 70% cap rejected it, and acceptance fell from 21/21 to 12/21.
     document.body.innerHTML =
       '<div class="ad-slot"><a href="https://ads.example.net/x">广告</a></div>';
     const budget = createHidingBudget(document);
@@ -208,7 +197,7 @@ describe('❗createHidingBudget：页级兜底，不许清空整页', () => {
     const before = budget.stats();
     assert.equal(before.totalLinks, 12);
 
-    // 页面又加载出 12 个链接
+    // The page loads 12 more links.
     document.body.innerHTML += Array.from(
       { length: 12 },
       (_, i) => `<a href="https://n${i}.com/">新增${i}</a>`,
@@ -216,7 +205,7 @@ describe('❗createHidingBudget：页级兜底，不许清空整页', () => {
     budget.refresh(document);
     assert.equal(budget.stats().totalLinks, 24, '分母应增长');
 
-    // 反过来：内容变少（我们自己隐藏了一些）时，分母**不得**缩小
+    // Conversely, when content shrinks (we hid some ourselves) the denominator must not shrink.
     document.body.innerHTML = '<a href="https://only.com/">只剩一个</a>';
     budget.refresh(document);
     assert.equal(budget.stats().totalLinks, 24, '分母只增不减，否则预算永远用不完');

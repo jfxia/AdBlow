@@ -1,11 +1,9 @@
-/**
- * 网络层自学习的浏览器验证：同一 profile 连续访问 N 次，观察
- * 「学到的域名」是否晋级成 DNR 拦截规则。
- *
- * 需要放宽沙箱权限（受限模式下 Chromium 的 Mojo 命名管道被拒，浏览器起不来）。
- *
- * 用法：node tools/e2e/learning.mjs <url> [visits]
- */
+// Browser verification of network-layer self-learning: visits the same site N
+// times in one profile and checks whether "learned domains" graduate into DNR
+// blocking rules.
+// Needs relaxed sandbox permissions -- under confinement Chromium's Mojo named
+// pipes are denied and the browser will not start.
+// Run: node tools/e2e/learning.mjs <url> [visits]
 import { spawn } from 'node:child_process';
 import { mkdirSync, openSync, closeSync, rmSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -25,12 +23,10 @@ const PROFILE = `${E2E_DIR}profile-learning`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * 页面内诊断：在真实页面上复算自学习的每个过滤阶段。
- *
- * 存在的原因：第一次实跑「学到 0 个域名」，但同一份 fixture 在 jsdom 里能学到。
- * 没有分阶段数字就无法判断是「没隐藏元素」「被可见内容过滤」还是「被自有域名过滤」。
- */
+// In-page diagnostic: recomputes every self-learning filter stage on the real
+// page. Why: the first real run learned 0 domains while the same fixture learned
+// fine in jsdom, and without per-stage numbers there is no telling "nothing was
+// hidden" from "filtered as visible content" or "filtered as site-owned".
 const DIAGNOSE_EXPRESSION = `(() => {
   const reg = (h) => { const p = h.split('.'); return p.length <= 2 ? h : p.slice(-2).join('.'); };
   const pageReg = reg(location.hostname);
@@ -166,7 +162,7 @@ async function findServiceWorker(timeoutMs = 15000) {
   return null;
 }
 
-/** 从 SW 里读当前的自学习状态。 */
+/** Read the current self-learning state from the SW. */
 async function readLearning(swWsUrl) {
   const cdp = await Cdp.connect(swWsUrl);
   await cdp.send('Runtime.enable');
@@ -240,7 +236,7 @@ try {
         break;
       }
     } catch {
-      /* 还没起来 */
+      /* not up yet */
     }
   }
   if (!up) throw new Error('CDP 未就绪');
@@ -249,13 +245,10 @@ try {
   if (!sw) throw new Error('未找到扩展 service worker');
   const swWs = sw.webSocketDebuggerUrl;
 
-  /**
-   * ⚠️ 导航前必须等扩展真正就绪（DNR 规则已同步）。
-   *
-   * 实测踩坑：找到 SW 就立刻导航，扩展的 onInstalled 未必跑完，
-   * 那一趟内容脚本根本不注入 —— 症状是「元素没被隐藏、没打印就绪日志、
-   * 自学习一个域名都没记」，而且时好时坏，极难定位。
-   */
+  // Navigation must wait until the extension is really ready (DNR rules synced).
+  // Pitfall: navigating as soon as the SW appears, before onInstalled has run,
+  // means the content script is never injected -- no elements hidden, no ready
+  // log, not one learned domain -- and it is intermittent, so very hard to pin.
   const readyDeadline = Date.now() + 20000;
   let ready = false;
   while (Date.now() < readyDeadline) {
@@ -273,8 +266,8 @@ try {
   console.log(`连续访问 ${VISITS} 次，观察域名自学习是否晋级为 DNR 规则\n`);
 
   for (let visit = 1; visit <= VISITS; visit++) {
-    // 用与 run.mjs 相同的方式导航：先 about:blank，再 Page.navigate + 重试。
-    // 直接 /json/new?<url> 打开目标实测不可靠（页面常常根本没加载出来）。
+    // Navigate the way run.mjs does: about:blank first, then Page.navigate with a
+    // retry. Opening the target directly via /json/new?<url> is unreliable.
     const created = await fetch(
       `http://127.0.0.1:${PORT}/json/new?${encodeURIComponent('about:blank')}`,
       { method: 'PUT' },
@@ -285,8 +278,8 @@ try {
       await cdp.send('Page.enable');
       await cdp.send('Runtime.enable');
       await cdp.send('Page.navigate', { url: URL_UNDER_TEST });
-      // 内容脚本的收尾有一轮在 DOMContentLoaded + 12s。若在此之前关掉标签页，
-      // 那一轮就不会跑，域名命中数会少一次 —— 实测因此导致「已晋级 0 个」误报。
+      // One content-script pass runs at DOMContentLoaded + 12s; closing the tab
+      // before that loses a round of domain hits (measured as a 0-promoted miss).
       await sleep(15000);
 
       const countElements = async () => {
@@ -302,8 +295,7 @@ try {
         await sleep(10000);
       }
 
-      // 首访做一次页面内诊断：把自学习各阶段的数字打出来，
-      // 否则「学到 0 个」无法区分是没隐藏、被可见过滤、还是被自有域名过滤。
+      // dump the self-learning stage counters on the first visit
       let diagnostic = null;
       if (visit === 1) {
         const r = await cdp.send('Runtime.evaluate', {
@@ -313,8 +305,8 @@ try {
         diagnostic = r.result?.value ?? null;
         console.log('  首访诊断：', JSON.stringify(diagnostic, null, 2).replace(/\n/g, '\n  '));
 
-        // 站点偶发只渲一半（或干脆没渲）会伪装成「学不到东西」，实测踩过两次。
-        // 用 hiddenCount 作为「这一趟有效」的判据，无效就再等一轮重试。
+        // A half-rendered (or unrendered) page masquerades as "nothing to learn"
+        // (seen twice), so hiddenCount decides whether the visit counts; retry if not.
         if (diagnostic && diagnostic.hiddenCount === 0) {
           console.log('  ⚠️ 本次页面没有可隐藏的广告（可能未完整渲染），再等一轮重试…');
           await sleep(8000);
@@ -333,8 +325,9 @@ try {
         console.log(`  ❗页面异常：\n    ${cdp.exceptions.join('\n    ')}`);
       }
 
-      // 图片健康度：这是「学完之后图片还正常吗」的直接度量。
-      // 自学习来的网络规则刻意不含 image/media 类型，因此这里不该有下降。
+      // Image health: the direct measure of "are images still fine after
+      // learning". Learned network rules deliberately exclude image/media, so this
+      // must not drop.
       const imgRes = await cdp.send('Runtime.evaluate', {
         expression: `(() => {
           const imgs = [...document.querySelectorAll('img')];
@@ -386,9 +379,10 @@ try {
   const okPromoted = last.promoted.length > 0;
   const okRules = last.dnrLearned > 0 && last.dnrLearned >= first.dnrLearned;
 
-  // 图片健康度：学会域名之后图片不该停止加载。
-  // 注意**不**断言「没有图片被隐藏」—— 隐藏广告位里的横幅/弹窗素材是正确的，
-  // 该断言曾在两个站点上都造成误报。真正要守的是「图片别坏掉」。
+  // Image health: images must not stop loading once domains are learned. Note it
+  // does **not** assert "no image is hidden" -- hiding banner/popup creatives in
+  // ad slots is correct, and that assertion caused false positives on two sites.
+  // What matters is that images do not break.
   const firstImg = imageRows[0];
   const lastImg = imageRows[imageRows.length - 1];
   const okImagesLoaded =

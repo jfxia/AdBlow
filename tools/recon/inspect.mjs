@@ -1,11 +1,7 @@
-/**
- * 通用站点广告机制侦察。
- *
- * 用法：node tools/recon/inspect.mjs <url>
- *
- * 只做结构分析：列出脚本、iframe、外部域名、广告特征标记。
- * 不执行页面脚本、不落库页面内容。
- */
+// Generic ad-mechanism recon for a site: lists scripts, iframes, external domains
+// and ad-signature markers. Structural analysis only -- page scripts are never run
+// and page content is never stored.
+// Run: node tools/recon/inspect.mjs <url>
 import { writeFileSync, mkdirSync } from 'node:fs';
 
 const UA =
@@ -49,7 +45,6 @@ console.log(`HTML     : ${html.length} 字节`);
 console.log(`最终地址 : ${res.url}`);
 if (res.url !== url) console.log(`  ⚠️ 发生了跳转`);
 
-// ── iframe（多数广告联盟的投放方式）────────────────────────────
 const iframes = [...html.matchAll(/<iframe[^>]*>/gi)].map((m) => m[0]);
 console.log(`\n=== IFRAME：${iframes.length} 个 ===`);
 for (const tag of iframes.slice(0, 20)) {
@@ -64,7 +59,6 @@ for (const tag of iframes.slice(0, 20)) {
   console.log(`  ${cross ? '[跨站]' : '[同站]'} ${host}  ${src.slice(0, 100)}`);
 }
 
-// ── 内联脚本里的 iframe 注入与 document.write ──────────────────
 console.log('\n=== 内联脚本里的 iframe / document.write / insertAdjacent ===');
 let n = 0;
 for (const m of html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
@@ -75,7 +69,6 @@ for (const m of html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/
 }
 console.log(`  （共 ${n} 段可疑内联脚本）`);
 
-// ── 脚本 src ─────────────────────────────────────────────────
 const scripts = uniq([...html.matchAll(/<script[^>]*?\ssrc=["']([^"']+)["']/gi)].map((m) => m[1]));
 console.log(`\n=== 外部脚本：${scripts.length} 个 ===`);
 for (const s of scripts.slice(0, 40)) {
@@ -88,7 +81,6 @@ for (const s of scripts.slice(0, 40)) {
   console.log(`  ${reg(host) !== pageReg ? '[跨站]' : '[同站]'} ${s.slice(0, 120)}`);
 }
 
-// ── 域名分布 ─────────────────────────────────────────────────
 const hosts = {};
 for (const m of html.matchAll(/(?:https?:)?\/\/([a-z0-9.-]+\.[a-z]{2,})/gi)) {
   hosts[m[1]] = (hosts[m[1]] ?? 0) + 1;
@@ -98,7 +90,6 @@ for (const [h, c] of Object.entries(hosts).sort((a, b) => b[1] - a[1]).slice(0, 
   console.log(`  ${reg(h) !== pageReg ? '[跨站]' : '[同站]'} ${String(c).padStart(4)}  ${h}`);
 }
 
-// ── 广告特征标记 ─────────────────────────────────────────────
 const adish = uniq(
   [...html.matchAll(/(?:class|id)=["']([^"']*)["']/gi)]
     .map((m) => m[1])
@@ -111,7 +102,6 @@ const adish = uniq(
 console.log(`\n=== 广告特征 class/id：${adish.length} 个 ===`);
 console.log('  ' + adish.slice(0, 50).join('\n  '));
 
-// ── 是否已有 AdBlow 规则包覆盖 ────────────────────────────────
 console.log('\n=== AdBlow 覆盖情况 ===');
 console.log(`  站点规则包：${/gjvrohros|cgw666/.test(page.hostname) ? '有' : '无 —— 网络层完全不生效'}`);
 console.log(`  广告特征词库命中 SS P/已知标记：${

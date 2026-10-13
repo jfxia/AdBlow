@@ -8,9 +8,9 @@ import { pilotPack as pack } from '../../src/rules/sites/pilot.ts';
 const fixture = readFileSync(new URL('../fixtures/pilot-category.html', import.meta.url), 'utf8');
 
 /**
- * 广告 SDK 与 SSP 样式的实物。用于给「服务端 0 命中」的选择器提供证据：
- * 一条在服务端 HTML 里不存在的规则，必须能在 SDK/SSP 实物里找到出处，
- * 否则它就是拼错的或者是凭空猜的。
+ * The real ad SDK and SSP stylesheet, used as evidence for selectors that match nothing in the
+ * server HTML: a rule absent from the server response must be traceable to the SDK/SSP
+ * artifacts, otherwise it is a typo or a guess.
  */
 const sdkArtifacts =
   readFileSync(new URL('../fixtures/ad-sdk-v0.0.4.10.js', import.meta.url), 'utf8') +
@@ -21,7 +21,7 @@ const doc = dom.window.document;
 const CONTENT = 'article[itemtype*="BlogPosting"]';
 const articles = Array.from(doc.querySelectorAll(CONTENT));
 
-/** 从 `[data-x]` 或 `.cls` 形式的选择器里取出可检索的特征串。 */
+/** Extracts a searchable feature string from a `[data-x]` or `.cls` selector. */
 function evidenceKey(selector: string): string | null {
   const attr = selector.match(/^\[(data-ssp-[a-z-]+)\]$/);
   if (attr) return attr[1]!;

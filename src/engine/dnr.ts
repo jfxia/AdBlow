@@ -1,10 +1,9 @@
 import type { NetworkRule, ResourceType } from './rules.ts';
 
 /**
- * 把自研网络规则编译成 declarativeNetRequest 规则。
- *
- * MV3 已无阻塞式 webRequest，网络拦截只能走 DNR。返回结构化类型而非
- * chrome.* 类型，保持引擎浏览器无关；background 侧再断言成 chrome 类型。
+ * Compile our own network rules into declarativeNetRequest rules. MV3 has no
+ * blocking webRequest, so DNR is the only path. Structural types (not chrome.*)
+ * keep the engine browser-agnostic; background asserts them to chrome types.
  */
 
 export interface DnrRule {
@@ -15,9 +14,9 @@ export interface DnrRule {
     urlFilter?: string;
     regexFilter?: string;
     resourceTypes: ResourceType[];
-    /** 这些发起方域名下不生效（用于「用户关掉了某站点」时豁免） */
+    /** Does not apply under these initiator domains (exempts sites the user turned off). */
     excludedInitiatorDomains?: string[];
-    /** 只在**这些发起方域名**下生效（用于把自学习规则的爆炸半径限制在教会它的站点） */
+    /** Applies **only** under these initiator domains (caps a learned rule's blast radius). */
     initiatorDomains?: string[];
   };
 }

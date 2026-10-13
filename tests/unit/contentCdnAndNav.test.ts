@@ -8,16 +8,12 @@ import {
 import { CONTENT_CDN_MIN_USES, frequentMediaDomains } from '../../src/engine/domains.ts';
 import { scoreNode } from '../../src/engine/score.ts';
 
-/**
- * 用户报告 dgav40 视频页「视频窗口、导航栏、推荐栏也被屏蔽」后的加固回归。
- *
- * 三个根因/设计点：
- *   1. **跨站素材没有排除站点自己的内容 CDN** —— 任何脚本渲染的块只要有
- *      2 张以上 CDN 图片就够 6 分被隐藏（缩略图放 CDN 是全网做法）
- *   2. **含 `<video>` 的块**不靠弱证据隐藏
- *   3. **类名类导航标记不能向后代传播** —— 传播会命中 `.navbar-box` 这类
- *      页面级包装容器，把整页后代都"保护"起来，广告反而拦不住（实测 6 个测试挂掉）
- */
+// Hardening regression after dgav40's video page lost "the video window, the nav bar and the
+// recommendation rail". Three roots: cross-site media did not exclude the site's own content
+// CDN (2 CDN thumbnails = 6 points = hidden, yet CDN-hosted thumbnails are universal);
+// blocks holding <video> must not be hidden on weak evidence; and class-based nav markers
+// must not propagate to descendants, or wrappers like .navbar-box protect the whole page
+// and ads slip through (6 tests failed on that in practice).
 
 function root(html: string): HTMLElement {
   const d = document.createElement('div');

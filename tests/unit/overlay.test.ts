@@ -9,12 +9,10 @@ import {
   isOverlay,
 } from '../../src/content/engine.ts';
 
-/**
- * 覆盖层检测是**独立一趟**，不参与逐元素打分。
- *
- * 原因见 src/content/engine.ts 的注释：把 getComputedStyle 塞进逐元素打分、
- * 同时又在扫描中改内联样式，会让样式/布局反复失效，大页面上整趟扫描跑不完。
- */
+// Overlay detection is a separate pass and takes no part in per-element scoring (see the
+// comment in src/content/engine.ts): calling getComputedStyle during per-element scoring while
+// also mutating inline styles invalidates style/layout repeatedly and makes a full scan of a
+// large page unable to finish.
 
 const HOST = 'afford.gjvrohros.cc';
 const VIEWPORT = 1920 * 1080;
@@ -25,7 +23,7 @@ function root(html: string): HTMLElement {
   return d;
 }
 
-/** 几何与样式全部注入，测试里不依赖真实布局。 */
+/** Geometry and style are injected; the tests don't depend on real layout. */
 function ctxFor(
   map: Record<string, { position: string; zIndex: string; w: number; h: number }>,
 ) {
@@ -154,8 +152,8 @@ describe('findOverlayAds：覆盖层必须另有旁证（关键误伤防线）',
       viewportArea: VIEWPORT,
       overlay: ctxFor({ 'popup-ad': BIG }),
     });
-    // 'popup-ad' 切词为 ['popup','ad']，其中 'ad' 是强命名 → 6
-    // 跨站链接 4 + 推广参数 2 + 覆盖层加分 4 = 16
+    // 'popup-ad' splits into ['popup','ad'], where 'ad' is strong naming → 6; plus cross-site
+    // link 4 + promo param 2 + overlay bonus 4 = 16.
     assert.equal(ads[0]!.hit.score, 16, JSON.stringify(ads[0]!.hit));
   });
 });

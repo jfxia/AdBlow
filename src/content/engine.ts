@@ -6,10 +6,10 @@ import { generalizeSelector, isSelectorSafe } from '../engine/selector.ts';
 import { forbiddenSelectorReason, validateSitePack, type SitePack } from '../engine/rules.ts';
 
 /**
- * 内容脚本的逻辑核心。
+ * Judging core of the content script.
  *
- * 刻意不碰 chrome.* 与全局 document：DOM 由调用方传入，判定时机由调用方决定。
- * 这样核心逻辑能在 Node + jsdom 里完整回归，chrome 接线只剩薄薄一层。
+ * Deliberately free of chrome.* and the global document: DOM and timing are passed in, so the core
+ * is regression-testable under Node + jsdom and the chrome wiring stays a thin layer.
  */
 
 export const SCORE_THRESHOLD = 6;
@@ -18,8 +18,8 @@ export type Rejection = { packId: string; problems: string[] };
 
 export type Hit = {
   /**
-   * 泛化后的选择器；为 null 表示没有稳定特征可泛化。
-   * 此时元素仍会被隐藏，但**不产出规则** —— 见 src/engine/selector.ts 的说明。
+   * Generalized selector; null when no stable feature could be generalized — the element is
+   * still hidden, but **no rule is produced** (see src/engine/selector.ts).
    */
   selector: string | null;
   score: number;
@@ -27,21 +27,19 @@ export type Hit = {
 };
 
 /**
- * 从命中里筛出可安全入库的选择器。
+ * Filter hits down to selectors safe enough to persist.
  *
- * 四道闸门（2–4 是 2026-10-10 事故后补的）：
- *   1. 泛化器已挡住裸标签名（返回 null）
- *   2. **不能是禁用选择器** —— 复用规则包那套护栏。自学习曾推导出 `.post-card`
- *      （正文卡片类名），而 `validateSitePack` 管不到自学习路径。
- *   3. **命中的元素里不能含正文**。
- *   4. **命中元素含图片的总数必须很少（≤ maxImages）**。这是区分「正常广告位」
- *      与「宽泛包装类」的关键：正常广告位只含 1–2 张素材图，而 `.tjtagmanager`
- *      这类站点通用外链包装命中 43 个元素、含 22 张图 —— 它既包广告也包内容，
- *      一旦入库就会在页面开头无条件隐藏一大片图片。
+ * Four gates (2–4 added after the 2026-10-10 incident):
+ *   1. the generalizer already rejects bare tag names (returns null)
+ *   2. not a forbidden selector — reuses the rule-pack guardrails; validateSitePack never sees the
+ *      learning path (which once derived a content-card class, see SelectorSet)
+ *   3. no matched element may contain real content
+ *   4. matched elements may hold only few images (≤ maxImages): a real ad slot holds 1–2 creatives,
+ *      whereas a site-wide link wrapper matched 43 elements with 22 images
  *
- * 再加宽度实测：命中数不得超过 maxMatches（防止过宽）。
+ * Plus a width measurement: the match count must stay below maxMatches.
  *
- * 自学习规则会在后续访问中生效，所以入库前必须极度保守。
+ * Learned rules apply on later visits, so admission must be extremely conservative.
  */
 export function recordableSelector(
   hit: Hit,
@@ -66,7 +64,7 @@ export function recordableSelector(
   let images = 0;
   for (const el of matched) {
     if (holdsRealContent(el)) return null;
-    // 更不允许把「显式声明的导航」学成可隐藏
+    // Never learn an explicitly declared navigation element as hideable either.
     if (mustNotHide(el)) return null;
     images += el.matches(MEDIA_TAGS) ? 1 : 0;
     images += el.querySelectorAll('img,video,picture').length;
@@ -79,49 +77,41 @@ export function recordableSelector(
 export type InjectionTest = (el: Element) => boolean;
 
 /**
- * 默认的注入判定。**只用于「纯行为证据」那一档**（见 createJudge 的三档决策）。
+ * Default injection test, used **only by the pure-behaviour tier** (see createJudge).
  *
- * ⚠️ 这里的 `reliable` 不是保守开关，是**实测必需的**（2026-10-10 标定）：
+ * `reliable` is a measurement requirement, not a conservative switch: at document_start almost
+ * nothing is parsed, so an in-place snapshot index is empty and untrustworthy — and the pilot's
+ * server HTML already holds compact link boxes scoring 8 against a threshold of 6, so the
+ * behaviour tier misfires on all of them with such a snapshot. Raising the threshold instead
+ * would lose the most valuable generic signal (cross-site link + promo parameter).
  *
- * `document_start` 时页面才刚开始解析，就地构建的快照索引几乎为空，不可信。
- * 而试点站服务端 HTML 里就有紧凑外链盒子（`.contact-link`、`footer#footer`、
- * `div.container`）广告度达到 8 分，超过阈值 6 —— 用不可信快照跑纯行为判定，
- * 必然误伤这三处；把阈值抬到 10 又会丢掉「跨站链接 + 推广参数」这条最有价值
- * 的通用检测。
+ * `reliable === false`: that tier is off entirely (static rules and the naming tier remain).
+ * `reliable === true`: a full server snapshot separates injected nodes by signature.
+ * The naming tier is unaffected either way — strong ad naming is deterministic evidence.
  *
- * 因此：
- *   - `reliable === false`：纯行为档**整体关闭**，只留静态规则与命名档
- *   - `reliable === true` ：快照来自完整服务端 HTML，按签名精确区分注入节点
- *
- * 快照回填见 src/engine/pristine.ts 的 buildPristineIndexFromHtml 与
- * src/content/index.ts 的 PRISTINE_STRATEGY。
- *
- * 注：**命名档（强广告命名）不受这里影响** —— 它是确定性证据，不需要注入佐证。
- * 第二站点（1024cg.com）的广告是服务端渲染的 `article.ad-item`，正是靠命名档
- * 才能拦住，否则会被这道闸门整个排除在外。
+ * See buildPristineIndexFromHtml (engine/pristine.ts) and PRISTINE_STRATEGY (content/index.ts).
  */
 export function makeInjectionTest(index: PristineIndex, reliable: boolean): InjectionTest {
   return (el: Element) => reliable && isInjected(el, index);
 }
 
 /**
- * 选择器集合：把「可信」与「自动推导」严格分开。
+ * Selector set: trusted and auto-derived selectors are kept strictly apart.
  *
- * 为什么必须分开（2026-10-10 事故）：自学习推导出的选择器此前与规则包混在一起，
- * 被一并写进 `document_start` 注入的样式表 —— 那条路径**没有任何元素级守卫**，
- * 于是自学习出来的 `.tjtagmanager`（站点外链包装类，内含 22 张图）和
- * `.post-card`（正文卡片类名）在页面一开头就无条件隐藏了一大片内容。
+ * Why (2026-10-10 incident): learned selectors used to be mixed with rule packs and written into
+ * the document_start stylesheet — a path with **no per-element guard** — so a learned link-wrapper
+ * class (22 images inside) and a content-card class hid a large slice of the page from the first
+ * moment.
  *
- * 现在的分工：
- *   - `curated`：站点规则包，经取证与 fixture 回归测试，允许进样式表
- *   - `learned`：自动推导，**一律不进样式表**，只走带守卫的逐元素判定
+ *   - `curated`: site rule packs, evidence + fixture regressions → may enter the stylesheet
+ *   - `learned`: auto-derived → never enters the stylesheet, guarded per-element path only
  */
 export type SelectorSet = {
   curated: string[];
   learned: string[];
 };
 
-/** 汇总选择器：规则包 → curated，自学习 → learned。 */
+/** Collect selectors: rule packs → curated, learned → learned. */
 export function selectorsFrom(
   packs: SitePack[],
   learned: string[],
@@ -141,18 +131,16 @@ export function selectorsFrom(
   return { curated: [...curated], learned: [...new Set(learned)] };
 }
 
-/** 弱命名要成立，至少要有这么多行为旁证（跨站链接 = 4）。 */
+/** Behaviour score a weak naming needs to count (one cross-site link = 4). */
 export const WEAK_NAMING_MIN_BEHAVIOR = 4;
 
 /**
- * 内容标记：出现这些才说明该元素里装着**真实正文**。
+ * Content markers: these mean the element holds **real content**.
  *
- * 这是命名档的硬性例外，来自一次自己踩出来的事故：加上命名档之后，
- * 试点站的 `<div data-ssp-container="ssp-list">` 因为属性名含 `data-ssp-`
- * 被判成强命名，于是整个正文列表被隐藏——正是设计文档 §2 反复强调的那条红线。
- *
- * 教训：**命名证据再强，也不能推翻「这里面装着正文」这个事实。**
- * 所以任何包含正文标记的元素，一律不因命名或行为被隐藏。
+ * A hard exception to the naming tier, from a self-inflicted incident: the pilot's
+ * `<div data-ssp-container="ssp-list">` counted as strong naming (the attribute contains
+ * `data-ssp-`) and the whole article list was hidden. No evidence may overturn "this holds
+ * content".
  */
 export const CONTENT_MARKERS = [
   'article[itemtype*="BlogPosting"]',
@@ -161,22 +149,22 @@ export const CONTENT_MARKERS = [
   'main article',
 ];
 
-/** 元素自身是正文，或内部装着真实正文。 */
+/** The element is content itself, or holds real content. */
 export function holdsRealContent(el: Element): boolean {
   return hasContentMarker(el) || hasSubstantiveText(el);
 }
 
 /**
- * 显式声明的**导航**结构。
+ * Explicitly declared **navigation** structures.
  *
- * 与正文标记同理，这是作者的直接声明（不是我们猜的），因此列入绝对保护：
- * 用户报告过「导航列表被屏蔽」。而导航里通常只有短标签，
- * 走"文字量"这条代理指标是保护不住的（实测 12 项导航合计才 72 字）。
+ * Like content markers this is the author's own declaration, so it is absolutely protected
+ * (users reported hidden navigation lists). Navigation holds only short labels, so the
+ * text-volume proxy cannot protect it (measured: 12 nav items, 72 characters in total).
  *
- * ⚠️ **不用 `querySelector` 往外传播**（这点与正文标记不同）：
- * 页面上 `<body>` 几乎都包含 `<nav>`，而"同时装着导航与广告的容器"更是常见 ——
- * 一旦传播，这些容器就都变成不可隐藏，广告拦不住了。
- * 因此只保护导航**自身**（`isNavigationLike`）与导航**内部**（`isInsideNavigation`）。
+ * No `querySelector` propagation outwards, unlike content markers: nearly every `<body>` has a
+ * `<nav>` and mixed navigation/ad containers are common, so propagating would make them all
+ * unhideable and the ads would survive. Only the navigation itself (`isNavigationLike`) and its
+ * insides (`isInsideNavigation`) are protected.
  */
 export const NAVIGATION_MARKERS = [
   'nav',
@@ -187,15 +175,13 @@ export const NAVIGATION_MARKERS = [
 ];
 
 /**
- * **类名类**导航标记：只保护元素自身，**不向后代传播**。
+ * **Class-based** navigation markers: protect the element itself, never its descendants.
  *
- * 现实里绝大多数站点不用语义标签，而是 `<div class="navbar">` —— 用户报告的
- * 「导航栏被屏蔽」就是这种。
- *
- * ⚠️ 但它们**绝不能**像语义标记那样传播：实测加了传播之后，
- * `[class*="navbar"]` 命中 `.navbar-box` / `.top-navbar` 这类**页面级包装容器**，
- * 于是整页所有后代都被"保护"起来，广告也拦不住了（6 个集成测试当场挂掉）。
- * 所以：语义标记 = 直接声明 → 可传播；类名 = 启发式猜测 → 只保护自身。
+ * Most sites use `<div class="navbar">` instead of semantic tags — exactly the reported hidden
+ * navigation bar. Propagation is impossible here: `[class*="navbar"]` matched page-level wrappers
+ * (`.navbar-box`, `.top-navbar`), so every descendant counted as protected and ads survived
+ * (6 integration tests failed at once). Semantic marker = declaration → may propagate;
+ * class = heuristic → self only.
  */
 export const NAV_CONTAINER_MARKERS = [
   '[class*="navbar"]',
@@ -222,51 +208,44 @@ export function isNavigationLike(el: Element): boolean {
   }
 }
 
-/** 元素位于**语义**导航内部（类名标记不参与，理由见上）。 */
+/** The element sits inside **semantic** navigation (class markers excluded, see above). */
 export function isInsideNavigation(el: Element): boolean {
   return el.closest(NAVIGATION_MARKERS.join(',')) !== null;
 }
 
 /**
- * **绝对不可隐藏**的判据：显式声明的正文与导航。
- *
- * 任何来源（启发式、站点规则包以外的自学习、过滤列表的 cosmetic 规则）都要过这一关。
- * 文字量不在其中 —— 它是代理指标，允许被强命名推翻（见 createJudge）。
+ * **Absolutely unhideable**: explicitly declared content and navigation. Every source must pass
+ * this gate. Text volume is deliberately not here: it is a proxy that strong naming may
+ * overturn (see createJudge).
  */
 export function mustNotHide(el: Element): boolean {
   return hasContentMarker(el) || isNavigationLike(el);
 }
 
-/** 语义标记（schema.org 文章标注）——**绝对保护**，任何证据都不能推翻。 */
+/** Semantic markers (schema.org article markup) — absolutely protected, nothing overturns them. */
 export function hasContentMarker(el: Element): boolean {
   const selector = CONTENT_MARKERS.join(',');
   return el.matches(selector) || el.querySelector(selector) !== null;
 }
 
-/** 「实质文字量」门槛（字符数，空白折叠后）。 */
+/** "Substantive text" threshold, in characters after whitespace collapse. */
 export const SUBSTANTIVE_TEXT_MIN = 200;
-/** 「像样的段落」的门槛：每个至少这么多字，才算正文段落。 */
+/** A "solid paragraph" needs at least this many characters to count as article text. */
 export const SUBSTANTIVE_PARA_MIN = 40;
-/** 至少这么多个像样的段落才算正文。 */
+/** This many solid paragraphs make the element article text. */
 export const SUBSTANTIVE_PARA_COUNT = 2;
 
 /**
- * 元素里是否有**实质文字量**。
+ * Does the element hold **substantive text**?
  *
- * ## 为什么必须加这一条（真实事故）
+ * Why this exists (real incident): the content guard only knew schema.org article markup,
+ * tuned on the pilot site which happens to carry it. On ordinary sites `<div class="content">`,
+ * `<nav>`, `<ul class="menu">` and plain `<p>` bodies got no protection at all, so heuristics
+ * wiped articles and navigation wholesale (the reported xchina.co symptom).
  *
- * 原先的内容守卫只认 schema.org 的文章标记（`article[itemprop]` 等）。
- * 那是针对试点站调的 —— 它恰好带这些标注。**换成普通站点，
- * `<div class="content">`、`<nav>`、`<ul class="menu">`、纯 `<p>` 段落
- * 一律不被保护**，内容守卫形同虚设，于是正文与导航被启发式成片误杀
- * （用户报告 xchina.co 就是这个症状）。
- *
- * ## 与语义标记的区别（重要）
- *
- * 语义标记是**直接证据**（作者显式声明"这里是正文"）→ 绝对保护。
- * 文字量是**代理指标**（广告也可能带一段文字）→ 只作为**强先验**：
- * 弱命名与纯行为证据不得隐藏它，但**强命名**（`.sponsored-post` 之类）可以。
- * 这个分层在 createJudge 里落实。
+ * Unlike semantic markers (direct evidence → absolute protection), text volume is a **proxy** —
+ * ads can carry text too — so it is only a strong prior: weak naming and pure behaviour may not
+ * hide it, strong naming (`.sponsored-post`) may (see createJudge).
  */
 export function hasSubstantiveText(el: Element): boolean {
   const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
@@ -283,40 +262,36 @@ export function hasSubstantiveText(el: Element): boolean {
 }
 
 /**
- * 元素位于正文**内部**（自身或其祖先带正文标记）。
+ * The element sits **inside** content (itself or an ancestor carries a content marker).
  *
- * 与 holdsRealContent 的区别：那个问"里面装着正文吗"，这个问"我在正文里面吗"。
- * 链接农场需要后者 —— 文章内的"相关链接/参考链接"区块有 5 个以上外链很正常，
- * 但它是**作者写的内容**，不能隐藏；而页脚/侧栏里的同类区块就是广告垃圾。
+ * holdsRealContent asks "does it hold content", this asks "am I within content". Link farms
+ * need the latter: a "related/ref links" block inside an article legitimately carries 5+ outbound
+ * links and is authored content, while the same block in a footer or sidebar is spam.
  */
 export function isInsideRealContent(el: Element): boolean {
   return el.closest(CONTENT_MARKERS.join(',')) !== null;
 }
 
-/** 媒体选择器：图片 / 视频 / 嵌入对象。 */
+/** Media selector: images, video, embedded objects. */
 export const MEDIA_TAGS = 'img,video,source,embed,object,picture';
 
-/** 元素自身是媒体，或内部包含媒体。 */
+/** The element is media itself, or contains media. */
 export function containsMedia(el: Element): boolean {
   return el.matches(MEDIA_TAGS) || el.querySelector(MEDIA_TAGS) !== null;
 }
 
 /**
- * 造一个启发式判定器。**三档决策，证据强度递减**。
+ * Build a heuristic judge. **Three tiers, decreasing evidence strength.**
  *
- * 这取代了早期「一律要求脚本注入」的单档设计。那个设计在第二站点
- * （1024cg.com）上完全失效：它的广告是**服务端渲染**的 `article.ad-item`，
- * 不是脚本注入的，于是被那道闸门整个排除在外，一个都拦不住。
+ * This replaced an early "require script injection" single tier, which failed entirely on site two
+ * (1024cg.com): its ads are server-rendered `article.ad-item`, so that gate excluded all of them.
  *
- * 三档：
- *   ① 确定性命名证据（naming >= 强命名）：直接判定，不看注入时机、不看行为。
- *      `class="ad-item"` 这种命名本身就是证据。
- *   ② 弱命名 + 行为旁证：`banner` / `popup` / `sponsor` 这类词在正常 UI 里
- *      也常见，单独出现不算数，但配上跨站外链就足够。
- *   ③ 纯行为证据：没有命名线索，只能靠行为推断。此时**必须**先证明是脚本
- *      注入，否则会顺着行为特征误伤服务端正文（标定证据见 makeInjectionTest）。
+ *   ① deterministic naming (>= NAMING_STRONG): decide outright, ignoring injection and behaviour
+ *   ② weak naming + behaviour: `banner` / `popup` / `sponsor` also appear in normal UI, so they
+ *      count only with corroboration such as a cross-site link
+ *   ③ pure behaviour: no naming, so script injection **must** be proven first (makeInjectionTest)
  *
- * 三档之前先过一次**内容守卫**（holdsRealContent）——见其注释。
+ * All tiers are preceded by the content guard (holdsRealContent).
  */
 export function createJudge(
   injected: InjectionTest,
@@ -326,7 +301,7 @@ export function createJudge(
   contentCdnDomains?: Set<string>,
 ): (el: Element) => Hit | null {
   return (el: Element): Hit | null => {
-    // 语义标记优先于一切证据（事故回归保护）
+    // Semantic markers outrank every other piece of evidence (incident regression guard).
     if (hasContentMarker(el)) return null;
 
     const naming = namingSignal(el).strength;
@@ -338,31 +313,31 @@ export function createJudge(
 
     const hit = (): Hit => ({ selector: generalizeSelector(el), score, reasons });
 
-    // ① 确定性命名证据（强命名可以直接推翻「文字量」这个代理指标，
-    //    因为命名是显式证据：`.sponsored-post` 里有正文也仍然是广告位）
+    // ① Deterministic naming: strong naming may overturn the text-volume proxy, because
+    // naming is explicit evidence — a `.sponsored-post` stays an ad slot even with text inside.
     if (naming >= NAMING_STRONG) return hit();
 
-    // 导航是页面骨架：短标签的导航靠文字量保护不住，必须单独挡
+    // Navigation is page skeleton: short labels escape text volume, so gate it separately.
     if (isNavigationLike(el) || isInsideNavigation(el)) return null;
 
-    // 视频/播放器：**含 `<video>` 的块不靠弱证据隐藏**（用户报告「视频窗口被屏蔽」）。
-    // 带广告命名的视频位在上面那一档已经拦掉了（验收第 10/13/14 条就是这类）。
+    // Video/player: blocks containing `<video>` are never hidden on weak evidence (reported as
+    // "the video window got blocked"). Ad-named video slots are already handled by the tier above.
     if (el.matches('video') || el.querySelector('video') !== null) return null;
 
-    // 文字量大 = 像正文 → **弱命名与纯行为证据不得隐藏它**
-    // （这正是「正文/导航被成片误杀」的根因所在，见 hasSubstantiveText）
+    // Plenty of text = looks like content → weak naming and pure behaviour may not hide it
+    // (this was the root cause of wholesale content/navigation kills, see hasSubstantiveText).
     if (hasSubstantiveText(el)) return null;
 
-    // ② 弱命名 + 行为旁证
+    // ② Weak naming + behavioural corroboration
     if (naming === NAMING_WEAK && behavior >= WEAK_NAMING_MIN_BEHAVIOR) return hit();
 
-    // ③ 纯行为证据：必须先证明是脚本注入，且**必须不像内容区块**
+    // ③ Pure behaviour: must be proven script-injected and must not look like content.
     //
-    // ⚠️ 这一档是"没有任何命名线索、只能靠行为推断"，本来就最弱；
-    // 实测（用户报告 dgav40 播放器/推荐栏被过滤，且在真实浏览器里确认是我们）：
-    // 视频播放器与推荐栏都是**脚本运行时创建**（injected=true），
-    // 而它们的封面/视频流来自跨站 CDN → 于是被这一档拦掉。
-    // 没有命名证据时，广告的形态是"小、素材少"；又大又满是缩略图的块是内容。
+    // The weakest tier by construction: no naming clue, inference from behaviour only. Measured
+    // (reported dgav40 player/recommendation rail, confirmed in a real browser): both were
+    // created at runtime (injected=true) with covers/streams on a cross-site CDN, so this tier
+    // killed them. Without naming, ads are small with few assets; big blocks full of thumbnails
+    // are content.
     if (
       injected(el) &&
       behavior >= threshold &&
@@ -375,46 +350,42 @@ export function createJudge(
   };
 }
 
-/** 纯行为档允许隐藏的最大面积（占视口比例）：再大就不是广告，是内容区块。 */
+/** Largest viewport share the pure-behaviour tier may hide: bigger than this is a content block. */
 export const BEHAVIOR_ONLY_MAX_AREA_RATIO = 0.25;
-/** 纯行为档允许的最大**内容素材**数量：广告素材通常 1–2 张，内容列表是成片的。 */
+/** Most content assets this tier allows: ad creatives come in 1–2, content lists come in walls. */
 export const BEHAVIOR_ONLY_MAX_MEDIA = 2;
 
 /**
- * 「像内容区块吗」—— 纯行为档（没有命名证据）的额外门槛。
+ * "Does this look like a content block?" — an extra gate for the pure-behaviour tier.
  *
- * 依据（2026-10-13，用户在真实浏览器里确认是我们造成的 dgav40 误杀）：
- *   - 视频播放器：脚本创建、含 `<video>`/播放器容器、封面来自跨站 CDN
- *   - 推荐栏：脚本创建、成片 CDN 缩略图、面积很大
- * 这两类在旧实现里都会拿到 6 分以上被隐藏。
+ * Basis (2026-10-13, user confirmed in a real browser): a script-created player (`<video>`
+ * container, cover on a cross-site CDN) and a recommendation rail (wall of CDN thumbnails,
+ * large) both scored 6+ and were hidden.
  *
- * ⚠️ **素材判据必须按"来源"算，不能只按数量**（同日第二次修正）：
- * 修完播放器/推荐栏后用户反馈"广告图片并未被屏蔽" —— 站点把广告挂进
- * `ul.streamer-box2`，里面有 3 张广告图。若只要"素材数 > 2"就放过，
- * 这种**广告轮播**会被当成内容列表漏掉。
- * 正确判据是：**来自本站内容 CDN（或同源）的成片素材**才算内容列表；
- * 来自广告域名的素材再多也只是广告轮播。
+ * Assets must be judged by **source**, not count: a site put 3 ad images inside
+ * `ul.streamer-box2`, and a pure count rule would treat that ad carousel as content. A wall of
+ * assets from the site's own content CDN (or same origin) is a content list; assets from ad
+ * domains stay ads however many there are.
  *
- * 判据刻意保守（只在**没有命名证据**时生效）：带 `.ad-slot` 这类强命名的
- * 大块仍然照拦（验收第 10/13/14 条的整屏视频广告就靠命名）。
+ * Only active **without naming evidence**: large blocks with strong naming (`.ad-slot`) still go.
  */
 export function looksLikeContentBlock(
   el: Element,
   viewportArea: number,
   ctx?: { pageHost?: string; contentCdnDomains?: ReadonlySet<string> },
 ): boolean {
-  // ① 面积大
+  // ① Large area
   if (viewportArea > 0) {
     const r = el.getBoundingClientRect();
     if ((r.width * r.height) / viewportArea > BEHAVIOR_ONLY_MAX_AREA_RATIO) return true;
   }
 
-  // ② 素材成片（内容列表 / 缩略图墙）—— 只统计**内容来源**的素材
+  // ② Wall of assets (content list / thumbnail grid) — count content-source assets only
   const cdn = ctx?.contentCdnDomains;
   const pageReg = ctx?.pageHost ? registrableDomain(ctx.pageHost) : null;
   let contentMedia = 0;
   for (const m of Array.from(el.querySelectorAll('img,picture,source,canvas'))) {
-    // 已经处理过的素材不重复采信（与 scoreNode 的守卫同源）
+    // Assets already handled are not counted twice (same guard as in scoreNode).
     if (m.parentElement?.closest(`[${HIDDEN_ATTR}]`)) continue;
     const raw =
       m.getAttribute('src') ?? m.getAttribute('data-src') ?? m.getAttribute('srcset') ?? '';
@@ -426,17 +397,17 @@ export function looksLikeContentBlock(
       continue;
     }
     const reg = registrableDomain(host);
-    // 同源素材、或站点内容 CDN 上的素材 → 算内容
+    // Same-origin assets, or assets on the site's content CDN → content.
     const isContentSource = (pageReg !== null && reg === pageReg) || (cdn?.has(reg ?? '') ?? false);
     if (isContentSource) contentMedia += 1;
   }
-  // 没有内容 CDN 知识时退回"数全部素材"（保守：宁可少隐藏）
+  // Without CDN knowledge, fall back to counting all assets (bias towards hiding less).
   const mediaCount = cdn && cdn.size > 0
     ? contentMedia
     : el.querySelectorAll('img,picture,video,source,canvas').length;
   if (mediaCount > BEHAVIOR_ONLY_MAX_MEDIA) return true;
 
-  // ③ 视频 / 播放器容器
+  // ③ Video / player container
   if (el.matches('video,iframe') || el.querySelector('video') !== null) return true;
   if (el.matches('[class*="player"],[id*="player"],[class*="video-"],[id*="video-"]')) return true;
   if (el.querySelector('[class*="player"],[id*="player"]') !== null) return true;
@@ -444,37 +415,31 @@ export function looksLikeContentBlock(
 }
 
 /**
- * 绝对不允许隐藏的根元素。
+ * Roots that must never be hidden.
  *
- * 隐藏 `<body>` / `<html>` 等于**清空整个页面** —— 这在任何情况下都不是
- * 合法的广告处理动作。加这条硬性不变量有两个理由：
- *   1. 它是最后一道"整页消失"保险（比页级预算更硬）
- *   2. 实测踩到过：某个测试把 `data-adblow-hidden` 留在了 `<body>` 上，
- *      说明引擎确实有可能把根元素判成目标
+ * Hiding `<body>` / `<html>` blanks the entire page, which is never a legitimate ad action.
+ * Two reasons for the hard invariant:
+ *   1. it is the last "the whole page vanished" safety net (harder than the page budget)
+ *   2. measured: a test left `data-adblow-hidden` on `<body>`, so the engine really can target
+ *      a root element
  */
 const NEVER_HIDE_TAGS = new Set(['HTML', 'BODY', 'HEAD']);
 
 /**
- * 用内联样式隐藏。
+ * Hide with inline styles.
  *
- * 为什么不用样式表：内联 `!important` 在作者源里优先级最高，不会被站点后续
- * 插进来的 `!important` 规则反制。样式表只是防闪现的第一道便宜防线。
+ * Not a stylesheet: an inline `!important` sits at the top of the author origin and cannot be
+ * countered by an `!important` rule the site injects later. The stylesheet is only the cheap first
+ * line of defence against flashing.
  *
- * ## ⚠️ 为什么还要设 `pointer-events` / `visibility`（真实事故）
+ * Why `pointer-events` / `visibility` too (real incident): on 1024cg the site reset `display` to
+ * `block` with an inline `!important` from its own origin — same precedence, later wins — so a
+ * `position:fixed; z-index:9999` layer covering 99.5% of the viewport reappeared and left the
+ * whole page unclickable while `data-adblow-hidden` still claimed success. Hiding on several
+ * fronts (`display`, `pointer-events`, `visibility`) means at least one survives.
  *
- * 实测（用户报告的 1024cg）：站点用**同一个作者源里的内联 `!important`**
- * 把 `display` 改回 `block` —— 同优先级下后写的赢，于是我们"隐藏过了"
- * 的元素又显示出来。那是一个 `position:fixed; z-index:9999`、覆盖 99.5% 视口的
- * 广告弹层，结果**整个页面的链接都点不动**，而我们的 `data-adblow-hidden`
- * 标记还挂着 —— 标记成了谎话。
- *
- * 所以隐藏要多管齐下：`display:none` 负责视觉，`pointer-events:none`
- * 保证**即使显示被改回来，点击也能穿透到下面的链接**，
- * `visibility:hidden` 再补一道。三条里至少有一条能扛住站点的反制。
- *
- * @param reason 隐藏的原因（写进 `data-adblow-reason`）。
- *   这是**排查误杀的唯一手段** —— 用户报"正文/导航被屏蔽了"时，
- *   必须能一眼看出是规则包、启发式、覆盖层、链接农场还是列表 cosmetic 干的。
+ * `reason` goes to `data-adblow-reason` and is the only means of triaging a false positive: it must
+ * be obvious whether a rule pack, heuristic, overlay, link farm or list cosmetic rule did it.
  */
 export function hideElement(el: Element, reason?: string): void {
   if (NEVER_HIDE_TAGS.has(el.tagName)) return;
@@ -490,25 +455,24 @@ export function hideElement(el: Element, reason?: string): void {
   style.setProperty('padding', '0', 'important');
 }
 
-/** 我们隐藏过、但显示被站点改回来的次数（诊断用）。 */
+/** How often the site made a hidden element visible again (diagnostics). */
 export const REFOUGHT_ATTR = 'data-adblow-refought';
 
 export type HidingAudit = {
-  /** 复核过的元素数 */
+  /** Elements re-checked. */
   checked: number;
-  /** 发现被改回来并重新隐藏的元素数 */
+  /** Elements found visible again and re-hidden. */
   refought: number;
-  /** 反复被改回来的元素（站点在主动对抗），按选择器摘要聚合 */
+  /** Elements restored repeatedly (the site is fighting back), aggregated as selector digests. */
   stubborn: string[];
 };
 
 /**
- * 复核隐藏是否仍然生效，并对被站点改回来的元素重新隐藏。
+ * Re-check that hiding still holds, and re-hide what the site restored.
  *
- * 为什么必须复核：**`!important` 不是不可战胜的** —— 站点脚本用同样
- * `!important` 的内联样式后写就能覆盖我们（实测 1024cg 的广告弹层就是这么干的，
- * 结果整页链接都点不动）。不复核的话，`data-adblow-hidden` 会变成谎话，
- * 而我们还以为自己拦住了。
+ * Required because `!important` is not invincible: a site script can overwrite it with an equally
+ * `!important` inline style written later (measured on the 1024cg overlay, which left the whole
+ * page unclickable). Without this pass `data-adblow-hidden` becomes a lie.
  */
 export function verifyHiding(root: ParentNode): HidingAudit {
   const audit: HidingAudit = { checked: 0, refought: 0, stubborn: [] };
@@ -526,7 +490,7 @@ export function verifyHiding(root: ParentNode): HidingAudit {
     }
     if (!visible) continue;
 
-    // 显示被改回来了 → 重新施加（保留原有原因，便于事后统计）
+    // Display was restored → re-apply, keeping the original reason for later statistics.
     const reason = el.getAttribute(REASON_ATTR) ?? undefined;
     const prev = Number(el.getAttribute(REFOUGHT_ATTR) ?? '0') + 1;
     hideElement(el, reason);
@@ -545,45 +509,41 @@ export function isHidden(el: Element): boolean {
   return el.getAttribute('data-adblow-hidden') === '1';
 }
 
-/** 元素自身或任一祖先已被隐藏（即已经不可见）。 */
+/** The element or any ancestor is already hidden (so it is invisible). */
 export function isInsideHidden(el: Element): boolean {
   return el.closest('[data-adblow-hidden]') !== null;
 }
 
 export const HIDDEN_ATTR = 'data-adblow-hidden';
 
-/** 隐藏原因所在属性（排查误杀用）。 */
+/** Attribute holding the hide reason (used to triage false positives). */
 export const REASON_ATTR = 'data-adblow-reason';
 
 /**
- * 判据原因所在属性（比 REASON_ATTR 更细）。
+ * Attribute holding the judging evidence (finer-grained than REASON_ATTR).
  *
- * `data-adblow-reason` 只说"是启发式/规则包/链接农场干的"，
- * 但排查误杀时真正要回答的是"**凭哪条证据**判的" ——
- * 例如 `cross-site-iframe` / `cross-site-media` / `geometry-growth`。
- * 用户报"视频窗口被屏蔽"时，靠这个才能一眼看出是哪个信号误伤。
+ * `data-adblow-reason` only says "heuristic / rule pack / link farm", while triage needs **which
+ * evidence** fired: `cross-site-iframe`, `cross-site-media`, `geometry-growth`.
  */
 export const WHY_ATTR = 'data-adblow-why';
 
 /**
- * 覆盖层检测：**独立的一趟遍历，不参与逐元素打分。**
+ * Overlay detection: **its own traversal, never part of per-element scoring.**
  *
- * 为什么必须独立（2026-10-10 实测踩坑）：一开始把覆盖层判定塞进 `scoreNode`，
- * 于是每个元素都要 `getComputedStyle`；而扫描过程中又不断隐藏元素（改内联样式），
- * 两者交替导致样式/布局反复失效。在 1024cg 这种大页面上直接导致整趟扫描跑不完 ——
- * 症状是「样式表注入了，但一个元素都没隐藏」，极难定位。
+ * Why separate (measured 2026-10-10): overlay checks inside `scoreNode` meant a `getComputedStyle`
+ * per element while the same scan kept rewriting inline styles; the alternation invalidated
+ * style/layout repeatedly and a full scan of a large page like 1024cg never finished — symptom
+ * "the stylesheet is injected but not one element is hidden". Now a cheap attribute pre-filter
+ * (see OVERLAY_PRESELECTOR) gates `getComputedStyle` plus geometry for a few candidates.
  *
- * 现在：先用**廉价的属性预筛**（注入型覆盖层几乎都会写内联样式），
- * 只对极少数候选做 `getComputedStyle` + 几何测量。
- *
- * 判定标准：固定/绝对定位 + 高 z-index + 占据大块视口。
- * 注意它**不足以单独判定**（Cookie 同意条、登录弹层也长这样），
- * 因此调用方应把结果当作"需要确认的候选"，而不是直接当广告。
+ * Criteria: fixed/absolute + high z-index + a large viewport share — **not sufficient alone**
+ * (cookie banners and login modals look the same), so results are candidates needing
+ * corroboration rather than ads.
  */
 export const OVERLAY_AREA_RATIO = 0.4;
 export const OVERLAY_MIN_Z = 1000;
 
-/** 廉价预筛：只挑写了内联位置样式的元素。 */
+/** Cheap pre-filter: only elements carrying inline positioning styles. */
 export const OVERLAY_PRESELECTOR = '[style*="position"]';
 
 export type OverlayContext = {
@@ -626,15 +586,16 @@ export function isOverlay(el: Element, ctx: OverlayContext): boolean {
   const areaRatio = (rect.width * rect.height) / ctx.viewportArea;
   if (areaRatio >= OVERLAY_AREA_RATIO) return true;
 
-  // ② 播放器内叠加（2026-10-10 验收实测补入）
+  // ② Overlays inside a player (added from acceptance measurements, 2026-10-10).
   //
-  // 视频叠加广告只盖住播放器，占视口往往不到 40%，按视口算会被漏掉。
-  // 判据要求「几乎完全盖住祖先 + 该祖先里有 <video>」，因此它只匹配
-  // **播放器内叠加层**，不会波及轮播图、卡片图这类"绝对定位盖住父元素"的正常布局。
+  // A video overlay only covers the player, often under 40% of the viewport, so the viewport
+  // ratio misses it. Requiring "covers an ancestor almost completely + that ancestor holds
+  // `<video>`" matches player overlays only, and never normal layouts such as carousels or card
+  // images that absolutely cover their parent.
   return coversVideoAncestor(el, rect, ctx);
 }
 
-/** 元素是否几乎完全盖住某个「内部含 `<video>`」的祖先（播放器内叠加层形态）。 */
+/** Does the element almost completely cover an ancestor holding `<video>` (player overlay)? */
 function coversVideoAncestor(
   el: Element,
   rect: { width: number; height: number },
@@ -664,12 +625,12 @@ function coversVideoAncestor(
   return false;
 }
 
-/** 播放器内叠加层：至少要盖住所在容器的这个比例。 */
+/** Player overlay: minimum share of its container it must cover. */
 export const OVERLAY_CONTAINER_COVERAGE = 0.8;
-/** 所在容器至少要占视口这个比例，避免为角落里的小控件触发。 */
+/** The container must cover this share of the viewport, so corner widgets never trigger it. */
 export const OVERLAY_CONTAINER_MIN_RATIO = 0.08;
 
-/** 找出页面上的覆盖层候选（覆盖大块视口的固定/绝对定位盒子）。 */
+/** Overlay candidates: fixed/absolute boxes covering a large part of the viewport. */
 export function findOverlays(root: ParentNode, ctx: OverlayContext): Element[] {
   const out: Element[] = [];
   for (const el of Array.from(root.querySelectorAll(OVERLAY_PRESELECTOR))) {
@@ -679,20 +640,20 @@ export function findOverlays(root: ParentNode, ctx: OverlayContext): Element[] {
   return out;
 }
 
-/** 覆盖层形态本身作为旁证时，额外计入的分值。 */
+/** Extra score when the overlay shape itself serves as corroboration. */
 export const OVERLAY_BONUS = 4;
-/** 覆盖层要有多少"其它"证据才成立（弱命名或跨站链接即达标）。 */
+/** Corroboration an overlay requires (weak naming or a cross-site link already qualifies). */
 export const OVERLAY_CORROBORATION = 4;
 
 export type OverlayAd = { element: Element; hit: Hit };
 
 /**
- * 找出并判定覆盖型广告位。
+ * Find and judge overlay ads.
  *
- * 为什么需要旁证：Cookie 同意条、登录弹层、全屏引导页都是"固定定位 + 高层级 +
- * 大块视口"的形态。**只看形态会误伤它们**，而误伤 Cookie 条可能让站点卡住不
- * 给看内容。所以要求至少还有一项其它证据：弱命名以上，或有跨站链接/媒体/iframe
- * 等行为信号（后者通常意味着这层是广告而不是站点自己的 UI）。
+ * Corroboration is required: cookie banners, login modals and interstitials share the "fixed +
+ * high z-index + large viewport" shape, and breaking a cookie banner can leave a site unusable.
+ * So one more signal is needed — weak naming or better, or behaviour such as cross-site
+ * links/media/iframes (which usually means an ad rather than the site's own UI).
  */
 export function findOverlayAds(
   root: ParentNode,
@@ -723,49 +684,43 @@ export function findOverlayAds(
   return out;
 }
 
-// ── 链接农场（用大量外站链接堆出来的广告/SEO 垃圾块）────────────────
+// ── Link farms (ad/SEO spam built from many off-site links) ──────────────────
 
 /**
- * 一个容器里出现这么多个**不同**的跨站域名，就算链接农场。
+ * This many **distinct** cross-site domains inside one container make it a link farm.
  *
- * 取证背景（2026-10-10，用户反馈某站点图片广告仍在显示）：实测那个页面页脚有
- * **39 个不同跨站域名**的链接（`a.referrerLink`，全部 `target=_blank`），
- * 由站点自己的 `/js/partners.js` 注入到 `[data-javeve-partners]`。
+ * Evidence (2026-10-10): a footer held **39 distinct cross-site domains** (`a.referrerLink`, all
+ * `target=_blank`) injected by the site's own `/js/partners.js` into `[data-javeve-partners]`.
  *
- * 为什么原有判据抓不到：单条跨站链接只值 4 分，低于纯行为档的 6 分门槛
- * （这是**故意的**，否则页面上每个正常外链都会变成隐藏目标）；
- * 而容器又因为后代太多（>12）根本不采信后代信号。
- *
- * 但"**一个块里挂着 5 个以上互不相同的外站域名**"是另一回事 ——
- * 正常内容区不会这样组织，广告/SEO 垃圾块才会。
+ * A single cross-site link is worth 4, below the deliberate pure-behaviour threshold of 6, and the
+ * container has too many descendants (>12) for descendant signals — yet normal content never
+ * organises itself as "5+ distinct off-site domains in one block".
  */
 export const LINK_FARM_MIN_DOMAINS = 5;
 
 /**
- * 一坨「**自家域名跳转**且载荷声明是广告」的链接数量下限。
+ * Minimum number of "own-domain redirect whose payload declares an ad" links.
  *
- * 实测（2026-10-13）：站点把广告链接走自己的域名
- * （`/traffic/go?t=<base64 {"kind":"ad","url":"https://广告落地页"}>`），
- * 于是跨站判据完全看不到它，而容器又因为后代太多（>12）不采信后代信号 ——
- * 结果整个广告轮播容器（`.streamer-container2` / `ul.streamer-box2`，
- * 里面 10 个广告位）完全没被隐藏，用户反馈"广告图片并未被屏蔽"。
+ * Measured (2026-10-13): the site routes ad links through its own domain
+ * (`/traffic/go?t=<base64 {"kind":"ad",...}>`), invisible to the cross-site criteria, while the
+ * container is too descendant-heavy (>12) for descendant signals — so a whole ad carousel
+ * (`ul.streamer-box2`, 10 slots) stayed visible.
  *
- * 载荷自己写了 `"kind":"ad"`，这是确定性证据，与"5 个不同外站域名"同级。
+ * The payload's `"kind":"ad"` is deterministic evidence, on par with 5 distinct off-site domains.
  */
 export const AD_REDIRECT_BLOCK_MIN = 3;
 
-/** 可能承载链接农场的容器标签。不包含 body/html/main/article（它们装着正文）。 */
+/** Tags that can host a link farm. Excludes body/html/main/article (those hold content). */
 const FARM_TAGS = 'div,ul,ol,section,aside,nav,footer,dl,table';
 
 /**
- * 找出**聚合型广告/垃圾块**：
- *   - 链接农场：挂着 ≥5 个互不相同的外站域名
- *   - 自家跳转广告块：挂着 ≥3 个载荷声明是广告的跳转链接
- *     （站点用这种方式绕过跨站判据，见 AD_REDIRECT_BLOCK_MIN）
+ * Find **aggregating ad/spam blocks**:
+ *   - link farms: ≥5 distinct off-site domains
+ *   - own-redirect ad blocks: ≥3 redirects whose payload declares an ad, see AD_REDIRECT_BLOCK_MIN
  *
- * 只返回**最深**的那些候选：父级往往也满足条件（甚至整个 footer 都满足），
- * 但隐藏最深的那层就足以清掉农场，而且不会连带抹掉同层容器里的正常内容
- * （页脚导航、版权声明等）。
+ * Only the **deepest** candidates are returned: parents usually qualify too (a whole footer can),
+ * but hiding the deepest layer clears the farm without also wiping normal content in the same
+ * container (footer navigation, copyright notices).
  */
 export function findLinkFarms(
   root: ParentNode,
@@ -778,11 +733,9 @@ export function findLinkFarms(
   const candidates: Element[] = [];
   for (const el of Array.from(root.querySelectorAll(FARM_TAGS))) {
     if (isInsideHidden(el)) continue;
-    // ❗里面已经有被隐藏的农场 → 这是**同一个农场的外层容器**，不要再吃一层。
-    // 实测（dgav40）：一个页脚农场被逐层隐藏了 4 层
-    // （#script_seo_links → .footer-links → section.footer-partners → .container），
-    // 每轮父容器都"装着同一批外链"于是又被判定一次。这正是"外层容器被吃掉"
-    // 的机制 —— 已经处理过的证据不该被重复采信。
+    // Already holds a hidden farm → this is the outer container of the same farm. Measured
+    // (dgav40): one footer farm was hidden layer by layer 4 times, because every parent "holds the
+    // same links" and qualified again. Handled evidence must not be counted twice.
     if (el.querySelector(`[${HIDDEN_ATTR}][${REASON_ATTR}="linkfarm"]`) !== null) continue;
 
     const domains = new Set<string>();
@@ -795,41 +748,39 @@ export function findLinkFarms(
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
         const reg = registrableDomain(parsed.hostname);
         if (!reg || reg === pageReg) {
-          // 同一站点：可能是「自家域名跳转」包装的广告（载荷里写明 kind=ad）
+          // Same site: may be an ad wrapped in an own-domain redirect (payload says kind=ad).
           if (unwrapAdRedirect(href, base).declaredAd) adRedirects += 1;
           continue;
         }
-        // 同品牌的镜像/备用域名不算"另一个域名" —— 实测 dgav36 的
-        // 「最新镜像网址」目录页正文就是几十个这样的域名，按跨站算会把正文
-        // 整块判成链接农场（用户报告的误杀）。
+        // Same-brand mirror/backup domains do not count as "another domain": the body of
+        // dgav36's "latest mirror URLs" index page is dozens of them, and counting those as
+        // cross-site turned the entire article into a link farm (reported misfire).
         if (isSameBrand(parsed.hostname, opts.host)) continue;
         domains.add(reg);
       } catch {
-        /* 忽略非法 URL */
+        /* Ignore invalid URLs */
       }
     }
-    // 判据一：挂着 ≥5 个互不相同的外站域名（链接农场）
+    // Criterion 1: ≥5 distinct off-site domains (link farm).
     const farmByDomains = domains.size >= min;
-    // 判据二：≥3 个「自家跳转 + 载荷声明是广告」的链接。
-    // ⚠️ 这条**必须同时有广告命名**（2026-10-13 实测误伤）：
-    // 一个通用包装（`div.text-center`）里恰好夹着几个跳转广告链接时，
-    // 只看链接数会把整块正文（实测 39 个内容卡片）一起隐藏。
-    // 加上命名要求后，`ul.streamer-box2`（streamer）/`#topBanner`（banner）这类
-    // 明确的广告容器才走这条判据，通用包装被排除。
+    // Criterion 2: ≥3 "own redirect whose payload declares an ad" links.
+    // Ad naming is required too (measured misfire, 2026-10-13): on link count alone a generic
+    // wrapper (`div.text-center`) holding a few ad redirects hid a whole content block (39 cards).
+    // With naming, only real ad containers (`ul.streamer-box2`, `#topBanner`) take this path.
     const blockByRedirects =
       adRedirects >= AD_REDIRECT_BLOCK_MIN && namingSignal(el).strength >= NAMING_WEAK;
     if (!farmByDomains && !blockByRedirects) continue;
     if (holdsRealContent(el)) continue;
-    // 导航（自身或内部）不是链接农场 —— 用户报告过「导航列表被屏蔽」。
-    // ⚠️ 但**伪装成导航的广告位**要留出退路：如果它自己带着广告强命名
-    // （`nav.ad-links` 这种），那命名就是显式证据，照判。
+    // Navigation (itself or inside) is not a link farm — users reported hidden navigation lists.
+    // Ads disguised as navigation still get caught: when they carry strong ad naming of their own
+    // (`nav.ad-links`), that naming is explicit evidence and wins.
     if (isNavigationLike(el) || isInsideNavigation(el)) {
       if (namingSignal(el).strength < NAMING_STRONG) continue;
     }
-    // 链接农场是"只有链接、没有文字"的墙。带实质文字的块不是农场 ——
-    // 导航列表、友链说明、索引页都可能挂着不少外链，但它们是内容。
+    // A link farm is a wall of links with no text. Substantive text means content: nav lists,
+    // partner-link notes and index pages all legitimately carry many outbound links.
     if (hasSubstantiveText(el)) continue;
-    // 文章内部的"相关链接/参考链接"是作者写的内容，不是广告垃圾
+    // "Related/reference links" inside an article are authored content, not ad spam.
     if (isInsideRealContent(el)) continue;
     candidates.push(el);
   }
@@ -840,24 +791,24 @@ export function findLinkFarms(
 }
 
 /**
- * 只看会**加载资源**的标签；不看 `<a href>`（那是点击目标，不算"使用"）。
+ * Only tags that **load resources**; `<a href>` is a click target, not a "use" of the domain.
  */
 export const RESOURCE_TAGS = 'img,script,link,iframe,video,source,embed,object';
 
-// ── 几何突增重判（随动伸缩 / 悬浮展开 / 自动放大）────────────────────
+// ── Geometry-growth re-judging (grow-on-hover / auto-enlarge) ────────────────
 
-/** 几何突增作为旁证时额外计入的分值。 */
+/** Extra score when geometry growth serves as corroboration. */
 export const GROWTH_BONUS = 4;
 
 /**
- * 判定一个「面积刚刚突然撑大」的元素。
+ * Judge an element whose area just jumped.
  *
- * 与常规三档判定的区别：**不再要求"必须证明是脚本注入"**。
- * 几何突增本身就是证据 —— 一个原本不起眼的盒子突然撑到占视口 15% 以上，
- * 同时带弱命名或跨站链接/素材，这就足够说明它是展开型广告。
+ * Unlike the three tiers it does **not** require proof of script injection: growth is evidence in
+ * itself. A previously unremarkable box that suddenly fills 15%+ of the viewport while carrying
+ * weak naming or cross-site links/assets is an expanding ad.
  *
- * ⚠️ 产出的 hit 刻意**不带 selector**：几何是**瞬时证据**，
- * 一个正常组件偶然撑大不该被固化成永久规则。隐藏当下这一次即可。
+ * The hit deliberately carries **no selector**: geometry is **transient evidence**, and a normal
+ * component that grew once must not become a permanent rule.
  */
 export function judgeGrownElement(el: Element, options: JudgeOptions): Verdict | null {
   if (isHidden(el)) return null;
@@ -881,12 +832,11 @@ export function judgeGrownElement(el: Element, options: JudgeOptions): Verdict |
   };
 }
 
-// ── 假关闭按钮（伪装成关闭的跨站链接）──────────────────────────────
+// ── Fake close buttons (a "close" control that is a cross-site link) ─────────
 
 /**
- * 「看起来是关闭控件」的线索。
- *
- * 用属性选择器做廉价预筛，再用 looksLikeCloseControl 精确判断。
+ * Clues that something "looks like a close control": a cheap attribute-selector pre-filter, then
+ * looksLikeCloseControl decides.
  */
 export const CLOSE_HINT_SELECTOR = [
   '[class*="close"]',
@@ -903,10 +853,10 @@ export const CLOSE_HINT_SELECTOR = [
   '[title*="关闭"]',
 ].join(',');
 
-/** 常见的关闭符号/文字。 */
+/** Common close symbols and words. */
 const CLOSE_TEXTS = new Set(['×', '✕', '✖', '╳', 'x', 'X', '关', '关闭', 'close', 'Close', 'CLOSE']);
 
-/** 元素是否"看起来用于关闭"。 */
+/** Does the element look like it is meant to close something? */
 export function looksLikeCloseControl(el: Element): boolean {
   const hay = [
     el.getAttribute('class') ?? '',
@@ -924,7 +874,7 @@ export function looksLikeCloseControl(el: Element): boolean {
   return CLOSE_TEXTS.has(text);
 }
 
-/** 跨站链接判断（按可注册域名）。 */
+/** Cross-site link test, by registrable domain. */
 function isCrossSiteLink(href: string, pageHost: string): boolean {
   if (!href || href.startsWith('#') || href.startsWith('javascript:')) return false;
   try {
@@ -936,18 +886,16 @@ function isCrossSiteLink(href: string, pageHost: string): boolean {
   }
 }
 
-/** 假关闭按钮：向上找它的广告容器，最多追这么多层。 */
+/** Fake close button: how many ancestor levels to walk looking for the ad container. */
 export const FAKE_CLOSE_MAX_DEPTH = 6;
 
 /**
- * 找「假关闭按钮」并给出应当隐藏的广告容器。
+ * Find fake close buttons and return the ad container that should be hidden.
  *
- * 手法：广告浮窗上的 "×" 其实是个跨站链接，点了不是关闭而是跳转。
- * 常规判据抓不到它 —— 小浮窗（占视口不到 40%）过不了覆盖层阈值，
- * 又常常没有任何广告命名。但"**关闭控件却是跨站链接**"这件事本身极可疑：
- * 正常站点的关闭按钮不会把人带到别的域名去。
- *
- * 处理方式不是拦点击（那样广告还在），而是**把外层广告容器整体隐藏**。
+ * The trick: the "×" on an ad pop-up is a cross-site link, so it navigates instead of closing.
+ * Regular criteria miss it (under the 40% overlay area threshold, usually no ad naming) — yet no
+ * legitimate close button sends the user to another domain. Blocking the click would leave the ad
+ * in place, so hide the outer container.
  */
 export function findFakeCloseAds(
   root: ParentNode,
@@ -965,18 +913,17 @@ export function findFakeCloseAds(
     if (!anchor) continue;
     if (!isCrossSiteLink(anchor.getAttribute('href') ?? '', opts.host)) continue;
 
-    // 从链接向上找"看起来像广告浮层"的容器。
+    // Walk up from the link looking for a container that looks like an ad pop-up.
     //
-    // ⚠️ 必须**优先取定位祖先**（2026-10-10 单元测试抓到的真 bug）：
-    // 早先的实现取"最外层匹配的祖先"，而任意一层含图片的通用包裹 div 都算匹配，
-    // 结果会选到一个离广告浮窗很远的容器 —— 隐藏范围过大。广告浮窗一定是
-    // 固定/绝对定位的，所以定位祖先才是正确目标。
+    // Prefer the positioned ancestor (real bug caught by a unit test, 2026-10-10): the outermost
+    // matching ancestor could be any generic wrapper div holding an image, landing
+    // far away from the pop-up and hiding far too much. Ad pop-ups are always fixed/absolute.
     let positioned: Element | null = null;
     let mediaFallback: Element | null = null;
     let node: Element | null = anchor.parentElement;
     for (let i = 0; i < maxDepth && node; i++) {
       if (node === document.body || node === document.documentElement) break;
-      // 一旦碰上装着正文的祖先就停手 —— 宁可漏，不可误伤内容
+      // Stop at any ancestor holding content: better to miss an ad than to break content.
       if (holdsRealContent(node)) break;
 
       let isPositioned = false;
@@ -988,10 +935,10 @@ export function findFakeCloseAds(
       }
 
       if (isPositioned) {
-        // 持续向上覆盖：定位链上最外层的那个才是整个浮窗
+        // Keep overwriting: the outermost element of the positioned chain is the whole pop-up.
         positioned = node;
       } else if (positioned === null && mediaFallback === null) {
-        // 只有完全找不到定位祖先时，才退而求其次用一个含媒体的近层容器
+        // Only when no positioned ancestor exists: fall back to a nearby container with media.
         if (node.querySelector('img,video,iframe,canvas') !== null) mediaFallback = node;
       }
 
@@ -1016,12 +963,11 @@ export function findFakeCloseAds(
 }
 
 /**
- * 站点自有基础设施的声明位置（canonical / og / 图标）。
+ * Places where a site declares its own infrastructure (canonical / og / icons).
  *
- * 为什么需要：试点站的 canonical 指向 `cgw666.com` —— 那是它的**镜像域名**，
- * 同时托管正文图。而「被隐藏的推荐位图片」恰好引用了它。若不排除，
- * 网络层自学习会把站点自己的域名学成广告域名，一次就把正文图全废掉。
- * 这与 §2 的风险 A 是同一类错误，只是入口不同。
+ * Why: the pilot's canonical points at `cgw666.com`, a **mirror domain** that also hosts article
+ * images, and a hidden recommendation image referenced it. Learning it as an ad domain would kill
+ * every article image at once — the same class of error as §2 risk A, entered through another door.
  */
 const SITE_OWNED_SELECTOR = [
   'link[rel~="canonical"]',
@@ -1033,7 +979,7 @@ const SITE_OWNED_SELECTOR = [
   'meta[name="twitter:image"]',
 ].join(',');
 
-/** 从 head 元数据里提取「这个站点自己的」域名。 */
+/** Domains the site declares as its own, extracted from head metadata. */
 export function siteOwnedDomains(root: ParentNode, pageHost: string): Set<string> {
   const out = new Set<string>();
   const consider = (raw: string): void => {
@@ -1056,20 +1002,18 @@ export function siteOwnedDomains(root: ParentNode, pageHost: string): Set<string
 }
 
 /**
- * 从「已被隐藏的广告」里提炼出**可以安全学习**的跨站域名。
+ * Derive the cross-site domains that are **safe to learn** from already-hidden ads.
  *
- * 这是网络层自学习的决策核心，因此放在纯逻辑层而不是接线层。
+ * The decision core of network-layer learning, hence in the pure layer rather than the wiring.
  *
- * ⚠️ 三道安全过滤都是硬要求，各有回归测试：
- *
- *   1. **只要某域名在本页任何位置充当过图片/视频来源，就绝不学它**
- *      （不论可见与否）。这是 2026-10-10 一次真实事故的直接产物：
- *      1024cg 的内容缩略图与广告素材共用 `pic.jtzatly.cn`，而内容图是懒加载的，
- *      「是否被可见内容使用」这个判断会被时序错开骗过 —— 域名被学走后
- *      **整站图片全部不显示**。现在改成结构性判断，不再依赖时序。
- *   2. 也被**可见内容**使用的域名不学（风险 A：试点站的 `pic.wvxrrip.cn`）。
- *   3. **站点自有域名**（canonical / og / 图标所指）不学。试点站 canonical 指向
- *      镜像域名 `cgw666.com`，而它托管正文图，学它同样致命。
+ * Three hard filters, each with a regression test:
+ *   1. never learn a domain that served an image/video anywhere on this page, visible or not.
+ *      From a real incident: 1024cg's content thumbnails and ad creatives shared `pic.jtzatly.cn`,
+ *      and because content images lazy-load, "is it used by visible content" was fooled by timing;
+ *      learning it blanked every image on the site. Now a structural, timing-free test.
+ *   2. never learn a domain visible content also uses (risk A: the pilot's `pic.wvxrrip.cn`)
+ *   3. never learn a domain the site declares as its own (canonical/og/icons — the mirror
+ *      `cgw666.com`, which hosts article images)
  */
 export function learnableAdDomains(root: ParentNode, pageHost: string): string[] {
   const hidden = root.querySelectorAll(`[${HIDDEN_ATTR}]`);
@@ -1077,32 +1021,32 @@ export function learnableAdDomains(root: ParentNode, pageHost: string): string[]
 
   const adDomains = new Set<string>();
   for (const el of hidden) {
-    // 学习时算上外链：广告落地页域名学会后拦其子资源可挡弹窗，
-    // 而拦截子资源不影响 <a href> 导航（main_frame 已排除）。
+    // Include links while learning: blocking the ad landing page's subresources stops pop-ups,
+    // and subresource blocking leaves <a href> navigation alone (main_frame is excluded already).
     for (const d of crossSiteResourceDomains(el, pageHost, { includeLinks: true })) {
       adDomains.add(d);
     }
   }
   if (adDomains.size === 0) return [];
 
-  // 过滤 ①（结构性，不依赖时序）：整页媒体域名一律不学
+  // Filter ① (structural, timing-independent): never learn page-wide media domains.
   const media = pageWideMediaDomains(root, pageHost);
 
-  // 过滤 ②：可见内容使用的域名。判定**不算外链**：可见内容里有个指向该域名的
-  // 链接，不构成"该域名是站点的正常资源来源"。
+  // Filter ②: domains visible content uses. Links do not count here — a visible content link to
+  // a domain does not make that domain a normal resource source for the site.
   const usedByVisible = new Set<string>();
   for (const el of root.querySelectorAll(RESOURCE_TAGS)) {
     if (isInsideHidden(el)) continue;
     for (const d of crossSiteResourceDomains(el, pageHost)) usedByVisible.add(d);
   }
 
-  // 过滤 ③：站点自有域名
+  // Filter ③: domains the site declares as its own.
   const owned = siteOwnedDomains(root, pageHost);
 
   return [...adDomains].filter((d) => !media.has(d) && !usedByVisible.has(d) && !owned.has(d));
 }
 
-/** 生成防闪现用的样式表内容。 */
+/** Build the anti-flash stylesheet body. */
 export function cosmeticCss(selectors: string[]): string {
   return selectors
     .map(
@@ -1113,10 +1057,10 @@ export function cosmeticCss(selectors: string[]): string {
 }
 
 /**
- * 元素是否命中静态规则选择器。
+ * Does the element match any static rule selector?
  *
- * 合并成一个选择器一次 matches()，比逐个匹配快；合并串非法时退回逐个试，
- * 保证一条写坏的选择器不会让整个规则包失效。
+ * Joining the selectors and doing one matches() beats matching one by one; if the joined string
+ * is invalid, fall back to one by one so a single broken selector cannot disable a whole pack.
  */
 export function matchesAny(el: Element, selectors: string[]): boolean {
   if (selectors.length === 0) return false;
@@ -1141,24 +1085,21 @@ export type JudgeOptions = {
   viewportArea: number;
   selectors: SelectorSet;
   threshold?: number;
-  /** 页级预算兜底（见 createHidingBudget）。不传则不设兜底（测试用）。 */
+  /** Page-level budget fallback (see createHidingBudget). Omit for no fallback (tests). */
   budget?: HidingBudget;
-  /** 站点自己的内容 CDN（见 frequentMediaDomains）。不传则不做这项排除。 */
+  /** The site's own content CDN (see frequentMediaDomains). Omit to skip that exclusion. */
   contentCdnDomains?: Set<string>;
 };
 
 /**
- * 判定单个元素：先规则选择器，再启发式。
+ * Judge one element: rule selectors first, then heuristics.
  *
- * ⚠️ **curated 与 learned 的待遇必须不同**（2026-10-10 事故）：
+ * `curated` and `learned` must not be treated alike:
+ *   - `curated` (site packs): evidence + fixture regressions, hidden on match
+ *   - `learned` (auto-derived): only exempt from "must be proven script-injected", still needs
+ *     naming or behaviour evidence of its own (see SelectorSet)
  *
- *   - `curated`（站点规则包）：经取证与 fixture 回归测试，命中即隐藏。
- *   - `learned`（自学习推导）：**只免去「必须证明是脚本注入」这一步**，
- *     仍然要求元素自带命名或行为证据。这一点很关键 —— 早先的实现在这里
- *     给了自学习选择器「无条件隐藏」的权力，于是 `.tjtagmanager`
- *     （站点外链包装类，命中 43 个元素、含 22 张图）把图片整片隐藏了。
- *
- * 另外「绝不隐藏装着正文的元素」是全局不变量，对 curated 同样适用。
+ * "Never hide an element holding content" is a global invariant, curated included.
  */
 export function judgeElement(el: Element, options: JudgeOptions): Verdict | null {
   if (isHidden(el)) return null;
@@ -1171,7 +1112,7 @@ export function judgeElement(el: Element, options: JudgeOptions): Verdict | null
   }
 
   if (options.selectors.learned.length > 0 && matchesAny(el, options.selectors.learned)) {
-    // 自学习规则只加速，不授予特权：仍需命名或行为证据
+    // Learned rules only accelerate; they grant no privilege: naming or behaviour still needed.
     const naming = namingSignal(el).strength;
     const { behavior, score, reasons } = scoreNode(el, {
       pageHost: options.host,
@@ -1195,14 +1136,14 @@ export function judgeElement(el: Element, options: JudgeOptions): Verdict | null
   return hit ? { kind: 'heuristic', hit } : null;
 }
 
-/** 判定并应用隐藏。隐藏原因写进 `data-adblow-reason`，便于事后排查误杀。 */
+/** Judge and apply hiding; the reason goes to `data-adblow-reason` for later triage. */
 export function applyVerdict(
   el: Element,
   verdict: Verdict | null,
   budget?: HidingBudget,
 ): Verdict | null {
   if (!verdict) return null;
-  // 页级预算兜底：绝不允许把整页清空（见 createHidingBudget）
+  // Page-level budget fallback: never blank the whole page (see createHidingBudget).
   if (budget && !budget.canHide(el)) return null;
   const reason =
     verdict.kind === 'rule'
@@ -1210,7 +1151,7 @@ export function applyVerdict(
       : (verdict.hit?.reasons ?? []).includes('learned-selector')
         ? 'learned'
         : 'heuristic';
-  // 记下**凭哪条证据**判的（排查误杀时最关键的信息）
+  // Record **which evidence** fired: the most valuable information when triaging a misfire.
   if (verdict.kind === 'heuristic' && verdict.hit.reasons.length) {
     el.setAttribute(WHY_ATTR, verdict.hit.reasons.join(','));
   }
@@ -1219,26 +1160,25 @@ export function applyVerdict(
   return verdict;
 }
 
-/** 隐藏文字 / 链接占全页的比例上限（页级兜底，宁可少拦也不能清空页面）。 */
+/** Share of a page's text / links that may be hidden: blocking less beats blanking a page. */
 export const PAGE_TEXT_BUDGET_SHARE = 0.7;
 export const PAGE_LINK_BUDGET_SHARE = 0.7;
 /**
- * 页面内容太少时**不启用**预算。
+ * The budget stays **off** while a page holds too little content.
  *
- * ⚠️ 这是验收实测被迫加的：夹具页面上只有一个广告探针，隐藏它 = 该页 100%
- * 的链接 → 被 70% 阈值拒绝 → 广告反而拦不住，验收从 21/21 掉到 12/21。
- * 页级兜底的目的是"别把有内容的页面清空"，本来就**不该**作用在
- * 内容量微不足道的页面上。
+ * Forced by acceptance measurements: a fixture page with one ad probe has that probe as 100%
+ * of its links, so the 70% threshold rejected it and ads went unblocked (21/21 → 12/21).
+ * The fallback exists so that pages holding content are never blanked, not trivial ones.
  */
 export const BUDGET_MIN_TOTAL_LINKS = 10;
 export const BUDGET_MIN_TOTAL_TEXT = 400;
 
 export type HidingBudget = {
-  /** 还能隐藏这个元素吗（会突破页级预算就返回 false）。 */
+  /** May this element still be hidden (false when it would break the page budget)? */
   canHide(el: Element): boolean;
-  /** 记入已隐藏的量（必须在真的隐藏之后调用）。 */
+  /** Account for a hidden element; call only after actually hiding it. */
   commit(el: Element): void;
-  /** 页面继续加载后重测基线（分母只增不减）。 */
+  /** Re-measure the baseline as the page keeps loading (the denominator only grows). */
   refresh(doc: Document): void;
   stats(): {
     text: number;
@@ -1253,10 +1193,9 @@ export type HidingBudget = {
 const collapse = (s: string): string => s.replace(/\s+/g, ' ').trim();
 
 /**
- * 量一页的"内容量"，**排除 `<script>` / `<style>` 里的代码文本**。
- *
- * 不排除的话，内联 JS 多的页面文字总量能到十几万字符（实测 dgav36 报
- * 110034），预算就永远碰不到、形同虚设。
+ * Measure a page's "content volume", **excluding code text inside `<script>` / `<style>`** — else
+ * JS-heavy pages report hundreds of thousands of characters (measured: dgav36 reported 110034) and
+ * the budget never triggers.
  */
 function measureContent(root: Element): { text: number; links: number } {
   let clone: Element;
@@ -1275,23 +1214,19 @@ function measureContent(root: Element): { text: number; links: number } {
 }
 
 /**
- * 页级预算兜底：**逐元素判定之外的最后一道保险**。
+ * Page-level budget fallback: **the last line of defence beyond per-element judging**.
  *
- * ## 为什么必须要有（用户报告的真实误杀）
+ * Why it exists (reported misfire): dgav36.xyz's "latest mirror URLs" index page is entirely dozens
+ * of mirror cards; each card had evidence (cross-site links), so per-element judging hid all 96
+ * blocks and the user saw "content killed". Per-element judging never asks "am I blanking the whole
+ * page?".
  *
- * dgav36.xyz 上有一张「最新镜像网址」目录页，**整页正文就是几十张镜像卡片**。
- * 启发式逐张判定，每张都"有证据"（跨站链接），于是把整页 96 个块全隐藏了 ——
- * 用户看到的是"正文被误杀"。逐元素判定的根本缺陷是：**从不问
- * "我是不是把整个页面清空了"**。
- *
- * ## 三个必须注意的设计点（都是踩出来的）
- *
- * 1. **内容太少的页面不启用**：夹具页只有一个探针，隐藏它就是该页 100% 的链接，
- *    会反过来让广告拦不住（验收 21/21 → 12/21）。
- * 2. **文字量要排除 `<script>`**：否则内联 JS 让分母虚高到十几万，预算永远不触发。
- * 3. **基线在"动手前"测，且分母只增不减**：在隐藏过程中重测等于把已隐藏的
- *    部分从分母里去掉，预算就永远用不完。页面后续加载出更多内容时，
- *    用 `refresh` 把新增量加进分母。
+ * Three design points, all learned the hard way:
+ *   1. pages with too little content keep the budget off (a fixture page with one probe would
+ *      otherwise lose its only link: acceptance 21/21 → 12/21)
+ *   2. text volume must exclude `<script>`, or inline JS inflates the denominator
+ *   3. measure the baseline **before** touching anything and only grow the denominator —
+ *      re-measuring while hiding would drop hidden parts from it. `refresh` adds new content.
  */
 export function createHidingBudget(
   doc: Document,
@@ -1324,7 +1259,7 @@ export function createHidingBudget(
 
   return {
     canHide(el: Element): boolean {
-      // 页面内容太少 → 兜底不生效（这时"少拦"比"少误杀"更重要）
+      // Too little content → fallback off (blocking less matters more than misfiring less here).
       if (!enabled()) return true;
       const t = collapse(el.textContent ?? '').length;
       const l = el.querySelectorAll('a[href]').length;
@@ -1342,7 +1277,7 @@ export function createHidingBudget(
       const root = current.body ?? current.documentElement;
       if (!root) return;
       const m = measureContent(root);
-      // 当前可见量 + 我们已隐藏量 = 曾经观察到的总量；分母只增不减
+      // Visible now + hidden by us = the total ever observed; the denominator only grows.
       totalText = Math.max(totalText, m.text + text);
       totalLinks = Math.max(totalLinks, m.links + links);
     },
@@ -1356,12 +1291,12 @@ export type SweepResult = {
   hits: Hit[];
 };
 
-/** 扫一遍整棵子树（不含 root 自身）。 */
+/** Sweep an entire subtree (root itself excluded). */
 export function sweep(root: ParentNode, options: JudgeOptions): SweepResult {
   const result: SweepResult = { hiddenByRule: 0, hiddenByHeuristic: 0, hits: [] };
 
   for (const el of Array.from(root.querySelectorAll('*'))) {
-    // 已被祖先隐藏的整棵子树不必再判，省时也避免重复计数
+    // A subtree already hidden by an ancestor needs no judging: saves time, avoids double counts.
     if (isHidden(el)) continue;
     const verdict = applyVerdict(el, judgeElement(el, options), options.budget);
     if (!verdict) continue;
@@ -1377,12 +1312,13 @@ export function sweep(root: ParentNode, options: JudgeOptions): SweepResult {
 
 export type AddedResult = { rule: number; hits: Hit[] };
 
-/** 处理一个新增节点：先判自身，再扫子树。返回统计与自学习应记录的命中。 */
+/** Handle one added node: judge it, then sweep its subtree. Returns counts and learnable hits. */
 export function processAdded(el: Element, options: JudgeOptions): AddedResult {
   const self = applyVerdict(el, judgeElement(el, options), options.budget);
   if (self) {
-    // 自身已被隐藏 → 整棵子树已经不可见，不必再逐个判定。
-    // 否则既做无用功，又会把广告内部一堆节点的泛化选择器灌进自学习库当噪声。
+    // Itself hidden → the whole subtree is already invisible, so judge nothing further.
+    // Judging on would be wasted work and would flood the learned store with the generic
+    // selectors of every node inside the ad.
     return self.kind === 'heuristic'
       ? { rule: 0, hits: [self.hit] }
       : { rule: 1, hits: [] };

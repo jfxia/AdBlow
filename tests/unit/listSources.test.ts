@@ -6,16 +6,11 @@ import {
   scanTextForPaidWhitelist,
 } from '../../tools/filters/fetch-lists.mjs';
 
-/**
- * 目标硬要求：**列表来源只限无付费白名单者**。
- *
- * 背景：EasyList 等列表本身不含付费白名单，但"Acceptable Ads"是**另一份订阅**
- * （exceptionrules.txt）——广告主付费后进入该列表被放行。各种"免费 adblock"
- * 后来变味，往往就是从默认勾选这份订阅开始的。
- *
- * 这里把承诺变成**代码里的强制检查**：配置里加了这类来源 → 抓取直接失败；
- * 正文出现 AA 痕迹 → 也失败。这样以后有人（包括我）想偷偷加进去会立刻被拦。
- */
+// Hard requirement: list sources must contain no paid whitelist. EasyList et al. have none,
+// but "Acceptable Ads" is a separate subscription (exceptionrules.txt) that sells
+// pass-through, and "free adblock" tools usually rot by enabling it by default. This makes
+// the promise a code check: such a source in the config, or AA traces in the text, fail the
+// fetch outright, so nobody (including me) can slip one in unnoticed.
 
 describe('checkNoPaidWhitelist：来源配置', () => {
   it('❗当前配置的 6 份列表全部通过', () => {
@@ -43,7 +38,7 @@ describe('checkNoPaidWhitelist：来源配置', () => {
       LIST_SOURCES.map((s) => s.id).sort(),
       ['easylist', 'easylist-china', 'easyprivacy', 'ublock-badware', 'ublock-filters', 'ublock-privacy'],
     );
-    // 每个来源都要有许可证信息（否则无法署明出处）
+    // Every source needs license info, or attribution is impossible.
     for (const s of LIST_SOURCES) {
       assert.ok(s.license, `${s.id} 缺许可证标注`);
       assert.ok(s.url.startsWith('https://'), `${s.id} 必须用 https`);

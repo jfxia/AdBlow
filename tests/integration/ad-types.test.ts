@@ -12,11 +12,8 @@ import {
 } from '../../src/content/engine.ts';
 import { namingSignal, NAMING_STRONG, NAMING_WEAK } from '../../src/engine/lexicon.ts';
 
-/**
- * 21 类干扰视线广告的验收改进 —— 对应的判定逻辑回归。
- *
- * 每个 describe 都对应验收实测里的一条失败项，说明它当时为什么漏、现在靠什么补上。
- */
+// Regression coverage for the 21 disruptive-ad acceptance items: each describe maps
+// to one case that used to slip through on real sites.
 
 const HOST = 'www.example.com';
 const VIEWPORT = 1280 * 900;
@@ -36,8 +33,6 @@ function optionsFor(host = HOST): JudgeOptions {
   };
 }
 
-// ── 词库补充（验收第 10、13 条）──────────────────────────────────
-
 describe('词库：视频广告行业术语（验收第 10/11/12 条）', () => {
   it('outstream / instream 判为强命名', () => {
     for (const cls of ['outstream-video', 'instream-player', 'video-outstream']) {
@@ -53,7 +48,7 @@ describe('词库：视频广告行业术语（验收第 10/11/12 条）', () => 
 
   it('sticky 只作为弱命名（粘性页头也会用这个词）', () => {
     assert.equal(namingSignal(root('<div class="sticky"></div>').firstElementChild!).strength, NAMING_WEAK);
-    // 弱词不叠加：sticky + bottom + banner 全是弱词，合计仍是弱命名
+    // Weak words don't stack: sticky + bottom + banner all weak, total stays weak.
     assert.equal(
       namingSignal(root('<div class="sticky-bottom-banner"></div>').firstElementChild!).strength,
       NAMING_WEAK,
@@ -74,8 +69,6 @@ describe('词库：视频广告行业术语（验收第 10/11/12 条）', () => 
     );
   });
 });
-
-// ── 几何突增重判（验收第 8、14、18、21 条）──────────────────────
 
 describe('judgeGrownElement：展开型广告（验收第 8/14/18/21 条）', () => {
   it('撑大后带跨站链接 + 跨站素材 → 隐藏（不要求证明脚本注入）', () => {
@@ -118,15 +111,13 @@ describe('judgeGrownElement：展开型广告（验收第 8/14/18/21 条）', ()
   });
 
   it('已隐藏的元素不再重复判定', () => {
-    // 注意属性值是 '1'：hideElement 写的就是 '1'，用空值测不出 isHidden
+    // Value must be '1' — that is what hideElement writes; an empty value isn't "hidden".
     const el = root(
       `<div data-adblow-hidden="1"><a href="https://ads.example.net/x"></a></div>`,
     ).firstElementChild!;
     assert.equal(judgeGrownElement(el, optionsFor()), null);
   });
 });
-
-// ── 播放器内叠加层（验收第 13 条）──────────────────────────────
 
 describe('isOverlay：播放器内叠加层（验收第 13 条）', () => {
   const overlayCtx = (sizes: Record<string, { width: number; height: number }>): OverlayContext => ({
@@ -177,7 +168,7 @@ describe('isOverlay：播放器内叠加层（验收第 13 条）', () => {
          <div data-k="layer" style="position:absolute"></div></div>`,
     );
     const layer = doc.querySelector('[data-k="layer"]')!;
-    // 容器仅 200×150 = 30000 / 1152000 ≈ 2.6%
+    // 200x150 = 30000 / 1152000, about 2.6% of the viewport — below the 8% floor.
     const ctx = overlayCtx({ layer: { width: 200, height: 150 }, player: { width: 200, height: 150 } });
     assert.equal(isOverlay(layer, ctx), false);
   });
@@ -187,8 +178,6 @@ describe('isOverlay：播放器内叠加层（验收第 13 条）', () => {
     assert.equal(OVERLAY_CONTAINER_MIN_RATIO, 0.08);
   });
 });
-
-// ── 假关闭按钮（验收第 16 条）──────────────────────────────────
 
 describe('looksLikeCloseControl', () => {
   it('识别类名/属性里的 close / dismiss / 关闭', () => {

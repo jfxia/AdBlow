@@ -1,12 +1,10 @@
-/**
- * 诊断：用户浏览器里累积的自学习**选择器**是否在隐藏图片。
- *
- * 为什么需要：此前所有 E2E 都用全新 profile，没有累积的学习结果，
- * 因此「学到的选择器把图片藏了」这类问题在测试里永远不出现。
- * 本脚本连续访问若干次以累积学习结果，然后检查每条晋级选择器会命中多少张图片。
- *
- * 用法：node tools/e2e/diagnose-selectors.mjs <url> [visits]
- */
+// Diagnostic: are the self-learned **selectors** accumulated in a user's browser
+// hiding images?
+// Why: every earlier E2E run used a fresh profile, so no learned state ever piled
+// up and "a learned selector hides images" could not show up in tests. This visits
+// the site several times to accumulate learning, then checks how many images each
+// promoted selector matches.
+// Run: node tools/e2e/diagnose-selectors.mjs <url> [visits]
 import { spawn } from 'node:child_process';
 import { mkdirSync, openSync, closeSync, rmSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -119,7 +117,7 @@ async function readState(swWs) {
   return r.result?.value;
 }
 
-/** 在页面上检查每条晋级选择器会命中多少图片、以及那些图片是不是正文图。 */
+// how many images each promoted selector matches, and whether they are content images
 const SELECTOR_IMPACT = (selectors) => `(() => {
   const sel = ${JSON.stringify(selectors)};
   const imgs = [...document.querySelectorAll('img')];
@@ -192,8 +190,8 @@ try {
   if (!sw) throw new Error('未找到扩展 SW');
   const swWs = sw.webSocketDebuggerUrl;
 
-  // 不要在这里反复读写 SW（会反复建连，SW 休眠时容易失败）。
-  // 等目标出现后再连一次，并带重试。
+  // Do not poll the SW here: repeated connections fail readily while the SW is
+  // asleep. Connect once the target appears, with retries.
   await sleep(2500);
   let ready = false;
   for (let i = 0; i < 10 && !ready; i++) {
@@ -201,7 +199,7 @@ try {
       const s = await readState(swWs);
       if (s && s.dnrTotal > 0) ready = true;
     } catch {
-      /* 重试 */
+      /* retry */
     }
     if (!ready) await sleep(600);
   }
@@ -237,7 +235,7 @@ try {
 
   console.log(`\n自学习 DNR 规则用到的资源类型：${JSON.stringify(lastState.dnrLearnedTypes)}`);
 
-  // 最后再开一页，检查每条晋级选择器的图片影响
+  // open one more page to check each promoted selector's image impact
   const created = await fetch(
     `http://127.0.0.1:${PORT}/json/new?${encodeURIComponent('about:blank')}`,
     { method: 'PUT' },
@@ -267,10 +265,11 @@ try {
       console.log(`  ${row.selector.padEnd(34)} 匹配元素 ${String(row.matchedEls).padStart(3)}，其中含图片 ${row.imgsInside}${flag}`);
     }
 
-    // 被隐藏图片的来源与归属 + **内容卡片与其背景图是否还在**。
-    // 关键认知：该站的内容缩略图不是 <img>，而是设在帖子卡片上的 CSS 背景图
-    // （与试点站 loadBannerDirect 同一手法）。用户说的「图片不显示」，
-    // 实际是内容卡片被自学习出的 .post-card 规则整片隐藏。
+    // Origin and ownership of the hidden images, plus whether content cards and
+    // their background images survive. Key insight: this site's content thumbnails
+    // are not <img> but CSS backgrounds on post cards (the same trick as the pilot
+    // site's loadBannerDirect), so "images not showing" is really content cards
+    // being hidden wholesale by a learned .post-card rule.
     const detail = await cdp.send('Runtime.evaluate', {
       expression: `(() => {
         const hiddenOf = (el) => el.closest('[data-adblow-hidden]') !== null;
@@ -282,7 +281,7 @@ try {
         const imgs = [...document.querySelectorAll('img')];
         const hiddenImgs = imgs.filter(hiddenOf);
 
-        // 内容卡片：服务端渲染的帖子卡片（id 前缀 post-card-），缩略图是它的背景图
+        // Content cards: server-rendered post cards (id prefix post-card-); the thumbnail is their background image
         const cards = [...document.querySelectorAll('div.post-card[id^="post-card-"]')];
         const cardBg = (el) => {
           try { return getComputedStyle(el).backgroundImage || 'none'; } catch { return 'none'; }

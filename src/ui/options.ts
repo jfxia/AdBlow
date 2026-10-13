@@ -9,14 +9,12 @@ import { chromeLocal } from '../content/storage.ts';
 import { applyI18n, t } from './i18n.ts';
 
 /**
- * Options：自学习结果的审阅与撤销。
+ * Options: review and revoke what self-learning produced.
  *
- * 这不是「锦上添花」的界面，而是抗污染设计的必要一环：自学习规则晋级后会在
- * 后续访问中无条件生效（选择器在 DOM 层、域名在**网络层**），因此必须给用户
- * 一个看得见、删得掉的入口。
- *
- * 注意：这是**可选的审阅入口，不是必填配置**。普通用户不需要打开它。
- * 文案一律走 i18n（见 ui/i18n.ts），站点域名来自页面 → 只用 textContent。
+ * Not a nice-to-have: once promoted, learned rules apply unconditionally on later visits
+ * (selectors at the DOM layer, domains at the network layer), so users need a visible place
+ * to delete them. An optional review surface, not required configuration; all text goes
+ * through i18n and site domains come from pages, so textContent only (see ui/i18n.ts).
  */
 
 const store = chromeLocal();
@@ -122,7 +120,7 @@ function renderDomainEntry(pageHost: string, entry: DomainEntry): HTMLLIElement 
   return li;
 }
 
-/** 网络层：在某站点上学到的广告域名。 */
+/** Network layer: ad domains learned on one site. */
 function renderDomainSite(pageHost: string, entries: DomainEntry[]): HTMLElement {
   const section = document.createElement('section');
 
@@ -189,7 +187,7 @@ async function render(): Promise<void> {
     return;
   }
 
-  // 网络层（域名）优先展示：它的影响面比 DOM 选择器更大
+  // Domain (network-layer) entries first: broader impact than a DOM selector.
   for (const site of domainSites) {
     container.appendChild(renderDomainSite(site.pageHost, site.entries));
   }

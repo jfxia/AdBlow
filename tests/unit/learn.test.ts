@@ -124,7 +124,7 @@ describe('自学习数据迁移（安全闸门收紧后作废旧数据）', () =
   it('版本已是最新时不重复清理', async () => {
     const store = memoryStore();
     assert.equal(await migrateLearnedSchema(store), true);
-    // 之后又学了点东西
+    // Then learn something new.
     for (let i = 0; i < PROMOTE_AFTER; i++) await recordHit(store, 'a.cc', '.keep-me');
 
     assert.equal(await migrateLearnedSchema(store), false, '不应重复清理');

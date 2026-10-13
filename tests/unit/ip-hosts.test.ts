@@ -30,7 +30,7 @@ describe('isIpLiteral', () => {
 
 describe('registrableDomain：IP 必须原样返回（实测踩过的坑）', () => {
   it('IPv4 不再被截成末两段', () => {
-    // 曾经的 bug：54.169.219.76 → '219.76'，进而生成 ||219.76^ 这种会误配的规则
+    // Old bug: 54.169.219.76 was truncated to '219.76', producing misfiring ||219.76^ rules.
     assert.equal(registrableDomain('54.169.219.76'), '54.169.219.76');
     assert.equal(registrableDomain('13.229.106.237'), '13.229.106.237');
   });
@@ -48,7 +48,7 @@ describe('registrableDomain：IP 必须原样返回（实测踩过的坑）', ()
 
 describe('crossSiteResourceDomains：不学裸 IP', () => {
   it('跳过 IP 上的追踪端点', () => {
-    // 站点把上报放在裸 IP + 高位端口上；裸 IP 常为共享基础设施，不学
+    // The site reports to a bare IP on a high port; bare IPs are shared infrastructure, never learned.
     const domains = crossSiteResourceDomains(
       el('<script src="https://54.169.219.76:15212/api/eventTracking/batchReport.json"></script>'),
       HOST,
@@ -64,7 +64,7 @@ describe('crossSiteResourceDomains：不学裸 IP', () => {
       ),
       HOST,
     );
-    // 两段式主机的可注册域名就是它自己（'cyou' 是 TLD，不是可注册域名）
+    // A two-label host is its own registrable domain ('cyou' is a TLD, not registrable).
     assert.deepEqual(domains, ['api-dc-prod-003.cyou']);
   });
 });

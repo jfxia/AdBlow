@@ -1,10 +1,10 @@
 import type { KvStore } from './storage.ts';
 
 /**
- * 站点开关与运行统计。
+ * Per-site kill switch and run stats.
  *
- * 站点开关是**安全阀**：一个会在某站点上出错的过滤器必须有「本站关掉」的出口，
- * 否则用户只能整个禁用扩展。因此内容脚本启动的第一件事就是查它。
+ * The switch is a safety valve: a filter misfiring on one site must be
+ * disableable there, else the only escape is disabling the whole extension.
  */
 
 export const disabledKey = (host: string): string => `disabled:${host}`;
@@ -18,7 +18,7 @@ export async function setSiteDisabled(
   host: string,
   disabled: boolean,
 ): Promise<void> {
-  // 启用时删键而不是写 false，保持存储干净
+  // Delete the key instead of writing false, so storage stays clean.
   if (disabled) await store.set(disabledKey(host), true);
   else await store.remove(disabledKey(host));
 }

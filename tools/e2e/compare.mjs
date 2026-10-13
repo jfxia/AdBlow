@@ -1,20 +1,11 @@
-/**
- * 公平对比：AdBlow vs Adblock Plus / uBlock Origin Lite / AdGuard / 无扩展。
- *
- * ## 中立性设计（这是整件事的关键）
- *
- * 唯一可信的对比办法是**同一套指标测所有扩展**，且指标不能来自任何一方的实现：
- *
- *   1. **广告域请求**：一份固定的第三方广告/追踪域名清单（不取自任何扩展的规则），
- *      统计"成功拿到响应"的数量 —— 纯网络层，没有判据之争。
- *   2. **页面内容是否被误伤**：可见文字量、可见链接数、正文/导航是否还在。
- *   3. **广告位残留**：一套固定的中立启发式（跨站 iframe 面积、
- *      类名里的广告词、adsbygoogle 容器），对每个变体**完全相同**地应用。
- *
- * 每个变体用**全新的浏览器 profile**，同一批页面、同样的等待与滚动。
- *
- * 用法：node tools/e2e/compare.mjs [--pages=a,b,c]
- */
+// Fair comparison: AdBlow vs Adblock Plus / uBlock Origin Lite / AdGuard / no
+// extension. Neutrality is the whole point: one fixed metric set, taken from none
+// of the extensions' own implementations -- (1) successful responses to a fixed
+// third-party ad/tracking domain list, (2) content damage via visible text and
+// links, (3) leftover ad slots via one neutral heuristic applied identically to
+// every variant (cross-site iframe area, ad words in class names, adsbygoogle).
+// Each variant gets a fresh browser profile, the same pages, waits and scrolling.
+// Run: node tools/e2e/compare.mjs [--pages=a,b,c]
 import { spawn } from 'node:child_process';
 import { mkdirSync, openSync, closeSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -28,10 +19,8 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const PROBE = `${ROOT}_probe/`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * 固定的第三方广告 / 追踪域名清单（中立：不取自任何被测扩展的规则）。
- * 只用域名后缀匹配，避免路径差异带来的偏差。
- */
+// Fixed third-party ad / tracking domain list (neutral: taken from no tested
+// extension's rules). Suffix matching only, so paths cause no bias.
 const AD_DOMAINS = [
   'doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'google-analytics.com',
   'googletagmanager.com', 'googletagservices.com', 'adservice.google.com',
@@ -63,7 +52,7 @@ const PAGES = (() => {
   ];
 })();
 
-/** 被测变体。AdBlow 与对扩展都用**未打包加载**的构建。 */
+/** Variants under test; AdBlow and the rivals are all loaded unpacked. */
 const VARIANTS = [
   { key: 'none', label: '无扩展（基线）', dir: null },
   { key: 'adblow', label: 'AdBlow', dir: `${ROOT}dist` },
@@ -126,7 +115,7 @@ class Cdp {
   }
 }
 
-/** 中立的"广告位残留"启发式 —— 对每个变体施加完全相同的一套判据。 */
+/** Neutral leftover-ad-slot heuristic, applied identically to every variant. */
 const DOM_PROBE = `(() => {
   const vw = innerWidth, vh = innerHeight;
   const vis = (el) => {
@@ -139,7 +128,7 @@ const DOM_PROBE = `(() => {
 
   let adLikeVisible = 0;
   const samples = [];
-  // ① 跨站 iframe（面积够大）
+  // (1) Cross-site iframes of a decent size
   for (const f of document.querySelectorAll('iframe[src]')) {
     if (!vis(f)) continue;
     const src = f.getAttribute('src') || '';
@@ -151,7 +140,7 @@ const DOM_PROBE = `(() => {
     adLikeVisible += 1;
     if (samples.length < 4) samples.push('iframe ' + src.slice(0, 50));
   }
-  // ② 类名/ID 含广告词且面积够大的可见元素
+  // (2) Visible elements whose class/id carries an ad word and that are large enough
   for (const el of document.querySelectorAll('[class],[id]')) {
     const sig = ((el.getAttribute('class') || '') + ' ' + (el.id || ''));
     if (!AD_WORDS.test(sig)) continue;
@@ -161,7 +150,7 @@ const DOM_PROBE = `(() => {
     adLikeVisible += 1;
     if (samples.length < 8) samples.push(el.tagName.toLowerCase() + '.' + sig.trim().split(/\\s+/).slice(0,2).join('.'));
   }
-  // ③ 已知广告容器
+  // (3) Known ad containers
   for (const sel of ['ins.adsbygoogle', '[id*="google_ads"]', '[data-ad-slot]', '[data-ad-client]']) {
     for (const el of document.querySelectorAll(sel)) {
       if (vis(el)) adLikeVisible += 1;
@@ -230,7 +219,8 @@ async function measureVariant(variant, port) {
     child.kill();
     return { variant, error: 'CDP 未就绪' };
   }
-  // 给扩展（尤其带大量规则集的）留出初始化时间，避免不公平
+  // give extensions (especially those with large rulesets) time to initialise,
+  // so no variant is disadvantaged
   await sleep(variant.dir ? 6000 : 1500);
 
   const perPage = [];
@@ -305,7 +295,7 @@ for (const v of VARIANTS) {
 
 writeFileSync(`${PROBE}compare-result.json`, JSON.stringify(results, null, 2), 'utf8');
 
-// ── 报表 ──
+// report
 const host = (u) => {
   try {
     return new URL(u).hostname;

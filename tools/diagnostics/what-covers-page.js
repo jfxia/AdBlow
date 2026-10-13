@@ -1,24 +1,12 @@
-/**
- * 「到底是什么盖住了页面？」—— 一锤定音的小探针。
- *
- * ## 为什么需要它（2026-10-13）
- *
- * 用户的 ON/OFF 截图对比：过滤后页面 4836px → 1551px、97% 像素近黑、只剩零星几块。
- * 但取证结果是：网络层只拦了一个无害的 /js/tongji.js（48 个资源按 7 种类型全测），
- * DOM 只隐藏 2 个广告元素，脚本注入不适用于本站。
- *
- * 站点自带一个形态完全吻合的东西：
- *   mountPreroll() → #site-preroll-gate
- *   position:fixed; inset:0; z-index:2147482500; background:rgba(0,0,0,.94)
- *   document.addEventListener('play', blockPlay, true) + pausePlayback()  → 锁死播放
- *   按钮 5 秒后可点、10 秒后自动 release()
- *
- * 所以只要问浏览器一句话就能定案：**屏幕正中央最上层的是哪个元素**。
- *
- * ## 用法（关键：在问题正在发生时运行，不要刷新）
- *
- * F12 → 控制台 → 粘贴本文件全部内容 → 回车 → 结果会自动复制到剪贴板
- */
+// "What is covering the page?" -- a one-shot probe. Paste it into the console while
+// the problem is happening (do not reload); the result goes to the clipboard.
+// Why it exists: with filtering on, a user's page shrank 4836px -> 1551px with 97%
+// of pixels nearly black, while forensics found only one harmless /js/tongji.js
+// blocked and 2 DOM elements hidden. The site itself ships a perfect match:
+// mountPreroll() -> #site-preroll-gate, position:fixed; inset:0;
+// z-index:2147482500; background:rgba(0,0,0,.94), locking playback through a
+// capture-phase 'play' handler. So one question settles it: which element is
+// topmost at the centre of the screen.
 (() => {
   const inViewport = (el) => {
     const r = el.getBoundingClientRect();
@@ -51,12 +39,12 @@
     };
   };
 
-  // ① 屏幕中央最上层是谁（"谁盖住了页面"的直接答案）
+  // topmost element at the centre of the screen (the direct answer)
   const cx = Math.floor(innerWidth / 2);
   const cy = Math.floor(innerHeight / 2);
   const stack = document.elementsFromPoint(cx, cy).slice(0, 6).map(describe);
 
-  // ② 所有"覆盖视口 ≥90%"的固定/绝对定位可见层 —— 全屏遮罩的完整清单
+  // every visible fixed/absolute layer covering >=90% of the viewport
   const overlays = [];
   for (const el of document.querySelectorAll('body *')) {
     if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK') continue;
@@ -70,7 +58,7 @@
     }
   }
 
-  // ③ 播放器与视频的真实状态
+  // real state of the player and video
   const media = {
     videos: document.querySelectorAll('video').length,
     audio: document.querySelectorAll('audio').length,
@@ -79,7 +67,7 @@
     playerBox: describe(document.querySelector('#player, [class*="player"], [id*="player"]')),
   };
 
-  // ④ 站点自己的广告闸门是否在
+  // is the site's own ad gate present
   const gate = document.getElementById('site-preroll-gate');
   const preroll = {
     gateExists: !!gate,
@@ -89,7 +77,7 @@
     prerollCompleteFired: !!window.__sitePrerollComplete,
   };
 
-  // ⑤ 页面整体形态
+  // overall page shape
   const shape = {
     bodyText: (document.body.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 200),
     textLength: (document.body.innerText || '').trim().length,

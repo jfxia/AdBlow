@@ -34,10 +34,10 @@ describe('shouldAllowOpen', () => {
 
   it('非法输入不抛异常：同源放行，无法解析则拦截', () => {
     assert.doesNotThrow(() => shouldAllowOpen('ht!tp://%%', HOST, false));
-    // 这类畸形串会被当作相对引用解析成同源地址，放行是正确语义
-    // （只是同源跳转，没有跨站风险）
+    // Malformed strings like this parse as relative references — i.e. same-origin — so
+    // allowing them is correct: only a same-site hop, with no cross-site risk.
     assert.equal(shouldAllowOpen('ht!tp://%%', HOST, false), true);
-    // 真正无法解析的输入必须拦截，且不能抛
+    // Genuinely unparseable input must be blocked, and must not throw.
     assert.doesNotThrow(() => shouldAllowOpen('http://[', HOST, false));
     assert.equal(shouldAllowOpen('http://[', HOST, false), false);
   });

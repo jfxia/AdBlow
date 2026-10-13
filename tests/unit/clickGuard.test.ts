@@ -120,14 +120,14 @@ describe('正常点击必须放行（误伤守卫）', () => {
 });
 
 /**
- * 文档级「点击即跳转」处理函数的识别。
- *
- * 对应实测未拦住的那种手法（/capture 变体）：点击目标是正常内容，事件层不能拦；
- * `location.href` 的赋值又无法被拦截 —— 只能在注册时就拒绝这个监听器。
+ * Detecting a document-level "click navigates away" handler — the /capture variant seen in
+ * the wild: the click target is ordinary content, so the event layer cannot block it, and
+ * assigning `location.href` cannot be intercepted either. The listener has to be refused at
+ * registration time.
  */
 describe('looksLikeNavigationHijack：识别文档级跳转处理函数', () => {
-  // 用 new Function 构造各种真实写法的源码，避免 TypeScript 对
-  // `self.location = 字符串` 这类写法报类型错（类型断言会被擦除，测不到真实源码形态）
+  // `new Function` reproduces the real source shapes verbatim: TypeScript rejects
+  // `self.location = <string>`, and a type assertion would be erased, hiding the real form.
   const fromSource = (body: string) => new Function(body) as () => void;
 
   it('识别直接赋值 location.href', () => {

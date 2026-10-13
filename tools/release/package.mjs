@@ -1,25 +1,11 @@
-/**
- * 发布打包：构建 → 审计 → 生成 zip。
- *
- * ## 为什么自己写 ZIP 而不是调外部工具
- *
- * `Compress-Archive` / `zip` 在目标机器上不一定存在，而且它们无法精确控制
- * "哪些文件进包"。ZIP 的格式足够简单（deflate + CRC32 + 三段结构），
- * 自己写反而更可控，且**零依赖**。
- *
- * ## 为什么必须剔除 `_metadata/`
- *
- * Edge/Chrome 加载解包扩展时会在扩展目录里生成
- * `_metadata/generated_indexed_rulesets/*`（规则集的索引缓存，实测约 6 MB）。
- * 它不是我们的产物，把它打进发布包既臃肿又可能让审核困惑。
- *
- * ## 审计规则：dist 里每个文件都必须是"可达的"
- *
- * 可达 = manifest 声明 / 图标 / 语言包 / 界面引用的资源 / 三类规则数据目录。
- * 其余一律视为构建残留：**打印出来并从包里剔除**，而不是静默打包。
- *
- * 用法：node tools/release/package.mjs [--no-build]
- */
+// Release packaging: build -> audit -> zip.
+// Why a hand-written ZIP: external `zip` / `Compress-Archive` may be absent and
+// cannot control which files go in; deflate + CRC32 + three sections is simple enough to write.
+// Why `_metadata/` must go: loading the unpacked extension creates
+// `_metadata/generated_indexed_rulesets/*` (~6 MB ruleset index cache), not our artifact.
+// Audit: a dist file is reachable when the manifest declares it, it is an
+// icon/locale/UI resource, or it is rule data; anything else is build leftover.
+// Run: node tools/release/package.mjs [--no-build]
 import { deflateRawSync } from 'node:zlib';
 import {
   existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync,
@@ -29,11 +15,12 @@ import { fileURLToPath } from 'node:url';
 
 const root = new URL('../../', import.meta.url);
 const p = (rel) => fileURLToPath(new URL(rel, root));
-// 与构建脚本共用同一个输出目录覆盖（浏览器正加载 dist 时也能打包）
+// share the build script's output-dir override, so packaging works while a
+// browser is holding dist/ open
 const DIST = process.env.ADBLOW_DIST ? p(process.env.ADBLOW_DIST) : p('dist');
 const RELEASE_DIR = p('release');
 
-// ── 1) 先构建（除非显式跳过）──
+// 1) build first, unless explicitly skipped
 if (!process.argv.includes('--no-build')) {
   console.log('构建 dist …');
   execFileSync(process.execPath, [p('tools/build/build.mjs')], { stdio: 'inherit' });
@@ -48,7 +35,7 @@ const manifest = JSON.parse(readFileSync(`${DIST}/manifest.json`, 'utf8'));
 const version = manifest.version;
 const appName = 'AdBlow';
 
-// ── 2) 收集"可达文件" ──
+// 2) collect the reachable files
 const reachable = new Set();
 
 const add = (rel) => {
@@ -57,8 +44,8 @@ const add = (rel) => {
   reachable.add(clean);
 };
 
-// 入口本身：manifest 不会"声明自己的文件名"，必须显式加入
-// （自测时踩到：审计把它当成构建残留删掉了）
+// the manifest itself: it never declares its own filename, so add it explicitly
+// (self-testing once had the audit delete it as a build leftover)
 add('manifest.json');
 
 for (const f of [
@@ -73,7 +60,7 @@ for (const f of [
   if (f) add(f);
 }
 
-// 界面 HTML 引用的本地资源
+// local resources referenced by the UI HTML
 for (const html of ['popup.html', 'options.html']) {
   const body = readFileSync(`${DIST}/${html}`, 'utf8');
   for (const m of body.matchAll(/(?:src|href)="([^"]+)"/g)) {
@@ -82,10 +69,10 @@ for (const html of ['popup.html', 'options.html']) {
   }
 }
 
-// 目录：语言包、三类规则数据（内容脚本/SW 运行时按需读取）
-//
-// ⚠️ 这里必须是**纯列举**函数：早先版本让同一个 walk 既列举又标记可达，
-// 结果"所有文件都可达"，审计永远发现不了残留（自测时才发现）。
+// directories: locales plus the three rule-data sets (read on demand by the
+// content script / SW). listFiles must stay a pure listing: an earlier version had
+// one walk both list and mark reachable, so everything looked reachable and the
+// audit could never spot leftovers.
 const listFiles = (dir, base = '') => {
   const out = [];
   for (const entry of readdirSync(dir)) {
@@ -101,7 +88,7 @@ for (const dir of ['_locales', 'icons', 'rulesets', 'cosmetic', 'scriptlets']) {
   if (existsSync(`${DIST}/${dir}`)) for (const f of listFiles(`${DIST}/${dir}`, dir)) add(f);
 }
 
-// ── 3) 审计：找出不该进包的东西 ──
+// 3) audit: find what should not be in the package
 const allFiles = listFiles(DIST, '');
 const excluded = allFiles.filter((f) => !reachable.has(f)).sort();
 
@@ -112,9 +99,9 @@ if (excluded.length) {
     console.log(`  ${f}  ${(size / 1024).toFixed(0)} KB`);
   }
   if (excluded.length > 20) console.log(`  … 其余 ${excluded.length - 20} 个`);
-  // 直接从 dist 删掉，保证目录本身也干净（下次构建前不必手动清理）
+  // delete them from dist too, so the directory stays clean for the next build
   for (const f of excluded) rmSync(`${DIST}/${f}`, { force: true });
-  // 清掉因此变空的目录
+  // remove directories that became empty
   for (const dir of readdirSync(DIST)) {
     const abs = `${DIST}/${dir}`;
     if (statSync(abs).isDirectory() && readdirSync(abs).length === 0) rmSync(abs, { recursive: true });
@@ -123,7 +110,7 @@ if (excluded.length) {
 
 const files = allFiles.filter((f) => reachable.has(f)).sort();
 
-// ── 4) 写 ZIP（deflate + CRC32，格式见 PKWARE APPNOTE）──
+// 4) write the ZIP (deflate + CRC32; format per the PKWARE APPNOTE)
 
 const CRC_TABLE = (() => {
   const table = new Int32Array(256);
@@ -141,7 +128,7 @@ function crc32(buf) {
   return (c ^ -1) >>> 0;
 }
 
-/** MS-DOS 时间/日期（ZIP 用）。 */
+/** MS-DOS time/date, as ZIP stores them. */
 function dosDateTime(date) {
   const time =
     (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
@@ -160,7 +147,7 @@ let offset = 0;
 for (const rel of files) {
   const data = readFileSync(`${DIST}/${rel}`);
   const compressed = deflateRawSync(data, { level: 9 });
-  // 压缩后反而更大时按规范退回 store（method 0），避免无谓膨胀
+  // fall back to store (method 0) when deflate grows the data, per spec
   const useDeflate = compressed.length < data.length;
   const body = useDeflate ? compressed : data;
   const method = useDeflate ? 8 : 0;
@@ -170,7 +157,7 @@ for (const rel of files) {
   const local = Buffer.alloc(30);
   local.writeUInt32LE(0x04034b50, 0);
   local.writeUInt16LE(20, 4);            // version needed
-  local.writeUInt16LE(0x0800, 6);        // flags: UTF-8 文件名
+  local.writeUInt16LE(0x0800, 6);        // flags: UTF-8 filename
   local.writeUInt16LE(method, 8);
   local.writeUInt16LE(dosTime, 10);
   local.writeUInt16LE(dosDate, 12);
@@ -197,7 +184,7 @@ for (const rel of files) {
   central.writeUInt16LE(0, 32);          // comment
   central.writeUInt16LE(0, 34);          // disk
   central.writeUInt16LE(0, 36);          // internal attrs
-  // external attrs: -rw-r--r--  （`<<` 在 JS 里是 32 位有符号，必须 >>> 0）
+  // external attrs: -rw-r--r--  (`<<` is signed 32-bit in JS, so `>>> 0` is needed)
   central.writeUInt32LE((0o100644 << 16) >>> 0, 38);
   central.writeUInt32LE(offset, 42);
   centralParts.push(central, nameBuf);
@@ -223,7 +210,6 @@ const zipName = `adblow-${version}-edge.zip`;
 const zipPath = `${RELEASE_DIR}/${zipName}`;
 writeFileSync(zipPath, zip);
 
-// ── 5) 报告 ──
 const totalRaw = files.reduce((n, f) => n + statSync(`${DIST}/${f}`).size, 0);
 console.log(`\n${appName} v${version} 发布包`);
 console.log(`  文件数   ${files.length}`);
@@ -231,7 +217,8 @@ console.log(`  解包体积 ${(totalRaw / 1024 / 1024).toFixed(2)} MB`);
 console.log(`  压缩后   ${(zip.length / 1024 / 1024).toFixed(2)} MB  (${(zip.length / totalRaw * 100).toFixed(0)}%)`);
 console.log(`  产物     release/${zipName}`);
 
-// 关键项自检：商店要求 manifest.json 在压缩包根目录、且必需字段齐全
+// key self-check: the store requires manifest.json at the archive root, with all
+// required fields present
 const requiredAtRoot = ['manifest.json', 'background.js', 'content.js'];
 for (const f of requiredAtRoot) {
   if (!files.includes(f)) {

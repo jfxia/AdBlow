@@ -44,8 +44,8 @@ describe('generalizeSelector', () => {
   });
 
   it('没有任何稳定特征时返回 null，绝不返回裸标签名', () => {
-    // 这是防「隐藏页面上所有链接」这类灾难的硬约束：
-    // 自学习规则会进入静态规则集，静态规则命中即隐藏、不做判定。
+    // Hard constraint against disasters like "hide every link on the page": learned rules join
+    // the static ruleset, and a static rule hides on match without any further judging.
     assert.equal(generalizeSelector(el('<a href="https://spam.example.com/x"></a>')), null);
     assert.equal(generalizeSelector(el('<div></div>')), null);
     assert.equal(generalizeSelector(el('<img src="/a.png">')), null);
@@ -67,7 +67,7 @@ describe('isSelectorSafe（入库前的宽度闸门）', () => {
   it('拒绝空串与过短选择器', () => {
     const root = el('<div></div>');
     assert.equal(isSelectorSafe('', root), false);
-    assert.equal(isSelectorSafe('a', root), false); // 长度 < 2
+    assert.equal(isSelectorSafe('a', root), false); // length < 2
   });
 
   it('非法选择器不抛异常，直接拒绝', () => {

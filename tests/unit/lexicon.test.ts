@@ -30,8 +30,8 @@ describe('词库：站点取证标记（最强档）', () => {
 
 describe('词库：强命名（广告专用术语）', () => {
   it('第二站点（1024cg.com）的广告命名 —— 旧版词库一个都认不出', () => {
-    // 这是「通用性差」那次反馈的直接回归：旧版用子串匹配 + 小词表，
-    // 下列 4 个最直白的命名全部漏判。
+    // Regression from the "poor generality" report: the old substring matcher over a tiny
+    // word list missed all four of the most obvious names below.
     assert.equal(strength('<article class="ad-item"></article>'), NAMING_STRONG);
     assert.equal(strength('<div class="ads-title"></div>'), NAMING_STRONG);
     assert.equal(strength('<div class="post-card-mask post-card-ads"></div>'), NAMING_STRONG);
@@ -90,9 +90,9 @@ describe('词库：弱命名（需要旁证，单独不足以判定）', () => {
   });
 
   it('❗驼峰连写必须切词（实测漏拦：站点把横幅广告叫 .topBanner）', () => {
-    // 2026-10-13：修完"播放器/推荐栏误杀"后用户反馈"广告图片并未被屏蔽"。
-    // 运行时 DOM 显示站点把横幅挂进 `.topBanner` —— 而 `topbanner` 与 `banner`
-    // 不是同一个词，旧实现完全匹配不到词表项。
+    // 2026-10-13: after the player/rail false positives were fixed, users reported ads were
+    // still not blocked. The banner sits in `.topBanner`, and `topbanner` is not the word
+    // `banner`, so the old implementation could never match a vocabulary entry.
     assert.equal(strength('<div class="topBanner"></div>'), NAMING_WEAK, 'topBanner 应命中 banner');
     assert.equal(strength('<div id="globalBannerTop"></div>'), NAMING_WEAK);
     assert.equal(strength('<div class="adCard0"></div>'), NAMING_STRONG, 'adCard0 → ad card 0');
@@ -104,7 +104,7 @@ describe('词库：弱命名（需要旁证，单独不足以判定）', () => {
   });
 
   it('❗驼峰切词不得制造新的误伤', () => {
-    // 切开后仍不应命中：这些词里没有广告术语
+    // Still must not match after splitting: none of these words holds an ad term.
     for (const cls of ['topBar', 'sideBar', 'progressBar', 'toolBar', 'scrollBar']) {
       assert.equal(strength(`<div class="${cls}"></div>`), NAMING_NONE, cls);
     }

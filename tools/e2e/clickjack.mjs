@@ -1,19 +1,11 @@
-/**
- * 点击劫持拦截的浏览器验证。
- *
- * 两种模式：
- *   1) 不带参数：起一个本地 HTTP 服务，提供三种真实点击劫持手法的测试页，
- *      先跑**基线（不装扩展，证明测试页确实会跳走）**，再装扩展验证被拦住。
- *      这是可复现、不依赖外部站点的验证。
- *   2) 带 URL：对指定站点做同样的「点击后是否跳走」检查（无基线）。
- *
- * 点击用 CDP 的 Input.dispatchMouseEvent 派发 —— 它产生的是**可信事件**
- * （isTrusted === true），与真实用户点击等价；用 JS 造事件测不出真实行为。
- *
- * 用法：
- *   node tools/e2e/clickjack.mjs
- *   node tools/e2e/clickjack.mjs https://example.com/page
- */
+// Browser verification of clickjacking interception.
+// No argument: a local HTTP server with fixtures for three real clickjacking
+// techniques -- baseline first (no extension, proving the fixtures do navigate
+// away), then with the extension, which must block all three.
+// With a URL: the same "does a click navigate away" check, baseline included.
+// Clicks go through CDP Input.dispatchMouseEvent, so they are trusted
+// (isTrusted === true) and equal real user clicks; JS events do not reproduce it.
+// Run: node tools/e2e/clickjack.mjs [url]
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdirSync, openSync, closeSync, rmSync, existsSync } from 'node:fs';
@@ -32,14 +24,13 @@ const TARGET_URL = process.argv[2] ?? null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ── 测试用的三种点击劫持手法 ─────────────────────────────────────
 const LAND = `http://localhost:${LAND_PORT}/landed`;
 
 const PAGES = {
   '/landed': `<!doctype html><html><head><title>LANDED-AD-PAGE</title></head>
 <body><h1 id="landed">你被带到广告页了</h1></body></html>`,
 
-  // ① 隐形全屏层：点哪都点在它上面（最经典的手法）
+  // invisible full-screen layer: every click lands on it (the classic technique)
   '/overlay': `<!doctype html><html><head><title>hijack-overlay</title>
 <style>body{margin:0;font:16px sans-serif}#content{padding:60px}</style></head>
 <body>
@@ -48,7 +39,7 @@ const PAGES = {
    style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:2147483647;opacity:0"></a>
 </body></html>`,
 
-  // ② 文档级捕获处理函数直接改 location
+  // document-level capture handler rewrites location directly
   '/capture': `<!doctype html><html><head><title>hijack-capture</title>
 <style>body{margin:0;font:16px sans-serif}#content{padding:60px}</style></head>
 <body>
@@ -58,7 +49,7 @@ document.addEventListener('click', function () { location.href = ${JSON.stringif
 </script>
 </body></html>`,
 
-  // ③ 脚本合成一个隐藏的跨站 <a> 并点击它（isTrusted === false）
+  // script synthesises a hidden cross-site <a> and clicks it (isTrusted === false)
   '/synthetic': `<!doctype html><html><head><title>hijack-synthetic</title>
 <style>body{margin:0;font:16px sans-serif}#content{padding:60px}</style></head>
 <body>
@@ -201,7 +192,7 @@ async function waitForExtension(port) {
   return false;
 }
 
-/** 打开一个页面并做点击测试，返回结果。 */
+/** Open a page and run the click test; returns the result. */
 async function clickTest({ port, url, label }) {
   const created = await fetch(
     `http://127.0.0.1:${port}/json/new?${encodeURIComponent('about:blank')}`,
@@ -220,7 +211,7 @@ async function clickTest({ port, url, label }) {
 
   const targetsBefore = (await list(port)).length;
 
-  // 在页面上多个位置派发**可信**点击
+  // dispatch trusted clicks at several points on the page
   const points = [
     { x: 640, y: 300 },
     { x: 200, y: 120 },
@@ -253,14 +244,13 @@ async function clickTest({ port, url, label }) {
   };
 }
 
-// ── 主流程 ───────────────────────────────────────────────────────
 let failures = 0;
 const rows = [];
 let servers = [];
 
 try {
   if (!TARGET_URL) {
-    // 本地夹具模式
+    // local fixture mode
     const ext = createServer((req, res) => {
       const body = PAGES[req.url ?? ''] ?? '<!doctype html><title>404</title>404';
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -275,7 +265,7 @@ try {
     servers = [ext, land];
     console.log(`本地夹具已启动：http://127.0.0.1:${EXT_PORT}/  广告落地页：${LAND}\n`);
 
-    // ① 基线：不装扩展 —— 必须能复现跳转（否则测试没有意义）
+    // baseline: no extension -- navigation must reproduce, else the test is void
     const baseBrowser = await launch({
       port: 9801,
       profileDir: `${E2E_DIR}cj-base`,
@@ -293,7 +283,7 @@ try {
     baseBrowser.kill();
     await sleep(1000);
 
-    // ② 装扩展：必须全部拦下
+    // with the extension: all three must be blocked
     const extBrowser = await launch({
       port: 9802,
       profileDir: `${E2E_DIR}cj-ext`,
@@ -316,8 +306,8 @@ try {
     }
     extBrowser.kill();
   } else {
-    // 指定站点模式：先跑**基线（不装扩展）**再跑装扩展，
-    // 否则「没跳走」可能只是这个站点在测试环境里本来就不跳 —— 那不算证据。
+    // Site mode: run the baseline (no extension) first, otherwise "it did not
+    // navigate" may just mean this site never navigates here -- not proof.
     const baseBrowser = await launch({
       port: 9803,
       profileDir: `${E2E_DIR}cj-site-base`,
@@ -346,7 +336,6 @@ try {
     browser.kill();
   }
 
-  // ── 判定 ─────────────────────────────────────────────────────
   console.log('\n' + '─'.repeat(72));
   const baseline = rows.filter((r) => r.phase === 'baseline');
   const withExt = rows.filter((r) => r.phase === 'extension' || r.phase === 'site');
@@ -354,8 +343,9 @@ try {
   if (baseline.length) {
     const repro = baseline.filter((r) => r.navigated).length;
     if (TARGET_URL) {
-      // 真实站点：基线不复现只能说明"这个环境触发不了"，不能据此判断扩展的作用，
-      // 所以标为「结论不确定」而不是失败 —— 那不该算扩展的问题。
+      // Real site: a non-reproducing baseline only means "this environment cannot
+      // trigger it", which says nothing about the extension, so report SKIP rather
+      // than a failure -- it is not the extension's fault.
       if (repro === 0) {
         console.log(
           `SKIP  基线未复现点击劫持   (0/${baseline.length} —— 该站点在此测试环境下不触发，` +
@@ -365,7 +355,7 @@ try {
         console.log(`PASS  基线能复现点击劫持   (${repro}/${baseline.length})`);
       }
     } else {
-      // 本地夹具：基线必须能复现，否则夹具本身无效、测试没有意义
+      // local fixtures: the baseline must reproduce, else the fixture is void
       const ok = repro === baseline.length;
       if (!ok) failures = 1;
       console.log(`${ok ? 'PASS' : 'FAIL'}  夹具能复现点击劫持   (${repro}/${baseline.length} 个变体跳转)`);

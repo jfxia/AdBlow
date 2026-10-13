@@ -31,7 +31,7 @@ describe('scoreNode：命名证据', () => {
   });
 
   it('命名分与行为分可分离，判定层才能分档处理', () => {
-    // 服务端渲染的广告卡：命名是确定性证据，行为只是旁证
+    // Server-rendered ad card: naming is definite evidence, behaviour only supporting.
     const r = scoreNode(
       el('<article class="ad-item"><a href="https://spam.example.com/x"></a></article>'),
       ctx,
@@ -80,15 +80,15 @@ describe('scoreNode：行为证据', () => {
   });
 
   it('data-src 懒加载图片同样计入跨站媒体', () => {
-    // 试点站用 loadBannerDirect + data-src 懒加载，只认 src 会漏
+    // The pilot site lazy-loads via loadBannerDirect + data-src, so checking src alone misses it.
     const r = scoreNode(el('<img src="/local.png" data-src="https://ads.example.com/a.png">'), ctx);
     assert.ok(r.reasons.includes('cross-site-media'), JSON.stringify(r.reasons));
   });
 });
 
 describe('scoreNode 的聚合结构约束（2026-10-10 实测标定）', () => {
-  // 早期版本对整棵子树无条件聚合跨站链接，导致 <html> 得 20 分、<body> 20 分、
-  // <footer> 12 分——盒子越大分越高，一过阈值就是整页消失。
+  // An early version aggregated cross-site links across the whole subtree, so <html> scored 20,
+  // <body> 20 and <footer> 12 — the bigger the box, the higher the score, wiping entire pages.
 
   it('紧凑盒子里的跨站链接计入（小而密的外链盒子确实是广告形态）', () => {
     const r = scoreNode(el('<div class="x"><a href="https://spam.example.com/a"></a></div>'), ctx);
@@ -151,10 +151,10 @@ describe('scoreNode：iframe 信号（不依赖命名）', () => {
 });
 
 describe('scoreNode：覆盖层**不参与**逐元素打分（架构约束）', () => {
-  // 曾经把覆盖层判定塞进 scoreNode，导致每个元素都要 getComputedStyle，
-  // 而扫描过程又不断改内联样式 —— 两者交替让样式/布局反复失效，
-  // 在 1024cg 这种大页面上整趟扫描跑不完（症状：样式注入了但零隐藏）。
-  // 现在覆盖层是独立一趟，见 src/content/engine.ts 的 findOverlayAds。
+  // Overlay judging used to live inside scoreNode, so every element needed getComputedStyle
+  // while the scan kept mutating inline styles; the two invalidated each other and a full scan
+  // of a large page like 1024cg never finished (styles injected, nothing hidden). Overlays are
+  // now a separate pass — findOverlayAds in src/content/engine.ts.
   it('scoreNode 的结果不受定位样式影响', () => {
     const r = scoreNode(el('<div class="horizontal-banner"></div>'), ctx);
     assert.ok(!r.reasons.includes('overlay'), '覆盖层不应再出现在打分理由里');

@@ -1,30 +1,20 @@
-/**
- * AdBlow 页面诊断脚本（给用户用）。
- *
- * ## 用法
- *
- * 1. 在出问题的页面上按 F12 打开开发者工具，切到「控制台 / Console」
- * 2. 打开本文件，全选复制，粘贴到控制台，回车
- * 3. 把输出（或截图）发给我
- *
- * 它只读取页面现状并打印，**不会修改任何东西**。
- * 用来回答：哪些元素被隐藏了、是哪个机制干的、它们是不是正文/导航，
- * 以及有多少链接被别的元素盖住点不动。
- *
- * ## ⚠️ 确定性测量（v3）
- *
- * 前两版是"粘上就测"，于是两次测量的**时机/懒加载进度不同**会污染对比
- * （实测用户 ON/OFF 两次的图片数差了 49，但无法排除是懒加载进度差异）。
- * 现在脚本会先**自己滚到底、再滚回顶部并等待**，再开始测量 ——
- * 这样 ON 与 OFF 两次的结果才可比。
- */
+// AdBlow page diagnostic, meant to be run by a user.
+// Usage: press F12 on the affected page, switch to Console, paste this whole file,
+// press Enter, then send the output (or a screenshot) back.
+// It only reads and prints the current page state and changes nothing. It answers:
+// which elements were hidden, by which mechanism, whether they are content or
+// navigation, and how many links are covered by something else.
+// v3 determinism: earlier versions measured immediately, so differing timing and
+// lazy-load progress polluted the comparison (a user's ON/OFF image counts differed
+// by 49, with no way to rule out lazy loading). The script now scrolls to the
+// bottom, returns to the top and waits, so ON and OFF runs are comparable.
 (async () => {
   const R = 'data-adblow-reason';
   const H = 'data-adblow-hidden';
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  // ── 确定性准备：滚一遍触发懒加载，再回到顶部 ──
+  // deterministic preparation: scroll through to trigger lazy loading, then back up
   try {
     const total = document.body.scrollHeight;
     for (let y = 0; y < total; y += Math.max(400, Math.floor(innerHeight * 0.8))) {
@@ -36,7 +26,7 @@
     scrollTo(0, 0);
     await sleep(800);
   } catch {
-    /* 忽略 */
+    /* ignore */
   }
 
   const desc = (el) => {
@@ -45,14 +35,13 @@
     return el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (cls ? '.' + cls : '');
   };
 
-  // 注意：对已隐藏元素读 innerText 永远是空（元素不可见），必须用 textContent
+  // Note: innerText of a hidden element is always empty (it is not visible), so
+  // textContent is required here
   const textOf = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim();
 
-  /**
-   * 把站点 CDN 的 base64 路径还原成**真实来源域名**。
-   * 形如 `https://cache-2610.sgvafw.com/base/<base64 of https://fourhoi.com/...>.cache`
-   * —— 还原后才能分清"丢的是广告图还是内容图"。
-   */
+  // Recover the real source domain from the site CDN's base64 path, e.g.
+  // `https://cache-2610.sgvafw.com/base/<base64 of https://fourhoi.com/...>.cache`.
+  // Only after unwrapping can a lost ad image be told from a lost content image.
   const realSource = (url) => {
     const m = /\/base\/([A-Za-z0-9+/=_-]+)/.exec(url || '');
     if (!m) return null;
@@ -68,15 +57,14 @@
   const vw = innerWidth;
   const vh = innerHeight;
 
-  // ── ① 被隐藏的元素，按原因聚合 ──
+  // hidden elements, grouped by reason
   const hidden = Array.from(document.querySelectorAll('[' + H + ']'));
 
-  // ── ①b 关键区域状态：区分「被隐藏」与「根本没加载出来」 ──
-  //
-  // 为什么必须有这一节（2026-10-13）：用户报告"视频窗口/推荐栏被过滤"，
-  // 但诊断显示我们只隐藏了 2 个广告元素 —— 说明问题不在 DOM 隐藏，
-  // 而在**这些区块压根没渲染出来**（脚本没加载/执行=网络层拦截）。
-  // 这一节就是用来分清这两种情况的。
+  // Key-area state: separates "hidden by us" from "never rendered at all".
+  // Why (2026-10-13): a user reported the video player and recommendation rail being
+  // filtered, while the diagnostic showed only 2 hidden ad elements -- so those
+  // blocks were not rendered at all (scripts not loaded/run = network blocking).
+  // This section exists to tell those two cases apart.
   const areaState = (sel) => {
     const el = document.querySelector(sel);
     if (!el) return { found: false };
@@ -101,10 +89,9 @@
     导航: areaState('nav, .navbar, [class*="navbar"]'),
     标签云数: document.querySelectorAll('.tag').length,
     图片: imgs.filter((i) => (i.naturalWidth || 0) > 0).length + '/' + imgs.length + ' 已加载',
-    /**
-     * ❗图片按**真实来源域名**归类 —— ON/OFF 两次对比时，
-     * 一眼就能看出丢的是广告图（广告域）还是内容图（站点自己的 CDN）。
-     */
+    // Images grouped by real source domain, so an ON/OFF comparison shows at a
+    // glance whether the missing ones are ad images (ad domains) or content images
+    // (the site's own CDN).
     图片来源域名: (() => {
       const m = {};
       for (const i of imgs) {
@@ -116,7 +103,7 @@
           try {
             key = new URL(raw, location.href).hostname;
           } catch {
-            /* 忽略 */
+            /* ignore */
           }
         }
         m[key] = (m[key] || 0) + 1;
@@ -155,13 +142,13 @@
     console.table(items.slice(0, 12));
   }
 
-  // ── ② 正文/导航类元素里，有哪些被隐藏了 ──
-  //
-  // ⚠️ 分类器要能区分"真的是正文/导航"与"本身就是广告块"（2026-10-13 收紧）：
-  // 旧版把 ul/ol 一律当内容，于是广告轮播 `ul.streamer-box2`（0 文字、10 个外链）
-  // 每次都被报成"正文被隐藏"，发回来反而是噪音。现在要求
-  //   - 有实质文字（≥30 字），或含标题/段落等正文结构；
-  //   - 且判据不属于 linkfarm/overlay/click-layer/fake-close 这类**本身即广告**的原因。
+  // Which content/navigation elements were hidden. The classifier must not confuse
+  // real content with ad blocks (tightened 2026-10-13): the old version treated any
+  // ul/ol as content, so the ad carousel `ul.streamer-box2` (0 text, 10 outbound
+  // links) was reported as "content hidden" every time -- pure noise. A candidate
+  // now needs real text (>=30 chars) or heading/paragraph structure, and must not be
+  // hidden for a reason that is inherently ad-like
+  // (linkfarm/overlay/click-layer/fake-close).
   const CONTENT = 'article, main, nav, header, footer, .content, .post, .entry, .article, .nav, .menu, .sidebar, ul, ol';
   const AD_ONLY_REASONS = new Set(['linkfarm', 'overlay', 'click-layer', 'fake-close']);
   const contentHidden = [];
@@ -186,7 +173,7 @@
     'font-weight:bold;color:' + (contentHidden.length ? 'red' : 'green'));
   if (contentHidden.length) console.table(contentHidden.slice(0, 25));
 
-  // ── ③ 链接点不动的情况 ──
+  // links hidden behind something else, i.e. not clickable
   const links = Array.from(document.querySelectorAll('a[href]')).filter((a) => {
     const r = a.getBoundingClientRect();
     if (r.width < 8 || r.height < 8) return false;
@@ -228,7 +215,7 @@
     console.table(samples);
   }
 
-  // ── ④ AdBlow 自己注入的东西 ──
+  // what AdBlow itself injected
   const styles = Array.from(document.querySelectorAll('style[data-adblow-list-cosmetic], style[data-adblow-cosmetic]'));
   console.log('\nAdBlow 注入的样式表：' + styles.length + ' 个');
   for (const s of styles) {
@@ -238,11 +225,9 @@
     if (sels.length) console.log('    前 5 条：' + JSON.stringify(sels.slice(0, 5)));
   }
 
-  // ── ⑤ 汇总成一段精简结论并**复制到剪贴板** ──
-  //
-  // 为什么要有这一步：前几版只打印表格，用户很容易只复制到最后一节表格，
-  // 而最关键的信息（被隐藏元素按原因/凭哪条证据）反而漏了。
-  // 复制的是纯文本，直接把整段粘回来即可。
+  // One compact summary, copied to the clipboard. Why: earlier versions only
+  // printed tables, and users tended to copy just the last one, losing the most
+  // important part (hidden elements by reason and by evidence).
   const summary = [
     '=== AdBlow 诊断 ===',
     'URL: ' + location.href,
@@ -255,7 +240,7 @@
       [...byReason].map(([reason, items]) => ({
         reason,
         count: items.length,
-        // 每条都带上 reason/why/大小/文字量，足以定位机制
+        // each item carries reason/why/size/text length, enough to locate the mechanism
         items: items.slice(0, 15),
       })),
       null,

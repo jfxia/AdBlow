@@ -1,34 +1,26 @@
 /**
- * 脚本注入规则（`##+js(...)`）的解析与编译（第三期）。
+ * Scriptlet (`##+js(...)`) rule parsing and compilation (phase 3).
  *
- * ## 实测数据（2026-10-11，6 份列表）
+ * Measured 2026-10-11 over 6 lists: 2,807 scriptlet rules, 3,748 domains, 50
+ * distinct names, extremely skewed (top 5 = 61%, top 10 = 81%, top 20 = 94%).
+ * Implementing the dozen-odd frequent names therefore covers the vast majority.
  *
- *   2,807 条脚本注入规则，涉及 **3,748 个域名**，50 个不同脚本名。
- *   频率分布极不均：**前 5 名覆盖 61%、前 10 名覆盖 81%、前 20 名覆盖 94%**。
+ * MAIN world only: these scripts must patch the page's own JS (`window.open`,
+ * `setTimeout`, property reads) and an ISOLATED world cannot see those objects.
  *
- *   aopr 636｜acs 359｜set 327｜aeld 206｜nostif 195｜aopw 184｜nowoif 178
- *
- * 因此"实现常用子集"是有依据的取舍：实现十几个高频名字就能覆盖绝大多数规则，
- * 而不是去追 50 个。
- *
- * ## 为什么只做 MAIN world
- *
- * 这些脚本要改写页面自己的 JS 行为（`window.open`、`setTimeout`、属性读写），
- * 只能在 MAIN world 生效。ISOLATED world 看不到页面的对象。
- *
- * 本模块浏览器无关，可在 Node 里直接单测。
+ * Browser-agnostic: unit-testable in Node.
  */
 
-/** 一条脚本注入调用。 */
+/** One scriptlet invocation. */
 export type ScriptletInvocation = {
-  /** 规则里的名字（可能是别名）。 */
+  /** Name as written in the rule (may be an alias). */
   name: string;
-  /** 已解析成规范名（别名 → 长名）；不在支持表里则为 null。 */
+  /** Resolved canonical name (alias → long name); null when not in the table. */
   canonical: string | null;
   args: string[];
 };
 
-/** 一条脚本注入规则（含作用域名）。 */
+/** One scriptlet rule, including its scope domains. */
 export type ScriptletRule = ScriptletInvocation & {
   raw: string;
   domains: string[];
@@ -36,18 +28,18 @@ export type ScriptletRule = ScriptletInvocation & {
 };
 
 /**
- * 别名 → 规范名。
+ * Alias → canonical name.
  *
- * 依据实测频率排序（注释里的数字是实测出现次数）。
- * 只收录**本实现支持**的规范名对应的别名；其余别名解析出来但标记为不支持，
- * 以便在覆盖率报告里如实反映"我们没做哪些"。
+ * Ordered by measured frequency (trailing numbers are observed counts). Only
+ * aliases of names this implementation supports are listed; anything missing
+ * resolves to null and is reported as an unknown name.
  */
 export const SCRIPTLET_ALIASES: Record<string, string> = {
-  // 高频（实测前 10）
+  // High frequency (measured top 10)
   aopr: 'abort-on-property-read', // 636
   acs: 'abort-current-script', // 359
   set: 'set-constant', // 327
-  aeld: 'prevent-addEventListener', // 206（核实自 uBO 源码：不是我原先猜的 abort-on-element-load）
+  aeld: 'prevent-addEventListener', // 206 (verified in uBO source)
   nostif: 'no-setTimeout-if', // 195
   aopw: 'abort-on-property-write', // 184
   nowoif: 'no-window-open-if', // 178
@@ -55,16 +47,16 @@ export const SCRIPTLET_ALIASES: Record<string, string> = {
   rc: 'remove-class',
   rmnt: 'remove-node-text', // 46
   nosiif: 'no-setInterval-if', // 26
-  // 中频
+  // Mid frequency
   'set-local-storage-item': 'set-local-storage-item', // 59
   'set-session-storage-item': 'set-session-storage-item',
   'remove-cookie': 'remove-cookie', // 51
-  'cookie-remover': 'remove-cookie', // 核实：cookie-remover 是 remove-cookie 的别名
+  'cookie-remover': 'remove-cookie', // alias confirmed against uBO source
   'json-prune': 'json-prune', // 27
   'json-edit': 'json-edit',
   'no-xhr-if': 'no-xhr-if', // 39
   'no-fetch-if': 'no-fetch-if', // 36
-  'prevent-fetch': 'no-fetch-if', // 核实：prevent-fetch 是规范名，no-fetch-if 是它的别名
+  'prevent-fetch': 'no-fetch-if', // verified: no-fetch-if is the canonical name
   'nano-sib': 'nano-setInterval-booster', // 51
   'nano-stb': 'nano-setTimeout-booster', // 31
   nowebrtc: 'nowebrtc', // 47
@@ -77,10 +69,10 @@ export const SCRIPTLET_ALIASES: Record<string, string> = {
 };
 
 /**
- * 本实现**实际支持**的规范名子集。
+ * Canonical names this implementation actually supports.
  *
- * 取舍原则：优先高频、语义自包含、误伤风险可控。
- * 明确不做的（及原因）见 SUPPORT_NOTES。
+ * Selection rule: high frequency, self-contained semantics, controllable blast
+ * radius. Names left out, and why, are in SUPPORT_NOTES.
  */
 export const SUPPORTED_SCRIPTLETS = new Set<string>([
   'set-constant',
@@ -98,8 +90,8 @@ export const SUPPORTED_SCRIPTLETS = new Set<string>([
 ]);
 
 /**
- * 不做的规范名及原因（写下来避免以后有人"顺手加上"）。
- * 语义依据：子代理对 uBO master 源码的核实（2026-10-11），非记忆。
+ * Unsupported canonical names and the reason (written down so nobody "just adds"
+ * one). Semantics verified against uBO master source (2026-10-11), not memory.
  */
 export const SUPPORT_NOTES: Record<string, string> = {
   'abort-current-script':
@@ -124,10 +116,10 @@ export const SUPPORT_NOTES: Record<string, string> = {
 };
 
 /**
- * 解析 `##+js(...)` 里的参数串。
+ * Parse the argument string inside `##+js(...)`.
  *
- * 语法：`name, arg1, arg2, ...`。参数可含转义逗号（`\,`）——uBO 支持这种写法，
- * 直接 `split(',')` 会把参数切错。
+ * Syntax: `name, arg1, arg2, ...`; arguments may contain escaped commas (`\,`),
+ * which a plain `split(',')` would break.
  */
 export function parseScriptletArgs(payload: string): string[] {
   const out: string[] = [];
@@ -147,20 +139,21 @@ export function parseScriptletArgs(payload: string): string[] {
     current += ch;
   }
   out.push(current.trim());
-  // ⚠️ 保留空参数：uBO 里空参数是**位置占位符**，
-  // 例如 `##+js(nostif, , 1000)` 表示"任意回调、延迟 1000 才拦"。
-  // 过滤掉空参数会把这些规则的含义改错。
+  // ⚠️ Keep empty arguments: they are positional placeholders in uBO, e.g.
+  // `##+js(nostif, , 1000)` means "any callback, block only after 1000ms".
+  // Dropping them would change the rule's meaning.
   return out;
 }
 
-/** 解析一条完整的脚本注入规则行；不是脚本注入则返回 null。 */
+/** Parse a full scriptlet rule line; null when it is not one. */
 export function parseScriptletRule(rawLine: string): ScriptletRule | null {
   const raw = rawLine.trim();
   if (!raw || raw.startsWith('!')) return null;
 
   const hideIdx = raw.indexOf('##+js(');
   const exceptIdx = raw.indexOf('#@#+js(');
-  // `#@#+js(...)` 是例外（取消注入）；本期不处理例外，返回 null 由调用方计入未支持
+  // `#@#+js(...)` is an exception (cancel injection); unhandled for now → null,
+  // and the caller counts it as unsupported.
   if (exceptIdx >= 0 && (hideIdx < 0 || exceptIdx < hideIdx)) return null;
   if (hideIdx < 0) return null;
 
@@ -198,22 +191,22 @@ export function parseScriptletRule(rawLine: string): ScriptletRule | null {
 }
 
 export type ScriptletIndex = {
-  /** 域名 → 该域名要执行的调用序列 */
+  /** Domain → invocations to run there */
   byDomain: Map<string, { canonical: string; args: string[] }[]>;
   stats: {
     parsed: number;
     supported: number;
     unsupportedName: number;
     unknownName: number;
-    /** 带 `~` 排除的规则（正向索引表达不了） */
+    /** Rules with `~` exclusions (a forward index cannot express them) */
     skippedExcluded: number;
-    /** 按规范名统计的未支持条数，用于决定下一步做什么 */
+    /** Unsupported counts by canonical name, to guide what to do next */
     unsupportedByCanonical: Record<string, number>;
     domains: number;
   };
 };
 
-/** 由解析结果构建「域名 → 调用序列」索引。 */
+/** Build the domain → invocation list index from parsed rules. */
 export function buildScriptletIndex(rules: ScriptletRule[]): ScriptletIndex {
   const byDomain = new Map<string, { canonical: string; args: string[] }[]>();
   const stats: ScriptletIndex['stats'] = {
@@ -244,7 +237,7 @@ export function buildScriptletIndex(rules: ScriptletRule[]): ScriptletIndex {
       continue;
     }
     if (rule.domains.length === 0) {
-      // 无域名限定的脚本注入对全站执行，风险过高，不做
+      // An unrestricted scriptlet would run everywhere: too risky
       stats.unknownName += 1;
       continue;
     }

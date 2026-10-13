@@ -1,14 +1,15 @@
 import type { KvStore } from './storage.ts';
 
 /**
- * 网络层自学习：把「被隐藏的广告用到的域名」晋级为 DNR 拦截规则。
+ * Network-layer learning: promote domains used by hidden ads into DNR rules.
  *
- * 为什么需要它：DOM 层隐藏只能让广告看不见，请求照发（浪费带宽、可能带追踪）。
- * 而未知站点原本完全没有网络层规则。这个闭环让扩展**越用越准且零配置**：
- * 同一域名累计在广告里出现 PROMOTE_DOMAIN_AFTER 次即晋级，此后该域名的请求
- * 在真正发起前就被拦掉。
+ * DOM hiding only makes ads invisible while requests still go out (bandwidth,
+ * tracking), and unknown sites had no network rules at all. A domain seen in ads
+ * PROMOTE_DOMAIN_AFTER times is promoted, after which its requests are blocked
+ * before they start — zero-config and improving with use.
  *
- * 抗污染与上一层的规则学习一致：需累计命中才晋级，且可逐条撤销。
+ * Anti-pollution matches the selector learner: accumulate hits before promoting,
+ * and every entry stays revocable.
  */
 
 export const PROMOTE_DOMAIN_AFTER = 3;
@@ -18,7 +19,7 @@ export type DomainEntry = {
   hits: number;
   promoted: boolean;
   lastSeenAt: number;
-  /** 首次出现的页面，便于用户判断这条学得对不对 */
+  /** Page where it first appeared; lets the user judge whether learning was right. */
   samplePage: string;
 };
 
@@ -61,7 +62,7 @@ export async function recordDomains(
   await store.set(key, current);
 }
 
-/** 某个页面宿主下已晋级的域名。 */
+/** Promoted domains for one page host. */
 export async function promotedDomainsFor(store: KvStore, pageHost: string): Promise<string[]> {
   const current = (await store.get<DomainMap>(domainsKey(pageHost))) ?? {};
   return Object.values(current)
@@ -71,10 +72,10 @@ export async function promotedDomainsFor(store: KvStore, pageHost: string): Prom
 }
 
 /**
- * **全局**已晋级的域名（去重）。
+ * **Global** promoted domains (deduplicated).
  *
- * 域名是全局概念：`ads.example.com` 在哪个站点都是广告域名。
- * 因此 DNR 规则也是全局的，只在「用户手动关掉了某个站点」时按站点豁免。
+ * A domain is an ad domain everywhere (`ads.example.com` included), so DNR rules
+ * are global too; only user-disabled sites get per-site exemptions.
  */
 export async function allPromotedDomains(store: KvStore): Promise<string[]> {
   const keys = (await store.keys()).filter((k) => k.startsWith(PREFIX));
@@ -89,18 +90,15 @@ export async function allPromotedDomains(store: KvStore): Promise<string[]> {
 }
 
 /**
- * **全局**已晋级的域名 + **教会它的站点清单**。
+ * **Global** promoted domains plus the sites that taught them.
  *
- * 为什么需要站点清单（2026-10-13 第二次同类事故后加的）：
- * 自学习域名原本编译成**全局** DNR 规则。但"这个域名在本站是广告域名"
- * 不等于"它在别的站点也是" —— 第三方 CDN 被多个站点共用时，
- * 在 A 站学到的域名很可能正是 B 站自己的资源来源。
- * 实测事故：某视频站的关键脚本与播放器库全部来自它自己的 CDN，
- * 一旦该 CDN 域名被学走，整页渲染与功能一起崩掉
- * （页面 JS 运行时创建的图片全部消失、播放器容器高度归零）。
+ * Learned domains used to compile into global DNR rules, but "an ad domain here"
+ * does not imply "an ad domain there": shared third-party CDNs make this fatal
+ * (measured: a video site's own script/player CDN was learned, after which the
+ * whole page broke). Scoping each rule with `initiatorDomains` limits the blast
+ * radius to the site that taught it.
  *
- * 返回 `Map<域名, 页面宿主[]>`，供 `learnedDomainRules` 写成
- * `initiatorDomains` 条件 —— 把爆炸半径限制在教会它的站点内。
+ * Returns `Map<domain, pageHost[]>`, consumed by `learnedDomainRules`.
  */
 export async function allPromotedDomainScopes(store: KvStore): Promise<Map<string, string[]>> {
   const keys = (await store.keys()).filter((k) => k.startsWith(PREFIX)).sort();
@@ -142,7 +140,7 @@ export async function forgetDomain(
   if (!(host in current)) return;
 
   delete current[host];
-  // 删空后连键一起删掉，避免留下一堆空键（否则 UI 会列出空分组）
+  // Drop the key once empty; leftover empty keys show up as empty UI groups.
   if (Object.keys(current).length === 0) await store.remove(key);
   else await store.set(key, current);
 }

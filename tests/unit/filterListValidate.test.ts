@@ -10,15 +10,11 @@ import {
 } from '../../src/engine/filterList/validate.ts';
 import type { DnrListRule } from '../../src/engine/filterList/compile.ts';
 
-/**
- * DNR 约束自检 —— 这个文件的存在理由是一次真实事故：
- *
- * 浏览器**只要发现一条规则非法，就拒绝加载整个扩展**，而 Node 侧毫无迹象。
- * 实测踩到两次（119 条规则同时带 resourceTypes 与 excludedResourceTypes；
- * `||*` 开头的 urlFilter），都只有开浏览器才暴露。
- *
- * 所以校验器必须比浏览器更早知道问题 —— 它现在是构建期的一道硬门。
- */
+// DNR constraint self-check. This file exists because of a real incident: a browser rejects
+// the whole extension when a single rule is invalid, while Node shows nothing. It happened
+// twice (119 rules carrying both resourceTypes and excludedResourceTypes, and a `||*`-prefixed
+// urlFilter) and only surfaced in a browser, so the validator must know before the browser
+// does — it is now a hard build-time gate.
 
 const rule = (over: Partial<DnrListRule> = {}): DnrListRule => ({
   id: 1,
@@ -40,8 +36,8 @@ describe('isValidRequestDomain', () => {
       'allyes.', // ||allyes.$third-party
       'check-tl-', // ||check-tl-$all
       'valid-check-tl-', // ||valid-check-tl-$all
-      'adservice.google.', // 尾部点
-      '142.91.159.', // 截断的 IP
+      'adservice.google.', // trailing dot
+      '142.91.159.', // truncated IP
       '.example.com',
       'no-tld',
       '256.1.1.1',
@@ -160,21 +156,21 @@ describe('validateRuleset', () => {
   });
 
   it('❗只报"意外拦主文档"，不报显式 $document', () => {
-    // 显式 main_frame 是编译器既定允许的
+    // An explicit main_frame is allowed by design in the compiler.
     assert.deepEqual(
       validateRuleset([rule({ condition: { urlFilter: '||a^', resourceTypes: ['main_frame'] } })], 1),
       [],
     );
-    // 两个类型字段都不写 = DNR 默认排除主文档，也不该报
+    // Writing neither type field means DNR excludes the main frame by default; don't report.
     assert.deepEqual(validateRuleset([rule({ condition: { urlFilter: '||a^' } })], 1), []);
-    // 写了 excludedResourceTypes 却没排除 main_frame = 意外拦主文档，要报
+    // excludedResourceTypes without main_frame = accidentally blocking it; must report.
     assert.ok(
       validateRuleset(
         [rule({ condition: { urlFilter: '||a^', excludedResourceTypes: ['image'] } })],
         1,
       ).some((p) => /主文档/.test(p.problem)),
     );
-    // 正确排除了就不报
+    // Correctly excluded, so nothing to report.
     assert.deepEqual(
       validateRuleset(
         [rule({ condition: { urlFilter: '||a^', excludedResourceTypes: ['image', 'main_frame'] } })],

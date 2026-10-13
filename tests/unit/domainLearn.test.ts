@@ -18,8 +18,8 @@ const PAGE = 'a.cc';
 
 describe('❗自学习域名的作用域（爆炸半径）', () => {
   it('记录域名是在哪些站点上学会的', async () => {
-    // 2026-10-13 事故：全局规则把站点自己的 CDN 拦掉，整页渲染崩。
-    // 域名是全局概念这句话有前提 —— A 站学到的域名很可能正是 B 站的资源来源。
+    // Incident 2026-10-13: a global rule blocked the site's own CDN and the page broke.
+    // "Domains are global" has a caveat — what A learns may be B's own resource host.
     const store = memoryStore();
     for (let i = 0; i < PROMOTE_DOMAIN_AFTER; i++) {
       await recordDomains(store, 'a.cc', ['cdn.shared.net'], `https://a.cc/${i}`);

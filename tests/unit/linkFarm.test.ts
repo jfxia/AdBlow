@@ -2,14 +2,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { LINK_FARM_MIN_DOMAINS, findLinkFarms } from '../../src/content/engine.ts';
 
-/**
- * 链接农场判据 —— 「零通用信号」广告里唯一能泛化的那一类。
- *
- * 取证来源：用户反馈的 dgav37.com 系列站点页脚有 **39 个不同跨站域名**的链接
- * （`a.referrerLink`，全部 target=_blank），由站点自己的 `/js/partners.js` 注入。
- * 原有判据抓不到：单条跨站链接只值 4 分（低于纯行为档 6 分门槛，这是故意的），
- * 容器又因后代过多（>12）不采信后代信号。
- */
+// Link-farm heuristic — the one generalisable class among "zero generic signal" ads.
+// Evidence: the dgav37.com series puts 39 distinct cross-site domains in its footer
+// (a.referrerLink, all target=_blank), injected by the site's own /js/partners.js. Existing
+// heuristics missed it: a single cross-site link scores only 4 (below the deliberate 6-point
+// behaviour threshold) and the container has too many descendants (>12) for descendant signals.
 
 const HOST = 'www.example.com';
 
@@ -59,7 +56,7 @@ describe('findLinkFarms：识别外站链接堆出来的块', () => {
   });
 
   it('❗只返回最深的那层（否则会把整个 footer 一起隐藏）', () => {
-    // 真实形态：footer > .container > section.footer-partners > #script_seo_links > 一堆 a
+    // Real shape: footer > .container > section.footer-partners > #script_seo_links > many <a>.
     const doc = root(
       `<footer><div class="container"><section class="partners">` +
         `<div id="script_seo_links">${links(['a1.com', 'a2.com', 'a3.com', 'a4.com', 'a5.com', 'a6.com'])}</div>` +
@@ -107,7 +104,7 @@ describe('findLinkFarms：识别外站链接堆出来的块', () => {
     const nav = root(`<nav id="f">${links(['a1.com', 'a2.com', 'a3.com', 'a4.com', 'a5.com'])}</nav>`);
     assert.deepEqual(findLinkFarms(nav, { host: HOST }), [], '导航是页面骨架，不能当农场端掉');
 
-    // 导航**内部**同理
+    // Same for links inside a nav.
     const inner = root(
       `<nav><div id="f">${links(['a1.com', 'a2.com', 'a3.com', 'a4.com', 'a5.com'])}</div></nav>`,
     );

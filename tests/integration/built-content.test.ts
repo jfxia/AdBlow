@@ -5,16 +5,14 @@ import { JSDOM } from 'jsdom';
 import { pilotPack } from '../../src/rules/sites/pilot.ts';
 
 /**
- * 构建产物冒烟测试：把真实的 dist/content.js 放进 jsdom，配上 chrome 桩，
- * 验证「源码 → 打包 → 运行时行为」整条链路。
- *
- * 这是沙箱内最接近真实运行的一步：跑的不是源码，而是最终会加载进浏览器的那个文件。
- *
- * 需要先 `pnpm build`。dist/ 不存在时跳过并明确提示（用 `pnpm verify` 可一并完成）。
+ * Smoke test for the real build output: dist/content.js runs in jsdom behind a chrome stub,
+ * covering source → bundle → runtime behaviour. This is the closest the sandbox gets to a
+ * real run — the file under test is the one the browser loads. Requires `pnpm build`;
+ * without dist/ the group skips with a message (`pnpm verify` covers both).
  */
 
-// 支持 ADBLOW_DIST：浏览器正加载 dist/ 时（Windows 下目录被占用）改用备用产物目录，
-// 否则这组冒烟测试会被整体跳过（跳过是静默的，只体现为总数变少，容易误判成"测试丢了"）。
+// ADBLOW_DIST picks an alternate output dir for when the browser holds dist/ open on
+// Windows; otherwise the whole group skips — silently, visible only as a lower test total.
 const distPath = new URL(
   `../../${process.env.ADBLOW_DIST ?? 'dist'}/content.js`,
   import.meta.url,
@@ -25,16 +23,16 @@ const fixture = readFileSync(new URL('../fixtures/pilot-category.html', import.m
 const HOST = 'afford.gjvrohros.cc';
 const CONTENT = 'article[itemtype*="BlogPosting"]';
 /**
- * ⚠️ 这不是正文缩略图，而是**服务端推荐位广告图**（20 个推荐位，id 形如
- * `xqbj-recommand-item-banner-1-N`）。隐藏它们是正确行为。
- * 试点站的正文缩略图由内联脚本从 pic.wvxrrip.cn 动态加载，见下面手工构造的用例。
+ * Server-rendered recommendation ad images (`xqbj-recommand-item-banner-1-N`, 20 of them),
+ * not content thumbnails, so hiding them is correct. The pilot site's content thumbnails
+ * load dynamically from pic.wvxrrip.cn — see the hand-built case below.
  */
 const RECOMMEND_IMG = 'img[data-src*="upload_01"]';
 
-/** 在第一篇正文 article 里塞一张跨站 CDN 的正文图，用来守「风险 A」。 */
+/** Inserts a cross-site CDN content image into the first article, guarding risk A. */
 function fixtureWithContentThumb(): string {
-  // 注意：脱敏后的 fixture 由 jsdom 序列化，布尔属性会变成 itemscope=""，
-  // 所以这里不能按原始 HTML 的字面量匹配。
+  // The sanitised fixture was serialised by jsdom, which rewrites boolean attributes to
+  // itemscope="", so match on structure instead of the original HTML literal.
   const marker = /(<article[^>]*itemtype="http:\/\/schema\.org\/BlogPosting"[^>]*>)/;
   const out = fixture.replace(
     marker,
@@ -46,7 +44,7 @@ function fixtureWithContentThumb(): string {
 
 type SendMessage = (msg: { type?: string; url?: string }) => Promise<unknown>;
 
-/** 最小 chrome 桩：只实现内容脚本用到的部分。 */
+/** Minimal chrome stub: only the parts the content script uses. */
 function fakeChrome(options: { packs: unknown[]; pristine: string | null }): unknown {
   const data: Record<string, unknown> = {};
   const sendMessage: SendMessage = async (msg) => {
@@ -75,7 +73,7 @@ function fakeChrome(options: { packs: unknown[]; pristine: string | null }): unk
   };
 }
 
-/** 在 jsdom 里跑打包产物，返回 document 与 storage 快照。 */
+/** Runs the bundle in jsdom; returns the document and a storage snapshot. */
 async function runBundle(options: {
   packs: unknown[];
   pristine: string | null;
@@ -90,8 +88,8 @@ async function runBundle(options: {
     pretendToBeVisual: true,
   });
 
-  // 内容脚本 boot 里的异常若不捕获只会变成 unhandled rejection，
-  // 计数断言会以「什么都没发生」的形式失败，很难定位。这里显式抓下来。
+  // An exception during boot would otherwise surface only as an unhandled rejection and
+  // fail the count assertions opaquely. Capture it explicitly.
   const errors: string[] = [];
   dom.window.addEventListener('unhandledrejection', (e) => {
     errors.push(String((e as PromiseRejectionEvent).reason));
@@ -110,7 +108,7 @@ async function runBundle(options: {
   script.textContent = code;
   dom.window.document.head.appendChild(script);
 
-  // 等内容脚本的两阶段 boot 落地
+  // Wait for the content script's two-phase boot to settle.
   const deadline = Date.now() + 4000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 25));
@@ -138,8 +136,8 @@ describe(
     });
 
     it('正文 article 与正文缩略图毫发无伤（误伤守卫）', async () => {
-      // 手工在正文里塞一张 pic.wvxrrip.cn 的图 —— 那是**风险 A**：
-      // 该域名既是 SSP 素材 CDN 又是正文缩略图 CDN，绝不能整体拉黑。
+      // Hand-inject a pic.wvxrrip.cn image into the article: that is risk A — the domain
+      // serves both SSP creatives and content thumbnails, so it must never be blocked wholesale.
       const { doc } = await runBundle({
         packs: [pilotPack],
         pristine: null,
@@ -185,8 +183,8 @@ describe(
     });
 
     it('命中规则包时不发起快照回填（省掉一次同源请求）', async () => {
-      // 若实现了 auto 策略却误发请求，pristine 被提供后启发式会启用并可能误伤；
-      // 这里通过「不提供 pristine 也一切正常」间接验证第一阶段已足够
+      // With an auto policy a supplied pristine snapshot would enable heuristics and risk
+      // false positives; "everything still works without pristine" shows phase one suffices.
       const { doc } = await runBundle({ packs: [pilotPack], pristine: null });
       assert.equal(doc.querySelectorAll('[data-ssp-slot-node]:not([data-adblow-hidden])').length, 0);
     });
@@ -194,7 +192,7 @@ describe(
     it('无规则包时走快照回填，启发式能拦住新注入的推广位', async () => {
       const { doc } = await runBundle({ packs: [], pristine: fixture });
 
-      // 回填完成后注入的推广盒子应当被启发式隐藏
+      // A promo box injected after the backfill completes should be hidden by the heuristics.
       const host = doc.createElement('div');
       host.innerHTML =
         '<div class="tg-promo-float"><a href="https://spam.example.com/x?click_id=1"></a></div>';
@@ -217,15 +215,15 @@ describe(
         }
       }
 
-      // 改进点：以前没有规则包又回填失败时，占位符会留在页面上；
-      // 现在命名档（属性名含 data-ssp-）不依赖规则包也不依赖快照，能直接拦住它们。
+      // Improvement: with no rule pack and a failed backfill the placeholders used to stay on
+      // the page; the naming tier (data-ssp- attribute in the name) needs neither to block them.
       const slots = Array.from(doc.querySelectorAll('[data-ssp-slot-node]'));
       assert.ok(slots.length > 0);
       for (const s of slots) {
         assert.ok(s.hasAttribute('data-adblow-hidden'), '占位符应被命名档拦住');
       }
 
-      // 容器仍然绝不能被隐藏（里面装着正文）
+      // The container must still never be hidden — it holds the content.
       const container = doc.querySelector('[data-ssp-container="ssp-list"]');
       assert.ok(container, '未找到 ssp-list 容器');
       assert.ok(!container.hasAttribute('data-adblow-hidden'), '装着正文的容器被隐藏了');
@@ -265,7 +263,7 @@ describe(
     });
 
     it('网络层自学习：在第二站点上把广告域名写进存储', async () => {
-      // 第二站点刻意不给规则包 —— 网络层自学习是它唯一能获得网络层保护的途径
+      // No rule pack for the second site on purpose: learning is its only network-layer defence.
       const secondSite = readFileSync(
         new URL('../fixtures/1024cg-home.html', import.meta.url),
         'utf8',
@@ -285,9 +283,9 @@ describe(
       assert.ok(domains, `未写入自学习域名。已有键：${Object.keys(storage).join(', ')}`);
       const hosts = Object.keys(domains);
       assert.ok(hosts.length > 0, '学到的域名列表为空');
-      // 站点自己的域名绝不能被学成要拦截的广告域名
+      // The site's own domain must never be learned as a domain to block.
       assert.ok(!hosts.includes('1024cg.com'), `学到了站点自己的域名：${hosts.join(', ')}`);
-      // 裸 IP 不学（共享基础设施，拦截不精确）
+      // Bare IPs are never learned: shared infrastructure, imprecise to block.
       assert.ok(
         hosts.every((h) => !/^\d{1,3}(\.\d{1,3}){3}$/.test(h)),
         `学到了裸 IP：${hosts.join(', ')}`,

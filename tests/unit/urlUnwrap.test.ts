@@ -3,16 +3,11 @@ import assert from 'node:assert/strict';
 import { findLinkFarms, hideElement, HIDDEN_ATTR } from '../../src/content/engine.ts';
 import { scoreNode, unwrapAdRedirect, unwrapCdnUrl } from '../../src/engine/score.ts';
 
-/**
- * 「地址包装」的两类解包 —— 2026-10-13 用户反馈"广告图片并未被屏蔽"后的修复。
- *
- * 背景：站点把广告链接与广告素材都**包装过**，让基于"跨站"的判据完全失效：
- *   ① 素材：`https://cache-2610.sgvafw.com/base/<base64 of 广告图真实地址>.cache`
- *      —— 看起来与内容图同源（同一个 CDN 域名）
- *   ② 链接：`http://<本站>/traffic/go?t=<base64 {"kind":"ad","url":"https://广告落地页"}>`
- *      —— 看起来是同站链接
- * 结果是整个广告轮播容器（`ul.streamer-box2`，10 个广告位）完全没被隐藏。
- */
+// The two URL wrappers that had to be unwrapped — fixed after the 2026-10-13 report that ad
+// images were still not blocked. The site wrapped both ad creatives (base64 inside the CDN
+// path, so they looked same-origin, sharing the content images' CDN domain) and ad links
+// (base64 payload in a same-site /traffic/go URL). Cross-site judging failed entirely and the
+// whole carousel container (ul.streamer-box2, 10 ad slots) went unhidden.
 
 const HOST = 'www.example.com';
 
@@ -42,7 +37,7 @@ describe('unwrapCdnUrl：还原站点 CDN 的 base64 包装', () => {
   });
 
   it('❗还原后才分得清"广告素材"与"内容图"', () => {
-    // 两者都走同一个 CDN 域名；不还原的话跨站判据完全失效
+    // Both live on the same CDN domain; without unwrapping, cross-site judging fails entirely.
     const adImg = `https://cache-2610.sgvafw.com/base/${b64('https://ads.bad.net/a.png')}.cache`;
     const contentImg = `https://cache-2610.sgvafw.com/base/${b64('https://fourhoi.com/x.jpg')}.cache`;
     assert.equal(new URL(unwrapCdnUrl(adImg)).hostname, 'ads.bad.net');
@@ -98,7 +93,8 @@ describe('聚合趟：自家域名跳转广告块', () => {
     Array.from({ length: n }, (_, i) => `<a href="${payload(`https://ads-${i}.net/`)}">${i}</a>`).join('');
 
   it('❗带广告命名 + ≥3 个声明广告的跳转链接 → 判为广告块', () => {
-    // 实测形态：ul.streamer-box2（30+ 后代，超过"紧凑"阈值，后代证据不被采信）
+    // Real shape: ul.streamer-box2 with 30+ descendants, past the "compact" threshold, so its
+    // descendant evidence is ignored.
     const doc = root(`<div><ul class="streamer-box2">${adLinks(10)}</ul></div>`);
     const farms = findLinkFarms(doc, { host: HOST });
     assert.deepEqual(

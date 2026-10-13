@@ -4,12 +4,11 @@ import { chromeLocal } from '../content/storage.ts';
 import { applyI18n, t } from './i18n.ts';
 
 /**
- * Popup：站点开关 + 运行统计 + 清空本站学习结果。
+ * Popup: per-site toggle, run stats, and clearing this site's learned results.
  *
- * 站点开关是**安全阀**：任何会在某站点上出错的过滤器都必须能单站关掉，
- * 否则用户只能整个禁用扩展。
- *
- * 界面文案一律走 i18n（`t()` / `data-i18n`），不写死中文 —— 见 ui/i18n.ts。
+ * The toggle is a safety valve: a filter that misbehaves on one site must be switchable per
+ * site, otherwise the only option left is disabling the whole extension. All text goes
+ * through i18n (`t()` / `data-i18n`) — see ui/i18n.ts.
  */
 
 const store = chromeLocal();

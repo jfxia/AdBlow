@@ -1,27 +1,22 @@
 /**
- * AdBlow 界面设计系统（popup 与 options 共用）。
+ * AdBlow UI design system, shared by popup and options.
  *
- * ## 为什么用一份共享样式表
+ * One shared stylesheet so design tokens exist once and a change lands on both pages.
+ * Previously each page carried its own inline copy and the two drifted (even the accent
+ * color differed).
  *
- * popup 与 options 是两个独立的扩展页面，但**可以**外链同一个 CSS 文件 ——
- * 这样设计令牌只有一份，改一处两边一起变。之前两边各写一份内联样式，
- * 已经出现了「改了一边忘了另一边」的漂移（强调色都不一样）。
+ * `--brand-1/--brand-2` are the violet gradient from the icon (#7C5CFF → #3B2FD1), so the
+ * UI and the icon share one visual language. The red/green used by similar extensions is
+ * deliberately avoided.
  *
- * ## 品牌色与图标一致
- *
- * `--brand-1/--brand-2` 就是图标里那组紫罗兰渐变（#7C5CFF → #3B2FD1），
- * 界面与图标是同一套视觉语言。刻意避开同类扩展的红/绿主色。
- *
- * ## 深色模式
- *
- * 用 `prefers-color-scheme`，跟浏览器主题走；`color-scheme` 让原生控件
- * （滚动条、复选框）也跟着变，否则深色下会出现一块白。
+ * Dark mode follows `prefers-color-scheme`; `color-scheme` also themes native controls
+ * (scrollbars, checkboxes), which would otherwise show a white block in dark mode.
  */
 
 :root {
   color-scheme: light dark;
 
-  /* 品牌色（与图标同一组渐变） */
+  /* brand gradient, same as the icon */
   --brand-1: #7c5cff;
   --brand-2: #3b2fd1;
 
@@ -73,8 +68,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── 品牌头部 ─────────────────────────────────────────────── */
-
 .brand {
   display: flex;
   align-items: center;
@@ -102,8 +95,6 @@ body {
   padding: 1px 7px;
   white-space: nowrap;
 }
-
-/* ── 按钮 ────────────────────────────────────────────────── */
 
 button {
   font: inherit;
@@ -153,8 +144,6 @@ button.danger:hover:not(:disabled) {
   background: var(--danger-soft);
 }
 
-/* ── 卡片 / 区块 ─────────────────────────────────────────── */
-
 .card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -171,8 +160,7 @@ button.danger:hover:not(:disabled) {
   font-size: 11.5px;
 }
 
-/* ── 开关（真实 checkbox + 样式化滑块）──────────────────── */
-
+/* switch: a real checkbox (keeps keyboard/a11y semantics) plus a styled slider */
 .switch-row {
   display: flex;
   align-items: center;
@@ -227,8 +215,6 @@ input[type="checkbox"]:disabled + .switch {
   opacity: 0.5;
 }
 
-/* ── 统计 ────────────────────────────────────────────────── */
-
 .stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -260,8 +246,6 @@ input[type="checkbox"]:disabled + .switch {
   letter-spacing: -0.2px;
 }
 
-/* ── 徽标 / 药丸 ─────────────────────────────────────────── */
-
 .pill {
   font-size: 11px;
   padding: 1px 8px;
@@ -276,8 +260,6 @@ input[type="checkbox"]:disabled + .switch {
   border-color: color-mix(in srgb, var(--ok) 45%, transparent);
   background: color-mix(in srgb, var(--ok) 10%, transparent);
 }
-
-/* ── 列表 ────────────────────────────────────────────────── */
 
 ul.rows {
   list-style: none;

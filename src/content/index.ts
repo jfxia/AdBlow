@@ -32,43 +32,39 @@ import { isSiteDisabled, writeStats } from './settings.ts';
 import { chromeLocal } from './storage.ts';
 
 /**
- * 几何巡检的防抖间隔。
+ * Debounce for the geometry pass.
  *
- * 展开型广告是**鼠标移入 / 滚动**触发的，所以按需巡检即可，不必常驻轮询 ——
- * 常驻 2 秒定时器在真实站点上是持续的 CPU 开销（一次巡检 = 一次
- * querySelectorAll + 最多 600 次尺寸读取）。
- *
- * ⚠️ 但**基线必须在展开之前记下**，否则第一次巡检时元素已经撑大了，
- * 面积记为"本来就大"，后续永远检测不出增长。因此 upkeep 每轮也会跑一次
- * 几何巡检来建立/更新基线，早于任何用户交互。
+ * Expand-on-hover ads fire on mouse/scroll, so an on-demand pass beats a permanent
+ * poll (one pass = one querySelectorAll + up to 600 size reads). But the baseline
+ * must be recorded *before* expansion, or the grown size is stored as normal and
+ * growth is never seen — hence upkeep also runs a geometry pass every round.
  */
 const GEOMETRY_DEBOUNCE_MS = 600;
 
 /**
- * 内容脚本（ISOLATED world）。
+ * Content script (ISOLATED world).
  *
- * 只做 chrome.* 接线与阶段编排；判定逻辑全在 engine.ts，可在 jsdom 里回归。
- *
- * 两个阶段（顺序很重要）：
- *   阶段一 document_start：静态规则就位。精确锚点，安全，无带宽代价。
- *   阶段二 快照回填成功后：启用启发式。理由见 engine.ts 的 makeInjectionTest。
+ * Only chrome.* wiring and phase orchestration; all judging lives in engine.ts so
+ * it stays testable under jsdom. Two phases, and the order matters:
+ *   1. document_start: static rules only — exact anchors, safe, no bandwidth cost.
+ *   2. after a snapshot backfill: heuristics on (see makeInjectionTest in engine.ts).
  */
 
 /**
- * 快照回填策略。
- *   auto（默认）没有匹配到站点规则包时才回填 —— 已有精确规则的站点不需要
- *                启发式，省掉一次同源请求（试点站 HTML 约 189KB）
- *   always      总是回填
- *   never       从不回填，启发式整体关闭
+ * Snapshot backfill strategy.
+ *   auto (default) backfill only when no site pack matched — such sites need no
+ *                  heuristics, saving one same-origin request (~189KB on the pilot)
+ *   always         always backfill
+ *   never          never backfill; heuristics stay off entirely
  */
 const PRISTINE_STRATEGY: 'auto' | 'always' | 'never' = 'auto';
 
 /**
- * 快照回填的等待上限。
+ * Cap on waiting for the backfill.
  *
- * SW 侧要再抓一次整页（试点站约 189KB），实测会偶发长时间不返回。
- * 没有超时的话，整条 boot 会卡在这里 —— 症状是「元素确实被隐藏了，
- * 但没打印就绪日志、自学习一个域名都没记」。
+ * The worker refetches the whole page (~189KB on the pilot) and occasionally
+ * stalls; without a timeout the whole boot blocks here — symptom: "elements do get
+ * hidden, but no ready log and not a single learned domain".
  */
 const BACKFILL_TIMEOUT_MS = 6000;
 
@@ -86,7 +82,7 @@ async function loadPacks(url: string): Promise<SitePack[]> {
   }
 }
 
-/** 取过滤列表里该主机名适用的域名专用 cosmetic 选择器。 */
+/** Domain-specific cosmetic selectors from the filter lists for this host. */
 async function requestListCosmetic(host: string): Promise<string[]> {
   try {
     const res = (await chrome.runtime.sendMessage({ type: 'get-cosmetic', host })) as
@@ -119,18 +115,16 @@ function installCosmeticStyle(selectors: string[]): void {
 }
 
 /**
- * 过滤列表的域名专用 cosmetic 选择器（第二期）。
+ * Filter-list cosmetic selectors, per domain (phase two).
  *
- * 与「站点规则包选择器」的区别：
- *   - 规则包选择器经逐站取证 + fixture 回归测试 → 可信，直接进样式表
- *   - 列表选择器来自社区维护、覆盖上万域名 → **必须过内容守卫**
- *
- * 守卫逻辑在 content/listCosmetic.ts 里（document 由调用方注入，可单测）。
+ * Unlike site-pack selectors (per-site evidence + fixtures → trusted, they may enter
+ * the stylesheet directly), these are community-maintained across tens of thousands
+ * of domains and must clear the content guard in content/listCosmetic.ts.
  */
 function installListCosmetic(selectors: string[]): number {
   if (selectors.length === 0) return 0;
-  // 列表规则必须同时过「内容」与「导航」两道闸门：
-  // 社区列表是按域名批量套用的，一条过宽的选择器就能让整站正文或导航消失。
+  // List rules must clear both the content and navigation gate: they are applied
+  // per domain in bulk, and one over-broad selector can wipe a whole site.
   const result = applyListCosmetic(
     document,
     selectors,
@@ -151,7 +145,7 @@ function installListCosmetic(selectors: string[]): number {
 async function boot(): Promise<void> {
   const host = location.hostname;
 
-  // 安全阀：站点被关掉时立刻退出，一个都不碰
+  // Kill switch: when the site is disabled, bail out without touching anything.
   if (await isSiteDisabled(store, host)) {
     console.debug(`[adblow] ${host} 已被用户关闭，本次不做任何处理`);
     return;
@@ -163,18 +157,16 @@ async function boot(): Promise<void> {
     console.warn('[adblow] 规则包被误伤护栏拒绝，整包丢弃', r.packId, r.problems),
   );
 
-  // ⚠️ 只有**规则包**选择器可以进防闪现样式表。
-  //
-  // 样式表在 document_start 生效，**没有任何元素级守卫**；而自学习选择器是
-  // 自动推导的、未经取证。实测事故：自学习推导出 `.tjtagmanager`（站点外链
-  // 包装类，内含 22 张图）与 `.post-card`（正文卡片类名）被写进样式表后，
-  // 页面一开头就隐藏了一大片内容与图片。自学习选择器只走带守卫的逐元素判定。
+  // Only curated (site-pack) selectors may enter the anti-flash stylesheet: it has
+  // no per-element guard, while learned selectors are auto-derived and untested.
+  // Measured: learned selectors in the stylesheet hid a large slice of the page from
+  // the first moment. Learned selectors use the guarded per-element path only.
   installCosmeticStyle(selectorSet.curated);
 
-  // 过滤列表的域名专用 cosmetic 规则（第二期）。
+  // Filter-list cosmetic rules (phase two).
   //
-  // 越早注入越好（防闪现），但它是异步的（要向 SW 取分片），所以先发起请求，
-  // 不阻塞后面的判定流程；拿到后再注入并走内容守卫。
+  // Earlier is better (anti-flash), but the fetch is async (shards live in the
+  // worker), so start it without blocking judging; apply under the guard on arrival.
   let listCosmeticCount = 0;
   void requestListCosmetic(host).then((selectors) => {
     listCosmeticCount = installListCosmetic(selectors);
@@ -183,7 +175,7 @@ async function boot(): Promise<void> {
         `[adblow] 列表 cosmetic：候选 ${selectors.length} 条，通过内容守卫 ${listCosmeticCount} 条`,
       );
     }
-    // 内容守卫依赖 DOM 已解析出元素；解析完成后再复核一次
+    // The content guard needs parsed elements; re-check once parsing is done.
     if (document.readyState === 'loading') {
       document.addEventListener(
         'DOMContentLoaded',
@@ -195,7 +187,7 @@ async function boot(): Promise<void> {
     }
   });
 
-  // 只记录经宽度检查的泛化选择器；不合格的只隐藏、不建规则
+  // Record only selectors that passed the width check; others are hidden, not learned.
   const learn = (hits: Hit[]): void => {
     for (const hit of hits) {
       const selector = recordableSelector(hit, document);
@@ -204,35 +196,32 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * 网络层自学习：把「被隐藏的广告用到的跨站域名」记下来，够次数就晋级成
-   * DNR 拦截规则。这是未知站点能**越用越好**的关键，且用户无需配置。
-   *
-   * 安全过滤（也被可见内容使用的域名一律不学）在 learnableAdDomains 里，
-   * 有独立回归测试 —— 试点站的 pic.wvxrrip.cn 就是风险 A。
+   * Network-layer learning: promote the cross-site domains used by hidden ads into
+   * DNR block rules after enough hits. This is what makes unknown sites improve with
+   * use and with no configuration; the safety filters live in learnableAdDomains.
    */
   const learnAdDomains = (): void => {
     const candidates = learnableAdDomains(document, host);
     if (candidates.length > 0) void recordDomains(store, host, candidates, location.href);
   };
 
-  // 页级预算兜底：防止"整页被清空"这种灾难。
-  // ⚠️ document_start 时 body 还几乎是空的（链接数为 0），此时测出的基线
-  // 毫无意义，所以下面在 DOMContentLoaded 之后再 refresh 一次。
+  // Page-level budget fallback against wiping a whole page. At document_start the
+  // body is nearly empty (zero links), so the baseline is remeasured below.
   const budget = createHidingBudget(document);
 
   /**
-   * 重算"站点自己的内容 CDN"。
+   * Recompute "the site's own content CDN".
    *
-   * 为什么每轮都要重算：跨站素材原本每张计 3 分，任何脚本渲染的块
-   * 只要有 2 张 CDN 图片就够 6 分被隐藏 —— 而缩略图放 CDN 是全网做法
-   * （用户报告的「推荐栏被屏蔽」「正文被屏蔽」都是这个）。
-   * 页面是渐进加载的，图片域名集合会变，所以每轮扫描前重新统计。
+   * Cross-site media scores 3 each, so any script-rendered block with two CDN images
+   * reached 6 and got hidden, while serving thumbnails from a CDN is universal (the
+   * reported hidden recommendation rails and body content were this). The page loads
+   * progressively, so recount before every sweep.
    */
   const refreshContentCdn = (): void => {
     options.contentCdnDomains = frequentMediaDomains(document, host);
   };
 
-  // 阶段一：仅静态规则。injected 恒 false 即关闭启发式。
+  // Phase one: static rules only. injected always false turns heuristics off.
   let options: JudgeOptions = {
     injected: () => false,
     host,
@@ -244,10 +233,11 @@ async function boot(): Promise<void> {
   let rule = 0;
   let heuristic = 0;
 
-  /** 几何面积快照：用于发现「靠 CSS 撑大」的展开型广告。 */
+  /** Geometry snapshots, used to spot ads that expand purely through CSS. */
   const tracker = createGrowthTracker();
 
-  // 单一观察器 + 可变 options：阶段二升级时不必重建观察器，也不会重复处理
+  // One observer plus a mutable options object: the phase-two upgrade neither
+  // rebuilds the observer nor reprocesses anything.
   new MutationObserver((records) => {
     for (const record of records) {
       for (const node of Array.from(record.addedNodes)) {
@@ -260,7 +250,7 @@ async function boot(): Promise<void> {
     }
   }).observe(document.documentElement, { childList: true, subtree: true });
 
-  // sweep 会跳过已隐藏的元素，因此多次累加不会重复计数
+  // sweep skips already-hidden elements, so repeated passes never double-count.
   const sweepNow = (): number => {
     refreshContentCdn();
     const r = sweep(document.documentElement, options);
@@ -271,12 +261,11 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * 几何突增重判（随动伸缩 / 悬浮展开 / 自动放大）—— 独立一趟。
+   * Geometry-growth re-judging (grow-on-hover / auto-enlarge) — its own pass.
    *
-   * 这类广告靠**纯 CSS 变化**工作：元素一直在页面上、只是又小又不起眼，
-   * 鼠标移上去之后被撑成大图。不产生任何节点增删，因此 MutationObserver
-   * 永远不触发 —— 验收实测里 8/18/21 三条全挂在这里。
-   * 几何突增本身就是证据，所以这一趟不再要求"必须证明是脚本注入"。
+   * These ads work through pure CSS, inserting no nodes, so MutationObserver never
+   * fires (three acceptance cases failed on exactly this). Growth is evidence in
+   * itself, so this pass needs no proof of script injection.
    */
   const recheckGrown = (): number => {
     const grown = collectGrownElements(document, tracker, {
@@ -296,13 +285,14 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * 链接农场（用大量不同外站链接堆出来的广告/SEO 垃圾块）—— 独立一趟。
+   * Link farms (ad/SEO spam blocks built from many distinct off-site links) — own pass.
    *
-   * 取证：实测站点页脚有 39 个不同跨站域名的链接，由站点自己的 partners.js
-   * 注入。单条跨站链接只值 4 分（低于 6 分门槛，这是故意的），
-   * 容器又因后代过多不采信后代信号 —— 所以必须单独判。
+   * Measured: a footer carried 39 distinct cross-site domains injected by the site's
+   * own partners.js. A single cross-site link scores only 4, below the 6 threshold
+   * (deliberately), and such containers have too many descendants for descendant
+   * signals to be trusted — hence a separate check.
    */
-/** 走页级预算兜底的隐藏（独立几趟都用它）。返回是否真的隐藏了。 */
+  /** Budget-guarded hide, shared by the standalone passes. Returns whether it hid. */
   const hideGuarded = (el: Element, reason: string): boolean => {
     if (!budget.canHide(el)) {
       console.debug(`[adblow] 页级预算兜底：拒绝隐藏 ${reason}（会清空整页）`);
@@ -326,10 +316,11 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * 假关闭按钮（伪装成关闭的跨站链接）—— 独立一趟。
+   * Fake close buttons (a "close" control that is really a cross-site link) — own pass.
    *
-   * 小浮窗过不了覆盖层面积阈值，又常常没有任何广告命名，常规判据抓不到。
-   * 但「关闭控件却是跨站链接」本身极可疑：正常站点的关闭按钮不会把人带去别的域名。
+   * Such pop-ups miss the overlay area threshold and carry no ad naming, yet a close
+   * control pointing at another domain is suspicious by itself. Hiding the outer ad
+   * container beats blocking the click, which would leave the ad in place.
    */
   const hideFakeClose = (): number => {
     const ads = findFakeCloseAds(document, { host });
@@ -345,11 +336,11 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * 隐形点击层（点击劫持）—— 独立一趟。
+   * Invisible click layers (clickjacking) — own pass.
    *
-   * 与覆盖层同理，几何与样式判断不能进逐元素打分的热路径。
-   * 主动隐藏它比「等用户点击时再拦」更好：隐藏后点击根本落不到它上面，
-   * 而且隐藏一个「渲染不出任何可见内容」的元素在视觉上是零影响。
+   * As with overlays, geometry and style checks stay out of the per-element hot path.
+   * Hiding beats intercepting the click: clicks never reach it, and it renders nothing
+   * visible, so hiding it removes no text or links.
    */
   const hideClickLayers = (): number => {
     const layers = findInvisibleClickLayers(document, {
@@ -357,9 +348,9 @@ async function boot(): Promise<void> {
     });
     let n = 0;
     for (const el of layers) {
-      // 点击层**不走预算兜底**：它是点击劫持的载体，
-      // 留着它的代价（整页点不动）比误判的代价大得多；
-      // 而且它渲染不出可见内容，隐藏它不会减少页面文字/链接。
+      // Click layers skip the budget fallback: leaving one in place costs far more
+      // (the whole page becomes unclickable) than a misjudgement, and since it
+      // renders nothing visible, hiding it removes no text or links.
       hideElement(el, 'click-layer');
       heuristic += 1;
       n += 1;
@@ -371,10 +362,11 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * 覆盖层单独一趟（不参与逐元素打分，见 findOverlays 的说明）。
+   * Overlays get their own pass (never part of per-element scoring).
    *
-   * 放在最后跑：此时普通规则与启发式都已落地，覆盖层的旁证判定能拿到最完整的
-   * 上下文；而且它自己会改内联样式，放在打分之后才不会拖慢扫描。
+   * Run last: regular rules and heuristics have landed by then, so corroboration sees
+   * the fullest context; and because this pass rewrites inline styles, running it
+   * after the scoring sweeps keeps those sweeps fast.
    */
   const hideOverlays = (): number => {
     const ads = findOverlayAds(document, { host, viewportArea: innerWidth * innerHeight });
@@ -388,32 +380,31 @@ async function boot(): Promise<void> {
     return n;
   };
 
-  // 首屏：此刻能扫到的部分。注意 document_start 时正文还没解析出来，
-  // 这一趟通常只覆盖到 <head>，真正的清扫靠下一趟。
+  // First-screen pass: whatever is scannable now. At document_start the body is not
+  // parsed yet, so this usually only covers <head>; the real sweep comes later.
   sweepNow();
 
   /**
-   * 收尾工作：覆盖层、网络层自学习、统计。
+   * Finalisation: overlays, network learning, stats.
    *
-   * ⚠️ **绝不能排在快照回填之后**（2026-10-10 实测踩坑）：
-   * 回填要由 SW 再抓一次整页（试点站 189KB），它慢或挂住时，后面这些收尾
-   * 就全被堵死——症状是「页面元素确实被隐藏了，但 AdBlow 没打印就绪日志、
-   * 自学习一个域名都没记」。而这些工作**本来就不依赖回填**。
+   * Never schedule it after the snapshot backfill: the backfill refetches the page
+   * through the worker and, when it stalls, would block all of this — symptom
+   * "elements hidden, but no ready log and not one learned domain". None of it
+   * depends on the backfill.
    */
   const upkeep = (label: string): void => {
-    // 先跑几何巡检：第一轮建立面积基线，后续轮次才能发现"被撑大"
+    // Geometry pass first: the initial round records the baselines growth is measured against.
     recheckGrown();
-    // 页面可能又加载出内容 → 更新预算分母（只增不减）
+    // More content may have loaded → refresh the budget denominator (it only grows).
     budget.refresh(document);
     refreshContentCdn();
     const farms = hideLinkFarms();
     const fakeClose = hideFakeClose();
     const layers = hideClickLayers();
     const overlays = hideOverlays();
-    // 复核"我们隐藏过的元素是否又被显示回来了"。
-    // 必须放在最后：刚隐藏的元素立刻复核没有意义，而站点改回显示
-    // 通常发生在它自己的脚本跑完之后（实测 1024cg 的广告弹层就是这样，
-    // 不复核的话整页链接都点不动，而我们还以为自己拦住了）。
+    // Re-check that what we hid is still hidden. Must come last: verifying a
+    // just-hidden element is pointless, and sites typically restore display after
+    // their own scripts ran (measured: a 1024cg overlay left links unclickable).
     const audit = verifyHiding(document);
     const bs = budget.stats();
     learnAdDomains();
@@ -430,11 +421,11 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * 按需几何巡检：只在鼠标移入 / 滚动之后跑，而不是常驻轮询。
+   * On-demand geometry pass: only after mouse-in / scroll, never a permanent poll.
    *
-   * 展开型广告的触发条件就是"鼠标移进来"或"滚动到视野"，因此这两个时机
-   * 之后再查一次既够用，又没有常驻定时器的开销。
-   * （同样地：常驻定时器还会让"把构建产物跑起来的测试"无法退出进程。）
+   * Those are exactly the triggers for expanding ads, so checking afterwards is
+   * enough and costs nothing in between. A permanent timer would also keep
+   * "run the build and observe" test processes from exiting.
    */
   let geometryTimer: ReturnType<typeof setTimeout> | null = null;
   const scheduleGeometryPass = (): void => {
@@ -451,29 +442,29 @@ async function boot(): Promise<void> {
     document.addEventListener(type, scheduleGeometryPass, { capture: true, passive: true });
   }
 
-  // 关键：DOM 解析完成后必须再扫一次。
-  // 只依赖 MutationObserver 也能补上，但显式扫一遍更可靠（观察器可能丢事件），
-  // 实测第一版就因为只扫了 document_start 那一趟而统计到 隐藏 rule=0。
+  // Key: sweep once more once the DOM is parsed. MutationObserver alone could cover
+  // this, but an explicit sweep is more reliable (the observer can drop events).
   if (document.readyState === 'loading') {
     await new Promise<void>((resolve) => {
       document.addEventListener('DOMContentLoaded', () => resolve(), { once: true });
     });
-    // 此刻页面内容才真正解析出来 → 重测预算基线（分母只增不减）
+    // Content is only parsed now → re-measure the budget baseline (it only grows).
     budget.refresh(document);
     sweepNow();
   }
 
-  // 阶段一收尾：不依赖回填，立刻落地
+  // Phase-one finalisation: independent of the backfill, so land it right away.
   upkeep('就绪(仅静态规则)');
 
-  // 延迟几轮再收尾一次，覆盖懒加载与延迟注入的广告位。
-  // 用有限的几次而不是常驻定时器，避免长驻开销。
+  // Finalise again a couple of rounds later, covering lazy-loaded and late-injected
+  // ad slots. A finite number of timers instead of a permanent one keeps idle cost zero.
   for (const delay of [4000, 12000]) {
     setTimeout(() => upkeep('巡回收尾'), delay);
   }
 
-  // 阶段二：回填完整服务端快照，启用启发式。
-  // ⚠️ 必须带超时：SW 侧要再抓一次整页，卡住时不能让判定一直停在静态档。
+  // Phase two: backfill the full server-side snapshot to enable heuristics.
+  // The timeout is required: the worker refetches the page, and a stall must not
+  // leave judging stuck in the static tier forever.
   const wantBackfill =
     PRISTINE_STRATEGY === 'always' || (PRISTINE_STRATEGY === 'auto' && packs.length === 0);
   if (!wantBackfill) return;
@@ -486,7 +477,7 @@ async function boot(): Promise<void> {
 
   try {
     const index = buildPristineIndexFromHtml(html, new DOMParser());
-    // 升级为带启发式的判定；已处理过的节点会被下面的全量 sweep 重新覆盖
+    // Upgrade to heuristic judging; the full sweep below re-covers handled nodes.
     options = { ...options, injected: makeInjectionTest(index, true) };
     sweepNow();
     upkeep('就绪(含启发式)');

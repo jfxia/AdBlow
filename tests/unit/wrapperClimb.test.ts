@@ -7,25 +7,13 @@ import {
 } from '../../src/content/engine.ts';
 import { scoreNode } from '../../src/engine/score.ts';
 
-/**
- * 「逐层往上吃」的回归 —— 用户报告 dgav40 的播放器/导航/推荐栏被屏蔽后，
- * 我在诊断里发现的通用缺陷。
- *
- * ## 事故形态
- *
- * 隐藏一个广告/农场之后，**它的父容器仍然"装着同一批外链、同一批素材"**，
- * 于是下一轮又被判定为广告，一层层往上吃，最后把外层容器（往往连带正文）
- * 一起隐藏。
- *
- * 实测证据：dgav40 一个页脚农场被**连隐藏了 4 层**：
- *   `#script_seo_links` → `.footer-links` → `section.footer-partners` → `.container`
- *
- * ## 修法
- *
- * 已经处理过的证据不该被重复采信：
- *   - `scoreNode` 不再统计**已被隐藏后代**的链接/素材/iframe
- *   - `findLinkFarms` 跳过"里面已经有被隐藏农场"的元素
- */
+// Regression for "eating its way up the tree", found while diagnosing dgav40's hidden player,
+// nav and recommendation rail: after an ad or farm is hidden, its parent still "holds the same
+// links and media", so the next pass judges it an ad too and climbs outward, taking the content
+// with it (one dgav40 footer farm was hidden 4 levels deep: #script_seo_links → .footer-links →
+// section.footer-partners → .container). Fix: evidence already processed is not reused —
+// scoreNode ignores links/media/iframes inside hidden descendants, and findLinkFarms skips
+// elements that contain a hidden farm.
 
 const HOST = 'www.example.com';
 
@@ -101,11 +89,11 @@ describe('❗findLinkFarms：同一个农场不再逐层重复隐藏', () => {
 
   it('❗第二轮：外层容器不再被当成新农场（这正是"往上吃"的回归）', () => {
     const doc = root(NESTED);
-    // 第一轮
+    // First pass.
     for (const el of findLinkFarms(doc, { host: HOST })) hideElement(el, 'linkfarm');
     assert.equal(doc.querySelector('#farm')!.getAttribute('data-adblow-hidden'), '1');
 
-    // 第二轮：inner / mid / outer 都"装着同一批外链"，但都不该再被隐藏
+    // Second pass: inner / mid / outer all "hold the same links" but must not be hidden again.
     const second = findLinkFarms(doc, { host: HOST });
     assert.deepEqual(
       second.map((e) => e.id),
@@ -119,11 +107,11 @@ describe('❗findLinkFarms：同一个农场不再逐层重复隐藏', () => {
       NESTED +
         `<div id="other">${farmLinks(['b1.com', 'b2.com', 'b3.com', 'b4.com', 'b5.com'])}</div>`,
     );
-    // 第一轮：两个分支各自的最深层都该命中（独立的农场不受影响）
+    // First pass: the deepest element in each branch must match (independent farms unaffected).
     const first = findLinkFarms(doc, { host: HOST }).map((e) => e.id).sort();
     assert.deepEqual(first, ['farm', 'other'], `实际 ${first.join(',')}`);
     for (const el of findLinkFarms(doc, { host: HOST })) hideElement(el, 'linkfarm');
-    // 第二轮：两者都不再重复
+    // Second pass: neither repeats.
     assert.deepEqual(findLinkFarms(doc, { host: HOST }), []);
   });
 });
@@ -157,11 +145,11 @@ describe('sweep 集成：外层容器不被连带隐藏', () => {
       viewportArea: 1600 * 900,
       selectors: { curated: [], learned: [] },
     };
-    // 模拟"上一趟已经处理掉这个广告"（例如链接农场/覆盖层那几趟，或上一轮扫描）
+    // Simulates the ad already handled in an earlier pass (farm / overlay pass, or a prior sweep).
     hideElement(document.querySelector('.ad-slot')!, 'overlay');
 
-    // 这一趟里主容器只有 3 个后代（属于"紧凑"），若重复采信已隐藏的广告证据
-    // 就会被吃掉 —— 正是要防的情形
+    // This pass sees the main container as "compact" (3 descendants), so reusing the hidden ad's
+    // evidence would eat it — exactly the case being guarded.
     sweep(document.documentElement, options);
     assert.equal(
       document.querySelector('#main-content')!.getAttribute('data-adblow-hidden'),

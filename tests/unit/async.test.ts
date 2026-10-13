@@ -23,7 +23,7 @@ describe('withTimeout：可选增强类调用的安全网', () => {
 
   it('已有结果时不会因为后续超时而改变返回值', async () => {
     const value = await withTimeout(Promise.resolve(42), 50);
-    await sleep(80); // 等过超时时刻
+    await sleep(80); // wait past the timeout
     assert.equal(value, 42);
   });
 });

@@ -4,16 +4,12 @@ import { validateSitePack } from '../../src/engine/rules.ts';
 import { SITE_PACKS, packsForUrl } from '../../src/rules/sites/index.ts';
 import { dgavPack } from '../../src/rules/sites/dgav.ts';
 
-/**
- * dgav37.com 系列站点规则包（用户反馈驱动，2026-10-10 取证）。
- *
- * 这个包的存在理由要写清：该站广告块**没有任何通用信号** ——
- * 广告图与 logo 共用同一个 CDN、外链指向本站、类名不含广告词、
- * 容器后代过多导致行为分不采信。唯一证据是站点自己的 `/css/inner-ads.css`。
- * 因此规则包是唯一可靠手段。
- */
+// The dgav37.com series pack (user-reported, evidence gathered 2026-10-10). Its reason to
+// exist: this site's ad blocks carry no generic signal — ad images share the logo's CDN,
+// outbound links point back to the site, class names lack ad words, and the container has
+// too many descendants for behaviour scoring. Only /css/inner-ads.css identifies them.
 
-/** 简易匹配器，语义与 chrome 的 match pattern 一致（只支持 * 通配）。 */
+/** Simplified matcher with chrome match-pattern semantics (* wildcard only). */
 function matchPattern(pattern: string, url: string): boolean {
   const re = new RegExp(
     '^' +

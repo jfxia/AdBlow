@@ -1,15 +1,11 @@
 /**
- * 单进程测试入口。
+ * Single-process test entry point. setup.ts is imported statically so ESM evaluates
+ * it before the dynamic imports below; then every *.test.ts under tests/unit and
+ * tests/integration is discovered and imported. Usage: node tests/run-all.ts.
  *
- * 先静态导入 setup.ts（ESM 会保证它在下方动态导入之前求值），
- * 再自动发现并导入 tests/unit 与 tests/integration 下所有 *.test.ts。
- *
- * 用法：node tests/run-all.ts
- * 退出码由 node:test 汇总，失败非零。
- *
- * 为什么不用 `node --test`：本沙箱禁止子进程管道，而 `node --test` 会为每个
- * 测试文件 spawn 一个子进程（piped stdio）并抛 EPERM。直接 `node 本文件` 是
- * 在当前进程内执行，零 spawn。
+ * Not `node --test`: the sandbox forbids child-process pipes and `node --test`
+ * spawns a piped child per test file, which fails with EPERM. Importing in-process
+ * spawns nothing.
  */
 import './setup.ts';
 

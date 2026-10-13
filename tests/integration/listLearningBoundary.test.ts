@@ -5,21 +5,14 @@ import { validateRulesets } from '../../src/engine/filterList/validate.ts';
 import { parseList } from '../../src/engine/filterList/parse.ts';
 import { SUBRESOURCE_TYPES, learnedDomainRules } from '../../src/engine/learnedRules.ts';
 
-/**
- * 集成过滤列表**之后**，自学习的安全闸门有没有被绕过。
- *
- * 项目原有的自学习安全测试（learnedRules / learned-selector-safety / domain-learning）
- * 都是在"没有列表"的前提下测的。集成 21,146 条列表规则之后，
- * 需要在**集成层**重新证明四件事：
- *
- *   1. 自学习规则仍然绝不拦 image / media / main_frame
- *   2. 列表里"允许拦图片"这件事不会传染给自学习规则
- *   3. 列表例外（优先级 3）能推翻自学习拦截（优先级 2）——
- *      自学习会学错，必须留这条退路
- *   4. 唯一允许拦主文档的来源仍是列表里**显式写的 `$document`**
- */
+// Integration-layer re-proof of the learned-rule safety gate once the lists are in.
+// The other learning tests (learnedRules / learned-selector-safety / domain-learning)
+// all run without lists; on top of 21,146 list rules this asserts that learned rules
+// still never block image/media/main_frame, that "lists may block images" does not leak
+// into them, that list exceptions (priority 3) still outrank learned blocks (priority 2),
+// and that explicit $document stays the only main-frame block.
 
-/** 一份贴近真实写法的列表片段：含拦图片、含例外、含 important、含 $document。 */
+/** A realistic list snippet: blocks images, has exceptions, important, and $document. */
 const LIST_TEXT = [
   '||ads.example.com^$image,script',
   '||ads.example.com^',
@@ -29,10 +22,8 @@ const LIST_TEXT = [
   '||fullpage-ad.example.com^$document',
 ].join('\n');
 
-/**
- * 编译后的条件可能用 `requestDomains`（域名打包）或 `urlFilter`，
- * 断言要把两者都覆盖到 —— 早期版本的测试只认 urlFilter，于是断言全部落空。
- */
+/** Compiled conditions may use `requestDomains` or `urlFilter`; cover both — an earlier
+ * version read only urlFilter, so its assertions silently matched nothing. */
 function domainsOf(r: DnrListRule): string[] {
   if (r.condition.requestDomains?.length) return r.condition.requestDomains;
   const m = /\|\|([^|^$]+)/.exec(r.condition.urlFilter ?? '');
@@ -67,7 +58,7 @@ describe('集成列表后：自学习安全闸门不被绕过', () => {
       assert.ok(!types.includes('image'), `${r.condition.urlFilter} 不得拦图片`);
       assert.ok(!types.includes('media'), `${r.condition.urlFilter} 不得拦音视频`);
     }
-    // 结构性保证：允许集合本身就不含这两个类型
+    // Structural guarantee: the allowed set itself excludes these two types.
     assert.ok(!SUBRESOURCE_TYPES.includes('image'));
     assert.ok(!SUBRESOURCE_TYPES.includes('media'));
   });
@@ -122,7 +113,7 @@ describe('集成列表后：自学习安全闸门不被绕过', () => {
     const docRule = listRules.find((r) => domainsOf(r).includes('fullpage-ad.example.com'));
     assert.ok(docRule, '应存在显式 $document 规则');
     assert.deepEqual(docRule!.condition.resourceTypes, ['main_frame']);
-    // 而自学习侧永远不会有这种规则
+    // Learned rules never contain such a rule.
     assert.ok(!learned.some((r) => (r.condition.resourceTypes ?? []).includes('main_frame')));
   });
 });

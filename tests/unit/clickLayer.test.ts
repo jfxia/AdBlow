@@ -9,12 +9,9 @@ import {
   isTransparentBackground,
 } from '../../src/engine/clickLayer.ts';
 
-/**
- * 隐形点击层识别 —— 点击劫持（「随便点哪里都跳走」）的正面防线。
- *
- * 安全性来自这条性质：**一个铺满视口、层级很高、却渲染不出任何可见内容的元素，
- * 隐藏它在视觉上零影响**，所以几乎没有误伤代价。
- */
+// Invisible click-layer detection — the direct defence against clickjacking ("every click
+// navigates away"). Safe by construction: an element that fills the viewport, sits high in
+// the stack and renders nothing visible costs nothing to hide.
 
 const VIEWPORT = 1920 * 1080;
 
@@ -32,7 +29,7 @@ type StyleSpec = Partial<{
   visibility: string;
 }>;
 
-/** 注入样式与几何，测试里不依赖真实布局。 */
+/** Injects style and geometry; the tests don't depend on real layout. */
 function ctxFor(
   specs: Record<string, StyleSpec>,
   rects: Record<string, { width: number; height: number }> = { full: { width: 1920, height: 1080 } },
@@ -100,7 +97,7 @@ describe('isInvisibleClickLayer：不命中（误伤守卫）', () => {
   });
 
   it('有够大的媒体的不算（图片/视频层是内容）', () => {
-    // 用真实 <img>：jsdom 里尺寸为 0，所以这里显式给一个大的 svg 元素
+    // jsdom reports 0 size, so use an <svg> with an explicit large rect.
     const el = root('<div data-k="layer"></div>').firstElementChild!;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     Object.defineProperty(svg, 'getBoundingClientRect', {

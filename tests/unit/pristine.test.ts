@@ -43,7 +43,7 @@ describe('buildPristineIndexFromHtml（快照回填通道）', () => {
   const index = buildPristineIndexFromHtml(fixture, new DOMParser());
 
   it('服务端渲染的元素全部不算注入', () => {
-    // 每个用例用独立解析结果，避免互相污染（DOM 是可变的）
+    // Each case re-parses: the DOM is mutable, so a shared one would leak between cases.
     const dom = new DOMParser().parseFromString(fixture, 'text/html');
     for (const sel of ['[data-ssp-slot-node]', '[data-ssp-container]', 'article', 'footer', '.post-card']) {
       const el = dom.querySelector(sel);
@@ -61,7 +61,7 @@ describe('buildPristineIndexFromHtml（快照回填通道）', () => {
   });
 
   it('与同一份 HTML 建出的原始 DOM 签名完全一致（回填可用性的前提）', () => {
-    // 回填索引必须能与内容脚本实际所在的 DOM 对上，否则整套判定失效
+    // The backfill index must line up with the content script's actual DOM, or judging breaks.
     const pristine = new DOMParser().parseFromString(fixture, 'text/html');
     const direct = buildPristineIndex(pristine.documentElement);
     assert.equal(direct.counts.size, index.counts.size);

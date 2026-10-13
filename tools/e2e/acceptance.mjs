@@ -1,21 +1,11 @@
-/**
- * 21 类干扰视线广告的**验收实测**。
- *
- * 目的：把评估表变成可执行的验收标准，而不是文字结论。
- * 每一类都有一个真实形态的测试页，先在**不装扩展**的基线下确认它确实在干扰
- * （否则这个夹具没有意义），再装扩展测它是否被处理。
- *
- * 三种测量模式：
- *   dom    —— 探针元素是否被我们隐藏（内联隐藏会打 data-adblow-hidden）
- *   hover  —— 先派发可信的鼠标移入（触发"随动伸缩/展开"），再按 dom 判定
- *   click  —— 派发可信点击，检查是否跳转 / 是否新开标签
- *   popup  —— 页面加载即尝试 window.open（无手势），检查是否新开标签
- *
- * 用 CDP 的 Input.dispatchMouseEvent 派发 —— 产生的是**可信事件**，
- * 与真实用户操作等价；用 JS 造事件测不出真实行为。
- *
- * 用法：node tools/e2e/acceptance.mjs [只测某个 id]
- */
+// Acceptance run for the 21 kinds of view-disturbing ads: an executable standard
+// rather than a written conclusion. Each kind has a realistic fixture page, the
+// baseline run (no extension) must confirm it really interferes -- otherwise the
+// fixture is meaningless -- and the extension run checks whether it is handled.
+// Modes: dom (probe hidden), hover (real mouse-over first), click (real click:
+// navigate or new tab?), popup (window.open on load). Events go through CDP
+// Input.dispatchMouseEvent and are trusted, equal to real user input; JS events
+// do not reproduce real behaviour. Run: node tools/e2e/acceptance.mjs [fixture id]
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdirSync, openSync, closeSync, rmSync, existsSync } from 'node:fs';
@@ -38,13 +28,13 @@ const ONLY = process.argv[2] ? Number(process.argv[2]) : null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// 1×1 透明 PNG
+// 1x1 transparent PNG
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
   'base64',
 );
 
-/** 每个夹具都带一段正常正文，模拟真实页面。 */
+/** Every fixture carries normal article text, mimicking a real page. */
 const CONTENT = `<div id="content" style="max-width:760px;margin:0 auto;padding:24px;font:16px/1.7 sans-serif">
   <h1>正常文章标题</h1>
   <p>这是一段正常正文，用来确认页面本身有内容。正文区域不应该被隐藏。</p>
@@ -59,7 +49,6 @@ const FIXED = (extra = '') =>
   `position:fixed;top:0;left:0;width:100%;height:100%;z-index:2147483647;opacity:0;${extra}`;
 
 export const FIXTURES = [
-  // ── 一、弹窗类 ────────────────────────────────────────────────
   {
     id: 1,
     cat: '一、弹窗类',
@@ -130,7 +119,6 @@ export const FIXTURES = [
     ),
   },
 
-  // ── 二、悬浮 / 漂浮 ──────────────────────────────────────────
   {
     id: 6,
     cat: '二、悬浮漂浮',
@@ -190,7 +178,6 @@ export const FIXTURES = [
     ),
   },
 
-  // ── 三、视频类 ───────────────────────────────────────────────
   {
     id: 10,
     cat: '三、视频类',
@@ -244,8 +231,8 @@ export const FIXTURES = [
     name: '视频叠加浮层（播放器内，仅占播放器）',
     mode: 'dom',
     probe: '.video-layer',
-    // 真实形态：播放器里有 <video>，广告是盖在它上面的一层。
-    // 这一层只占播放器、占视口不到 40%，所以走「播放器内覆盖」判据。
+    // Real shape: a <video> in the player with the ad layered over it. It covers
+    // only the player, under 40% of the viewport, so the in-player rule applies.
     html: page(
       '',
       `<div class="player" style="position:relative;width:640px;height:360px;background:#000;margin:20px auto">
@@ -276,7 +263,6 @@ export const FIXTURES = [
     hoverTarget: '#pa',
   },
 
-  // ── 四、点击触发 / 强制跳转 ──────────────────────────────────
   {
     id: 15,
     cat: '四、点击跳转',
@@ -344,7 +330,6 @@ export const FIXTURES = [
     ),
   },
 
-  // ── 五、富媒体动画 ──────────────────────────────────────────
   {
     id: 20,
     cat: '五、富媒体动画',
@@ -378,11 +363,9 @@ export const FIXTURES = [
     hoverTarget: '#rb',
   },
 
-  // ── 六、包装型广告 ────────────────────────────────────────────
-  //
-  // 2026-10-13 用户实测站点（dgav40）发现的形态：站点把广告"洗"过，
-  // 让所有基于"跨站"的判据失效 —— 实测它广告被漏拦、用户反馈"尺度过松"。
-  // 这两类必须进验收标准，否则以后改引擎会悄悄退化。
+  // Shapes found on a real site (dgav40, 2026-10-13): it launders ads through its
+  // own domain, which defeats every cross-site criterion and left them unblocked
+  // in practice. Both must stay here or engine changes regress silently.
   {
     id: 22,
     cat: '六、包装型广告',
@@ -391,9 +374,9 @@ export const FIXTURES = [
     probe: '#wrapped-ad-block',
     html: page(
       '',
-      // 广告链接全部指向**本站自己**的跳转端点，载荷是 base64 JSON：
-      //   {"kind":"ad","url":"<广告落地页>"}
-      // 跨站判据看不到它；必须解包载荷才能识别（见 score.ts 的 unwrapAdRedirect）。
+      // Ad links all point at the site's own redirect endpoint with a base64 JSON
+      // payload: {"kind":"ad","url":"<landing page>"}. Cross-site criteria cannot
+      // see it -- the payload must be unwrapped (score.ts unwrapAdRedirect).
       `<div class="text-center">
          <ul class="streamer-box2" id="wrapped-ad-block" style="display:flex;gap:8px;list-style:none;padding:0;margin:20px auto;width:640px">
            ${[1, 2, 3, 4]
@@ -417,10 +400,12 @@ export const FIXTURES = [
     probe: '#cdn-wrapped-ads',
     html: page(
       '',
-      // 素材走**跨站 CDN 的 base64 代理**：/base/<base64 of 真实广告图地址>
-      // 于是它与"站点自己的内容图"看起来同域；必须解包才能分出真实来源。
-      // 容器由脚本创建（无命名证据）→ 走"纯行为档"，因此也回归了
-      // "素材数量门槛不能把广告轮播当内容列表"这条修正。
+      // Creative goes through a cross-site CDN's base64 proxy: /base/<base64 of
+      // the real ad image URL>, so it looks same-origin as the site's own content
+      // images and only unwrapping reveals the real origin. The container is
+      // script-created (no naming evidence), so this exercises the behaviour-only
+      // path and also regresses the "material-count threshold must not treat an ad
+      // carousel as a content list" fix.
       `<div id="cdn-mount"></div>
        <script>(function(){
          var hosts=['ads-1.net','ads-2.net','ads-3.net'];
@@ -442,7 +427,6 @@ export const FIXTURES = [
   },
 ];
 
-// ── 服务端 ───────────────────────────────────────────────────────
 const LANDED = `<!doctype html><html><head><title>LANDED</title></head><body><h1 id="landed">广告落地页</h1></body></html>`;
 
 function startServers() {
@@ -475,7 +459,6 @@ function startServers() {
   return [site, ad];
 }
 
-// ── CDP ─────────────────────────────────────────────────────────
 class Cdp {
   constructor(ws) {
     this.ws = ws;
@@ -530,10 +513,9 @@ class Cdp {
 
 const list = (port) => fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json());
 
-/**
- * 浏览器级 CDP 会话：用来精确统计「这次夹具运行期间新开了几个页面」。
- * 用目标总数相减会出错（运行期间我们关掉旧页面，差值会出现负数）。
- */
+// Browser-level CDP session, to count exactly how many pages a fixture run opened.
+// Subtracting target totals fails: we close old pages during the run, so the
+// difference can go negative.
 let BROWSER_CDP = null;
 
 async function openBrowserCdp(port) {
@@ -560,8 +542,9 @@ async function launch({ port, profileDir, withExtension }) {
     '--disable-gpu',
     '--window-size=1280,900',
     '--autoplay-policy=no-user-gesture-required',
-    // 必须关掉浏览器自带的弹窗拦截器：否则「无手势 window.open」是由浏览器挡的，
-    // 而不是我们的守卫挡的 —— 基线就复现不了，对照失去意义。
+    // The browser's own popup blocker must stay off: otherwise a gesture-less
+    // window.open is stopped by the browser rather than by our guard, the baseline
+    // cannot reproduce it, and the comparison means nothing.
     '--disable-popup-blocking',
     '--headless=new',
   ];
@@ -609,7 +592,7 @@ async function waitForExtension(port) {
 
 const AD_HOST = new URL(AD).host;
 
-/** 在页面上判定探针是否被隐藏（我们隐藏时会打 data-adblow-hidden）。 */
+/** Whether the probe is hidden on the page (we tag with data-adblow-hidden). */
 const PROBE_EXPR = (probe) => `(() => {
   const els = [...document.querySelectorAll(${JSON.stringify(probe)})];
   const hiddenOf = (el) => el.closest('[data-adblow-hidden]') !== null;
@@ -624,7 +607,7 @@ const PROBE_EXPR = (probe) => `(() => {
 })()`;
 
 const AD_EL_EXPR = `(() => {
-  // 页面上任何指向广告域的元素是否还可见（作为"广告仍在干扰"的旁证）
+  // Whether anything pointing at the ad host is still visible (corroborates "the ad still interferes")
   const els = [...document.querySelectorAll('a[href*="' + ${JSON.stringify(AD_HOST)} + '"], img[src*="' + ${JSON.stringify(AD_HOST)} + '"]')];
   const hiddenOf = (el) => el.closest('[data-adblow-hidden]') !== null;
   return { total: els.length, hidden: els.filter(hiddenOf).length };
@@ -642,11 +625,11 @@ async function runFixture({ port, fixture }) {
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
 
-  // 快照事件位置：此后新出现的 page 目标就是这次运行"新开的标签"
+  // mark the event position: any page target appearing after this is a new tab
   const eventMark = BROWSER_CDP ? BROWSER_CDP.events.length : 0;
   const startUrl = `${BASE}/t${fixture.id}`;
   await cdp.send('Page.navigate', { url: startUrl });
-  await sleep(7000); // 覆盖内容脚本的 4s 收尾
+  await sleep(7000); // covers the content script's 4s wind-down
 
   let interaction = '无';
   if (fixture.mode === 'hover') {
@@ -660,12 +643,12 @@ async function runFixture({ port, fixture }) {
     ).result?.value;
     if (rect) {
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rect.x, y: rect.y });
-      // 再补一次，确保 mouseover 真的触发
+      // a second move, to make sure mouseover really fires
       await sleep(300);
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rect.x + 2, y: rect.y + 2 });
       interaction = `移入 (${rect.x},${rect.y})`;
     }
-    await sleep(4000); // 等几何重判那一趟
+    await sleep(4000); // wait for the geometry re-check pass
   } else if (fixture.mode === 'click') {
     for (const p of [
       { x: 640, y: 300 },
@@ -718,7 +701,6 @@ async function runFixture({ port, fixture }) {
   };
 }
 
-// ── 主流程 ───────────────────────────────────────────────────────
 const targets = ONLY ? FIXTURES.filter((f) => f.id === ONLY) : FIXTURES;
 let failures = 0;
 const servers = startServers();
@@ -729,7 +711,7 @@ console.log(`夹具站点 ${BASE} /t1..t21，广告域 ${AD}\n`);
 let baseBrowser = null;
 let extBrowser = null;
 try {
-  // ① 基线：不装扩展 —— 每一类都必须确实在干扰
+  // baseline: no extension -- every fixture must actually interfere
   baseBrowser = await launch({ port: 9831, profileDir: `${E2E_DIR}acc-base`, withExtension: false });
   BROWSER_CDP = await openBrowserCdp(9831);
   console.log('=== 基线（不装扩展）：确认每个夹具确实在干扰 ===');
@@ -755,7 +737,7 @@ try {
   baseBrowser = null;
   await sleep(1200);
 
-  // ② 装扩展
+  // with the extension loaded
   extBrowser = await launch({ port: 9832, profileDir: `${E2E_DIR}acc-ext`, withExtension: true });
   const ready = await waitForExtension(9832);
   BROWSER_CDP = await openBrowserCdp(9832);
@@ -781,7 +763,7 @@ try {
     );
   }
 
-  // ③ 汇总
+  // summary
   console.log('\n' + '─'.repeat(78));
   const passed = rows.filter((x) => x.handled).length;
   console.log(`通过 ${passed}/${rows.length}`);
@@ -797,7 +779,7 @@ try {
   const failedIds = rows.filter((x) => !x.handled).map((x) => `${x.f.id} ${x.f.name}`);
   if (failedIds.length) console.log(`\n未通过：\n  ${failedIds.join('\n  ')}`);
   console.log('─'.repeat(78));
-  // 注意：未通过不等于本次执行失败 —— 这是一把"尺子"，用来量命中率
+  // a failure here is not a run failure -- this is a ruler for measuring hit rate
   console.log(`验收命中率：${passed}/${rows.length}`);
 } catch (e) {
   failures = 1;

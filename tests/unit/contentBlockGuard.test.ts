@@ -7,28 +7,11 @@ import {
   looksLikeContentBlock,
 } from '../../src/content/engine.ts';
 
-/**
- * 纯行为档的「内容区块」门槛 —— 用户报告 dgav40 播放器/推荐栏被过滤后的修复。
- *
- * ## 事故（用户在真实浏览器里确认）
- *
- * 关闭 AdBlow 过滤时页面正常；开启后**视频窗口、导航栏、推荐栏**被过滤。
- *
- * ## 机制
- *
- * 这两块都是**脚本运行时创建**的（`injected=true`），而它们的封面/视频流来自
- * 跨站 CDN，于是命中最弱的「纯行为证据」档（没有任何命名线索也隐藏）。
- *
- * ## 修法
- *
- * 没有命名证据时，广告的形态是"小、素材少"；又大又满是缩略图的块是内容：
- *   ① 面积占视口 > 25%
- *   ② 素材（img/picture/video/source/canvas）数量 > 2
- *   ③ 含 `<video>` / iframe / 播放器容器
- *
- * 判据只在**没有命名证据**时生效：带 `.ad-slot` 的整屏视频广告照旧拦得住
- * （验收第 10/13/14 条靠命名）。
- */
+// Behaviour-only "content block" threshold, added after dgav40's player, nav and
+// recommendation rail were filtered. Those blocks are script-created with covers from a
+// cross-site CDN, so they hit the weakest (behaviour-only) tier. The thresholds — area over
+// 25% of the viewport, more than 2 media elements, or a <video>/player container — apply only
+// without naming evidence, so a strongly-named full-screen video ad is still blocked.
 
 function root(html: string): HTMLElement {
   const d = document.createElement('div');
@@ -39,7 +22,7 @@ function root(html: string): HTMLElement {
 const judge = (viewportArea = 1600 * 900) =>
   createJudge(() => true, 'example.com', viewportArea, 6);
 
-/** 让 jsdom 里的元素"有面积"（jsdom 不做布局，rect 恒为 0）。 */
+/** jsdom does no layout and reports a 0 rect, so inject one. */
 function withSize(el: HTMLElement, w: number, h: number): HTMLElement {
   el.getBoundingClientRect = () =>
     ({ width: w, height: h, top: 0, left: 0, right: w, bottom: h, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
@@ -102,9 +85,9 @@ describe('❗广告轮播不能被"素材成片"门槛放过', () => {
     Array.from({ length: n }, () => '<img src="https://content.cdn.net/t.jpg">').join('');
 
   it('3 张广告域素材的轮播（.streamer-box2 真实形态）→ 仍然隐藏', () => {
-    // 2026-10-13：修完"播放器/推荐栏误杀"后用户反馈"广告图片并未被屏蔽"。
-    // 运行时 DOM 显示站点把广告挂进 ul.streamer-box2，里面有 3 张广告图。
-    // 只按"素材数 > 2 就放过"会把这种广告轮播当成内容列表漏掉。
+    // 2026-10-13: after the player/rail false positives were fixed, users reported ads were no
+    // longer blocked. The site hangs 3 ad images inside ul.streamer-box2, so treating "more than
+    // 2 media elements" as content would miss that carousel.
     const el = root(
       `<ul class="streamer-box2">${adImgs(3)}${crossLinks(1)}</ul>`,
     ).firstElementChild!;

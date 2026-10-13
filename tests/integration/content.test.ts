@@ -16,20 +16,17 @@ import {
 } from '../../src/content/engine.ts';
 import { pilotPack } from '../../src/rules/sites/pilot.ts';
 
-/**
- * 在真实页面的脱敏快照上做端到端回归。
- *
- * 这是「广告零残留、内容零误伤」这个验收标准在沙箱内能做到的最强验证：
- * 真实 DOM 结构 + 真实规则包 + 真实引擎 + 真实服务端快照，唯独没有浏览器。
- */
+// End-to-end regression on a sanitised snapshot of a real page: the strongest sandbox
+// check of the "zero ad residue, zero content damage" criterion — real DOM, real rule
+// pack, real engine, real server snapshot, everything except the browser.
 
 const fixture = readFileSync(new URL('../fixtures/pilot-category.html', import.meta.url), 'utf8');
 const HOST = 'afford.gjvrohros.cc';
 const CONTENT = 'article[itemtype*="BlogPosting"]';
 /**
- * 服务端渲染的推荐位图片。
- * ⚠️ 它们**不是正文缩略图**：这 10 张全部属于「推荐位广告块」，隐藏是正确行为。
- * 正文缩略图由内联脚本从 pic.wvxrrip.cn 动态加载，见下面的专项用例。
+ * Server-rendered recommendation images. These are not content thumbnails: all 10 belong
+ * to the recommendation ad block, so hiding them is correct. Content thumbnails are loaded
+ * dynamically from pic.wvxrrip.cn — see the dedicated case below.
  */
 const RECOMMEND_IMG = 'img[data-src*="upload_01"]';
 
@@ -38,10 +35,9 @@ function freshDoc(): Document {
 }
 
 /**
- * 造判定选项。
- *
- * reliable=true 时用 fixture 本身当「完整服务端快照」——这正是 background
- * 回填通道交付的东西。只有在这个前提下启发式才允许启用（见 content/engine.ts）。
+ * Builds judge options. With reliable=true the fixture itself doubles as the complete
+ * server snapshot — exactly what the background backfill path delivers — and only then
+ * may heuristics run (see content/engine.ts).
  */
 function optionsFor(doc: Document, reliable = true): JudgeOptions {
   const index = buildPristineIndexFromHtml(fixture, new DOMParser());
@@ -53,12 +49,11 @@ function optionsFor(doc: Document, reliable = true): JudgeOptions {
   };
 }
 
-/** processAdded 现返回 {rule, hits} 统计对象，这里只取命中，保持用例可读。 */
+/** processAdded returns {rule, hits}; only the hits matter here. */
 function addHits(el: Element, options: JudgeOptions): Hit[] {
   return processAdded(el, options).hits;
 }
 
-/** 造一个脚本注入的元素。 */
 function inject(doc: Document, html: string): Element {
   const host = doc.createElement('div');
   host.innerHTML = html;
@@ -97,10 +92,9 @@ describe('集成：真实 fixture 上的首屏清扫', () => {
   });
 
   it('跨站 CDN 的正文缩略图不被隐藏（误伤守卫，风险 A）', () => {
-    // ⚠️ 注意别搞错：fixture 里 `img[data-src*="upload_01"]` 那 10 张**全部属于
-    // 「服务端推荐位」**，隐藏它们是正确的（下面单独断言）。真正要守的是正文缩略图，
-    // 而试点站的正文缩略图由内联脚本 loadBannerDirect 从 pic.wvxrrip.cn 动态加载
-    // （那段内联脚本在脱敏时被抹掉了），所以这里手工构造一张放进正文 article。
+    // Careful: all 10 `img[data-src*="upload_01"]` images belong to the server-rendered
+    // recommendation block and must be hidden (asserted below). The content thumbnail is
+    // loaded dynamically from pic.wvxrrip.cn by a stripped inline script, so build one here.
     const doc = freshDoc();
     const article = doc.querySelector(CONTENT)!;
     const img = doc.createElement('img');
@@ -125,9 +119,8 @@ describe('集成：真实 fixture 上的首屏清扫', () => {
   });
 
   it('内容守卫：装着正文的容器绝不因命名被隐藏（事故回归保护）', () => {
-    // 这是加命名档时自己踩出来的事故：`<div data-ssp-container="ssp-list">`
-    // 的属性名含 `data-ssp-`，被判成强命名，于是整个正文列表被隐藏。
-    // 命名证据再强也不能推翻「这里面装着正文」这个事实。
+    // Self-inflicted incident when the naming tier landed: `data-ssp-container="ssp-list"`
+    // carried the `data-ssp-` marker, was scored as strong naming, and hid the whole list.
     const doc = freshDoc();
     const container = doc.querySelector('[data-ssp-container="ssp-list"]')!;
     assert.ok(container, '未找到 ssp-list 容器');
@@ -142,8 +135,8 @@ describe('集成：真实 fixture 上的首屏清扫', () => {
   });
 
   it('服务端渲染的合法外链盒子没有被隐藏（标定发现的高分元素）', () => {
-    // 这三个元素广告度高达 8 分（跨站链接），全靠「服务端快照」把它们
-    // 与脚本注入区分开。这条断言就是那套机制的回归保护。
+    // These three reach 8 points on cross-site links and are only spared because the server
+    // snapshot tells them apart from script-injected nodes — that is the regression here.
     const doc = freshDoc();
     sweep(doc.documentElement, optionsFor(doc));
 
@@ -181,9 +174,9 @@ describe('集成：脚本注入的动态内容', () => {
   });
 
   it('processAdded 回报静态规则命中数（统计用，实测踩过计 0 的坑）', () => {
-    // 占位符在解析过程中就会被 MutationObserver 拦掉，此时 DOMContentLoaded
-    // 那一趟 sweep 看到的是已隐藏状态而跳过。统计必须把观察器这次的命中算上，
-    // 否则 Popup 会显示「规则拦截 0」而实际隐藏了 10 个元素。
+    // The placeholder is already caught by the MutationObserver during parsing, so the
+    // DOMContentLoaded sweep sees it hidden and skips it. This hit must still be counted,
+    // or the popup reports "0 blocked by rules" while 10 elements were hidden.
     const doc = freshDoc();
     const options = optionsFor(doc);
     const overlay = inject(doc, '<div data-ssp-sdk-popup-overlay></div>');
@@ -226,7 +219,7 @@ describe('集成：脚本注入的动态内容', () => {
     const hits = addHits(promo, options);
     assert.ok(isHidden(promo), '跨站推广位未被隐藏');
     assert.equal(hits.length, 1, `应产生 1 条命中，实际 ${hits.length}`);
-    // 弱命名（promo/float → +2）加行为旁证（跨站链接 +4、推广参数 +2）
+    // Weak naming (promo/float +2) plus behaviour (cross-site link +4, promo param +2).
     assert.equal(hits[0]!.score, 8, JSON.stringify(hits[0]));
     assert.deepEqual(hits[0]!.selector, '.tg-promo-float');
     assert.equal(recordableSelector(hits[0]!, doc), '.tg-promo-float');
@@ -295,7 +288,7 @@ describe('集成：快照不可信时启发式必须整体关闭', () => {
   it('reliable=false 时，纯行为档关闭（无命名线索的推广盒子不被隐藏）', () => {
     const doc = freshDoc();
     const options = optionsFor(doc, false);
-    // 刻意用没有任何广告命名的 class：这样才能真正测到「纯行为档」
+    // Deliberately ad-free class name, so this really exercises the behaviour-only tier.
     const promo = inject(
       doc,
       '<div class="zzz-plain"><a href="https://spam.example.com/x?click_id=1"></a></div>',
@@ -355,8 +348,8 @@ describe('集成：规则包护栏与「可信 / 自学习」分离', () => {
   });
 
   it('❗自学习选择器必须与规则包分开，绝不混进 curated', () => {
-    // 事故回归：两者混在一起时，自学习选择器会被写进 document_start 的样式表，
-    // 那条路径没有任何元素级守卫。
+    // Incident regression: while the two were merged, learned selectors reached the
+    // document_start stylesheet, which has no element-level guard.
     const set = selectorsFrom([pilotPack], ['[data-ssp-slot-node]', '.learned-ad']);
 
     assert.ok(
@@ -364,7 +357,6 @@ describe('集成：规则包护栏与「可信 / 自学习」分离', () => {
       '自学习选择器绝不能进入 curated（它会进样式表）',
     );
     assert.deepEqual(set.learned, ['[data-ssp-slot-node]', '.learned-ad']);
-    // 去重
     assert.equal(new Set(set.learned).size, set.learned.length);
   });
 });

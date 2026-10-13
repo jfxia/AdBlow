@@ -9,13 +9,10 @@ import {
   type Rect,
 } from '../../src/engine/geometry.ts';
 
-/**
- * 几何突增追踪 —— 展开型广告（随动伸缩 / 悬浮展开 / 自动放大）的唯一发现途径。
- *
- * 事故背景：引擎原本只在「节点被加入 DOM」时判定一次，而这类广告靠**纯 CSS 变化**
- * 工作（元素一直在，只是被撑大），不产生任何节点增删，因此永远不触发重判。
- * 验收实测里第 8、18、21 三条全挂在这个盲区上。
- */
+// Geometry-growth tracking — the only way to find expand-type ads (auto-resizing,
+// hover-expand, auto-enlarge). Incident: the engine judged an element once, when it entered
+// the DOM, while these ads work by pure CSS change (the element stays, it just grows) and add
+// no nodes, so a re-judge never fired. Acceptance cases 8, 18 and 21 all sat in that blind spot.
 
 const VIEWPORT = 1280 * 900;
 
@@ -25,7 +22,8 @@ function root(html: string): HTMLElement {
   return d;
 }
 
-/** 用可变的尺寸表驱动 rectOf，模拟元素被撑大；样式也注入，避免依赖 jsdom 的 getComputedStyle。 */
+/** A mutable size table drives rectOf to simulate growth; styles are injected too, so the
+ * test doesn't depend on jsdom's getComputedStyle. */
 function sizedCtx(sizes: Record<string, Rect>, positions: Record<string, string> = {}) {
   return {
     viewportArea: VIEWPORT,
@@ -46,7 +44,7 @@ describe('collectGrownElements：发现被撑大的元素', () => {
     const doc = root('<div data-k="box" style="position:fixed"></div>');
     const tracker = createGrowthTracker();
     const sizes = { box: { width: 80, height: 60 } };
-    collectGrownElements(doc, tracker, sizedCtx(sizes)); // 建基线
+    collectGrownElements(doc, tracker, sizedCtx(sizes)); // establish the baseline
 
     sizes.box = { width: 640, height: 440 };
     const grown = collectGrownElements(doc, tracker, sizedCtx(sizes));
@@ -62,7 +60,7 @@ describe('collectGrownElements：发现被撑大的元素', () => {
     const sizes = { box: { width: 10, height: 10 } };
     collectGrownElements(doc, tracker, sizedCtx(sizes));
 
-    // 涨了 25 倍，但只有 2500px² ≈ 视口的 0.2%
+    // 25x growth, but only 2500px² ≈ 0.2% of the viewport.
     sizes.box = { width: 50, height: 50 };
     assert.deepEqual(collectGrownElements(doc, tracker, sizedCtx(sizes)), []);
   });
@@ -73,12 +71,13 @@ describe('collectGrownElements：发现被撑大的元素', () => {
     const sizes = { box: { width: 640, height: 440 } };
     collectGrownElements(doc, tracker, sizedCtx(sizes));
 
-    sizes.box = { width: 700, height: 480 }; // 仅 1.2 倍
+    sizes.box = { width: 700, height: 480 }; // only 1.2x
     assert.deepEqual(collectGrownElements(doc, tracker, sizedCtx(sizes)), []);
   });
 
   it('命中时会连带返回值得作为候选的祖先（定位的，或内部含媒体的）', () => {
-    // 真实形态：撑开的盒子里有图片，外层是定位容器，中间夹一层普通包裹
+    // Real shape: the grown box holds an image, wrapped in a positioned outer container with
+    // a plain div in between.
     const doc = root(
       '<div data-k="outer" style="position:fixed"><div data-k="mid"><div data-k="box" style="position:absolute"><img src="/x.png"></div></div></div>',
     );
@@ -146,7 +145,7 @@ describe('collectGrownElements：发现被撑大的元素', () => {
     const doc = root(many);
     const tracker = createGrowthTracker();
     let calls = 0;
-    // 全部给一个"变大"的尺寸：即便超限也只应处理上限内的元素
+    // Every element "grows": even well past the cap, only the capped number may be processed.
     const ctx = {
       viewportArea: VIEWPORT,
       rectOf: (): Rect => {

@@ -1,32 +1,24 @@
 /**
- * 把解析后的过滤规则编译成 DNR 静态规则集。
+ * Compiles parsed filter rules into DNR static rulesets.
  *
- * ## 为什么这个文件的主体是"预算与取舍"
+ * Measured 2026-10-11 over six lists: 132,585 network rules against a static
+ * ruleset budget on the order of 30k — only ~23% can be kept, so trimming is the
+ * core of this compiler, not an afterthought.
  *
- * 实测（2026-10-11，六份主流列表）：
- *   网络规则合计 **132,585** 条，而 MV3 静态规则集的预算量级是 **3 万条**。
- *   也就是只能保留约 23% —— **裁剪策略就是这个编译器的核心**，不是附属逻辑。
+ * Priority (higher wins on conflict); deliberately ordered, do not reshuffle:
+ *   7 list important allow — ABP semantics put important exceptions on top
+ *   5 list important block — must beat plain exceptions
+ *   4 site packs — per-site, hand-verified, more trustworthy than generic lists
+ *   3 list allow — the main defence against site breakage, beats plain blocks
+ *   2 learned domains — above list blocks but overridable (learning can be wrong)
+ *   1 list block — fallback
  *
- * ## 优先级设计（决定了冲突时谁赢）
- *
- * DNR 里优先级高的规则胜出。这张表是刻意排的，不要随手改：
- *
- * | 优先级 | 来源 | 理由 |
- * |---|---|---|
- * | 7 | 列表的 important 例外 | ABP 语义里 important 例外最高 |
- * | 5 | 列表的 important 拦截 | ABP 语义：important 拦截要压过普通例外 |
- * | 4 | **本项目的站点规则包** | 逐站取证过，比通用列表更可信 |
- * | 3 | 列表的普通例外 | 例外是"防站点损坏"的主力，必须压过普通拦截 |
- * | 2 | **自学习域名拦截** | 高于列表拦截，但要能被列表例外推翻（自学习会学错） |
- * | 1 | 列表的普通拦截 | 兜底 |
- *
- * ## 两条刻意的偏离（有测试守着）
- *
- * 1. **默认不让列表规则拦主文档**（`allowMainFrame: false`）。列表里
- *    `||ads.x.com^` 这种不带类型选项的规则按 ABP 语义包含 document，
- *    照搬会导致用户点链接直接导航失败 —— 与本项目既有的「main_frame 永不拦」
- *    纪律冲突。只有显式写了 `$document` 的规则才拦主文档。
- * 2. **不认识选项的规则整条丢弃**（见 parse.ts），绝不静默放宽。
+ * Two deliberate deviations, both covered by tests:
+ *   1. List rules never block the main document (`allowMainFrame: false`). ABP
+ *      reads a plain `||ads.x.com^` as including `document`, which would break
+ *      navigation on click; only explicit `$document` rules block main frames.
+ *   2. Rules with unknown options are dropped whole (see parse.ts), never
+ *      silently widened.
  */
 import type { ResourceType } from '../rules.ts';
 import type { ParsedFilter } from './parse.ts';
@@ -36,18 +28,12 @@ export type DnrCondition = {
   urlFilter?: string;
   regexFilter?: string;
   /**
-   * 请求域名列表。
+   * Request-domain list — the single most effective compression lever.
    *
-   * 这是**最关键的压缩手段**（2026-10-11 核实 uBOL 构建日志后加入）：
-   * uBOL 把 Peter Lowe 的 3,552 条输入压成 **1 条**规则、urlhaus 的 3,029 条
-   * 压成 **1 条**，靠的就是把几千个域名塞进一条规则的 `requestDomains`
-   * （实测单规则可容纳约 3,500 个域名，官方无上限文档）。
-   *
-   * 本编译器原本"一个域名一条规则"，于是被 3 万条预算卡死；
-   * 改用域名打包后，12 万个域名只需几百条规则。
-   *
-   * 语义上它还**更精确**：`requestDomains` 直接按请求域名匹配，
-   * 不像 `||domain^` 依赖分隔符规则。
+   * uBOL packs Peter Lowe's 3,552 inputs into 1 rule and urlhaus' 3,029 into 1
+   * this way (measured ~3,500 domains per rule; no documented cap). It is also
+   * more precise than separator-sensitive `||domain^`: 120k domains fit in a few
+   * hundred rules instead of exhausting the 30k budget one rule at a time.
    */
   requestDomains?: string[];
   isUrlFilterCaseSensitive?: boolean;
@@ -65,18 +51,17 @@ export type DnrListRule = {
   condition: DnrCondition;
 };
 
-/** 优先级取值（见文件头表格）。 */
+/** Priority values (see the header table). */
 export const PRIORITY = {
   listBlock: 1,
   learnedBlock: 2,
   listAllow: 3,
-  /** 站点规则包（动态规则，本文件不产出，仅在此登记取值以免冲突） */
+  /** Site packs (dynamic rules, not produced here; value registered to avoid clashes) */
   packBlock: 4,
   listImportantBlock: 5,
   listImportantAllow: 7,
 } as const;
 
-/** 全部子资源类型。 */
 export const ALL_SUBRESOURCE_TYPES: ResourceType[] = [
   'sub_frame',
   'stylesheet',
@@ -92,24 +77,24 @@ export const ALL_SUBRESOURCE_TYPES: ResourceType[] = [
 ];
 
 export type CompileOptions = {
-  /** 静态规则总条数上限。 */
+  /** Total static-rule budget. */
   budget: number;
-  /** 单个静态规则集最多几条（便于分卷）。 */
+  /** Max rules per static ruleset (for chunking). */
   rulesetSize: number;
-  /** 正则规则条数上限（DNR 有独立且更小的限额）。 */
+  /** Regex-rule limit; DNR caps regexes separately and much lower. */
   regexBudget: number;
-  /** 是否允许列表规则拦主文档，默认 false（见文件头）。 */
+  /** Allow list rules to block main frames; default false (see header). */
   allowMainFrame?: boolean;
   /**
-   * 每份列表的配额（条数）。未列出的列表用 defaultListQuota。
+   * Per-list rule quota; lists not listed here fall back to defaultListQuota.
    *
-   * 为什么要按列表配额：实测六份列表覆盖的域名**基本互不重叠**
-   * （12 万候选里只有 59 条被多份列表提到），所以"多列表共识"没有区分度。
-   * 若单纯按价值分排序，结果由**输入顺序**决定 —— 实测会把 EasyPrivacy
-   * 几乎全部挤掉。配额保证每份列表都有份额。
+   * Measured: the six lists barely overlap (only 59 of 120k candidate domains are
+   * mentioned by more than one), so "multi-list consensus" has no discriminating
+   * power. Ranking purely by value follows input order and starved EasyPrivacy;
+   * quotas guarantee every list a share.
    */
   listQuotas?: Record<string, number>;
-  /** 未显式配置配额的列表的上限。 */
+  /** Cap for lists without an explicit quota. */
   defaultListQuota?: number;
 };
 
@@ -117,7 +102,7 @@ export type CompileReport = {
   input: number;
   afterBadfilter: number;
   deduped: number;
-  /** 因按域名归并而消失的规则条数。 */
+  /** Rules merged away by domain collapsing. */
   collapsedDomains: number;
   compiled: number;
   exceptions: number;
@@ -128,16 +113,16 @@ export type CompileReport = {
   budgetUsed: number;
   budgetTruncated: number;
   rulesetCount: number;
-  /** 被打包进 requestDomains 的域名总数与产出的规则条数。 */
+  /** Domains packed into requestDomains, and the rules produced. */
   packedDomains: number;
   packedRules: number;
-  /** `||*` 被规范化成 `*` 的条数（略微放宽，需知情）。 */
+  /** Patterns normalized from `||*` to `*` (slightly wider, hence reported). */
   normalizedPatterns: number;
-  /** 多列表共识分布（预算有限时靠它排序）。 */
+  /** Consensus distribution; drives ranking when the budget binds. */
   consensus: { single: number; multi: number; maxLists: number };
-  /** 每份来源列表实际保留的规则数（验证配额是否生效）。 */
+  /** Rules actually kept per source list (verifies the quotas). */
   keptByList: Record<string, number>;
-  /** 列表里**本来有多少**可供选择（用于判断我们丢掉了什么）。 */
+  /** How much each category had to choose from. */
   available: {
     domainAnchors: number;
     regex: number;
@@ -151,13 +136,13 @@ export type CompileResult = {
   report: CompileReport;
 };
 
-/** 从正则里尽量提取域名锚点；提不出来返回 null。 */
+/** Extract a domain anchor from a regex body, or null. */
 export function simplifyRegex(regexBody: string): string | null {
-  // 只处理"以 http(s) 开头 + 域名"这一种最常见的形态；
-  // 其余正则一律保留为正则（受独立的正则预算约束）
+  // Only the common "http(s) prefix + domain" shape; anything else stays a regex
+  // and is subject to the separate regex budget.
   if (!/https?\??:?/i.test(regexBody)) return null;
 
-  // 抓第一段"域名形态"的文本（点号在正则里通常是转义的）
+  // Grab the first domain-shaped run (dots are usually escaped in regexes)
   const m = /([a-z0-9][a-z0-9-]*(?:\\?\.[a-z0-9-]+)+)/i.exec(regexBody);
   if (!m) return null;
 
@@ -172,19 +157,19 @@ type Candidate = {
   exception: boolean;
   important: boolean;
   condition: DnrCondition;
-  /** 价值分：预算不够时按它从高到低保留。 */
+  /** Value score; kept highest-first when the budget binds. */
   value: number;
   regex: boolean;
-  /** 出现在哪些来源列表里（多列表共识 = 更高置信度）。 */
+  /** Source lists it came from (consensus = higher confidence). */
   sources: Set<string>;
 };
 
 /**
- * 多列表共识的每条加成。
+ * Per-extra-list consensus bonus.
  *
- * 预算只够保留约 20% 的候选，因此**排序依据决定了实际覆盖质量**。
- * 一个域名被 EasyList、EasyPrivacy、uBlock 同时拉黑，比只被一份列表提到
- * 更可能是真广告/追踪域名 —— 这是免费且有效的置信度信号。
+ * The budget keeps only ~20% of candidates, so ranking decides real coverage: a
+ * domain blocked by EasyList, EasyPrivacy and uBlock at once is far likelier to
+ * be genuine ad/tracking infrastructure than one mentioned by a single list.
  */
 export const CONSENSUS_BONUS = 60;
 
@@ -201,7 +186,7 @@ function canonicalKey(exception: boolean, important: boolean, c: DnrCondition): 
   ]);
 }
 
-/** badfilter 的抵消键：与目标规则一致，但不含 badfilter 标记本身。 */
+/** Cancellation key for badfilter: matches the target rule minus the flag itself. */
 function badfilterKey(f: ParsedFilter): string {
   return JSON.stringify([
     f.exception,
@@ -215,7 +200,7 @@ function badfilterKey(f: ParsedFilter): string {
   ]);
 }
 
-/** 判断模式是否为"纯域名锚点"（覆盖最广、最值钱的一类）。 */
+/** Whether the pattern is a bare domain anchor (widest and most valuable kind). */
 function isDomainAnchor(pattern: string, regex: boolean): boolean {
   if (regex) return false;
   return /^\|\|[a-z0-9.-]+\^?$/i.test(pattern);
@@ -246,17 +231,15 @@ function toCandidate(
     if (simplified) condition.urlFilter = simplified;
     else condition.regexFilter = f.pattern;
   } else {
-    // `||*` 开头被 DNR 明确禁止（任何一条非法规则都会让整个扩展装不上），
-    // 按官方建议规范化成 `*` 开头。改动量在 compileFilters 里统计。
+    // DNR forbids a leading `||*`, and one illegal rule stops the whole extension
+    // from installing, so normalize to `*` as the docs advise; counted in the report.
     condition.urlFilter = normalizeUrlFilter(f.pattern).value;
   }
 
-  // 最后一道过滤：urlFilter 语法不合法就丢弃这条规则。
-  //
-  // 为什么是"丢弃"而不是"交给校验器报错"：一条非法规则会让**整个扩展装不上**，
-  // 而这类问题来自上游清单的写法瑕疵（实测：`||*xav.*/guang/*.gif`、
-  // 中段带 `|` 的模式），数量极少、价值可忽略。丢掉它们比让用户装不上强得多。
-  // 校验器仍然保留，作为"编译器本不该产出这种东西"的断言。
+  // Last filter: drop the rule when the urlFilter syntax is invalid. One invalid
+  // rule makes the entire extension uninstallable, and the offenders are upstream
+  // typos (measured: `||*xav.*/guang/*.gif`, mid-string `|`) — few and worthless.
+  // The validator stays as an assertion that the compiler never emits one.
   if (condition.urlFilter) {
     const problem = urlFilterProblem(condition.urlFilter);
     if (problem) return { dropped: `invalid-urlfilter` };
@@ -271,29 +254,27 @@ function toCandidate(
 
   const allowMainFrame = opts.allowMainFrame;
   if (f.resourceTypes?.length) {
-    // 显式写了类型的规则照原意执行 —— 包括显式 $document（那是刻意拦主文档，
-    // 见文件头第 1 条偏离）。这里**不能**把 main_frame 过滤掉，
-    // 否则 `||x^$document` 会被整条丢弃，与设计意图相反。
+    // Rules with explicit types run as written — including explicit $document
+    // (deliberately blocking the main frame, see deviation 1 in the header).
+    // main_frame must NOT be filtered out here, or `||x^$document` would be
+    // dropped entirely, the opposite of the intent.
     condition.resourceTypes = f.resourceTypes;
   } else if (f.excludedResourceTypes?.length) {
-    // 排除型：只用 excludedResourceTypes。
-    // ⚠️ 绝不能同时写 resourceTypes —— 官方约束是
-    // "Only one of resourceTypes and excludedResourceTypes should be specified"，
-    // 同时写会让规则非法（实测曾因此导致**整个扩展加载失败**，而且只在浏览器里
-    // 才暴露出来）。不写 resourceTypes 时默认是"除主文档外全部"，
-    // 所以只要把主文档补进排除表即可。
+    // Exclusion form: set excludedResourceTypes only.
+    // ⚠️ Never alongside resourceTypes: the official constraint is "Only one of
+    // resourceTypes and excludedResourceTypes should be specified", and breaking
+    // it once made the whole extension fail to load — visible only in a browser.
+    // Without resourceTypes the meaning is "all but main_frame", so adding
+    // main_frame to the exclusion list is enough.
     const excluded = [...f.excludedResourceTypes];
     if (!allowMainFrame && !excluded.includes('main_frame')) excluded.push('main_frame');
     condition.excludedResourceTypes = excluded;
   } else {
-    // 无类型选项：ABP 语义是"全部类型"（含主文档）。
-    //
-    // ⚠️ 但据官方文档：**"If neither of them is specified, all resource types
-    // except main_frame are blocked."** 也就是说"除主文档外全部"正是 DNR 的默认，
-    // 因此这里**什么也不写**即可 —— 比展开 11 种类型既准确又省空间，
-    // 还能让更多规则共享同一条件签名（对域名打包有利）。
-    //
-    // 这同时实现了文件头第 1 条偏离：默认不拦主文档。
+    // No type options: the docs say "If neither of them is specified, all
+    // resource types except main_frame are blocked" — that IS the DNR default, so
+    // write nothing: more accurate and cheaper than expanding 11 types, and more
+    // rules then share one condition signature (which helps domain packing).
+    // This also implements deviation 1 from the header.
     if (allowMainFrame) {
       condition.resourceTypes = [...ALL_SUBRESOURCE_TYPES, 'main_frame'];
     }
@@ -312,44 +293,34 @@ function toCandidate(
   };
 }
 
-/** 纯域名锚点（无路径、无作用域）的解析结果。 */
+/** Resolved bare domain anchor (no path, no scope), or null. */
 function domainAnchorOf(c: Candidate): { domain: string } | null {
   if (c.regex) return null;
   if (c.condition.initiatorDomains?.length) return null;
   if (c.condition.excludedInitiatorDomains?.length) return null;
   const m = /^\|\|([a-z0-9.-]+)\^?$/i.exec(c.condition.urlFilter ?? '');
   if (!m) return null;
-  // 只接受形状正确的域名：上游列表里有 `||allyes.$third-party`、`||check-tl-$all`
-  // 这类残缺模式，当成域名打包会产出非法规则（实测导致扩展加载失败）。
+  // Only well-formed domains qualify: upstream lists contain fragments such as
+  // `||allyes.$third-party` or `||check-tl-$all`, and packing those emits illegal
+  // rules (measured to break extension loading).
   if (!isValidRequestDomain(m[1]!)) return null;
   return { domain: m[1]!.toLowerCase() };
 }
 
 /**
- * 按域名归并同类规则。
+ * Merge same-kind rules by domain.
  *
- * ## 为什么这是必要的（实测数据驱动）
+ * Measured on the first compile (2026-10-11, six lists): 120,585 usable domain
+ * anchors against a 24,000 budget — 96,700 dropped, and arbitrarily (by input
+ * order, which starved EasyPrivacy). One domain usually has several variants
+ * (`||d^$third-party`, `||d^$script`, `||d^`) that merge into one wider rule, so
+ * the same budget covers far more domains.
  *
- * 首次编译（2026-10-11，六份列表）的实测：域名锚点可用 **120,585** 条，
- * 而预算只允许保留 24,000 条 —— 丢掉 96,700 条，且选择是**任意的**
- * （按输入顺序，结果是 EasyPrivacy 几乎全被丢掉，只剩前两份列表的前段）。
+ * Merging takes the union of the intents (untyped beats typed; `$third-party`
+ * plus `$first-party` means untyped), i.e. what having all rules at once does.
  *
- * 但列表里同一个域名常有多个变体：
- *   `||d^$third-party`、`||d^$script`、`||d^$image,script`、`||d^`
- * 它们可以安全地合并成一条 `||d^$script,image`（甚至 `||d^`）。
- * 归并后**同一个预算能覆盖多得多的域名**。
- *
- * ## 为什么合并是语义安全的
- *
- * 合并取的是**各条意图的并集**：`$script` 与 `$image` 并成 `$script,image`；
- * 一条不限类型 + 一条限类型 → 不限类型；`$third-party` 与 `$first-party`
- * 并成"不限"。这与"这些规则同时存在"的最终效果一致。
- *
- * ## 为什么只归并"无作用域"的规则
- *
- * 带 `$domain=site.com` 的规则是**站点专用**的（无论拦截还是例外）。
- * 把它归并成全局规则会：拦截规则变成全局过度拦截，例外规则变成全局放行
- * （可能放走广告）。因此这类规则一律不参与归并。
+ * Only unscoped rules merge: a `$domain=site.com` rule is site-specific, and
+ * merging it would globalize a block or, worse, an exception.
  */
 function collapseByDomain(candidates: Map<string, Candidate>): {
   collapsed: Map<string, Candidate>;
@@ -369,17 +340,18 @@ function collapseByDomain(candidates: Map<string, Candidate>): {
     const groupKey = `${c.exception ? 'allow' : 'block'}|${anchor.domain}`;
     const existing = byDomain.get(groupKey);
     if (!existing) {
-      // 统一成带 ^ 的形式：更精确，避免 `||domain` 匹配到 `domainfoo.com`
+      // Normalize to the `^` form: `||domain` would also match `domainfoo.com`
       byDomain.set(groupKey, { ...c, condition: { ...c.condition, urlFilter: `||${anchor.domain}^` } });
       continue;
     }
 
     mergedAway += 1;
-    // 类型限制的并集：
-    //   - 任一方**没写**类型（语义是"除主文档外全部"，最宽）→ 合并后也不写类型
-    //   - 否则取两边类型的并集
-    // ⚠️ 早期版本在两边都没写类型时生成了 `resourceTypes: []` —— 空数组是非法规则，
-    // 会让整个扩展加载失败（由构建期自检抓到）。
+    // Union of the type limits:
+    //   - either side untyped ("all but main_frame", the widest) → stay untyped
+    //   - otherwise union both type sets
+    // ⚠️ An early version emitted `resourceTypes: []` when both sides were
+    // untyped — an empty array is illegal and broke extension loading (caught by
+    // the build-time self-check).
     const eitherUntyped =
       existing.condition.resourceTypes === undefined || c.condition.resourceTypes === undefined;
     const mergedTypes = new Set<ResourceType>([
@@ -407,11 +379,11 @@ function collapseByDomain(candidates: Map<string, Candidate>): {
       sources: existing.sources,
       condition: mergedCondition,
     };
-    // 一方限第三方、另一方不限 → 取"不限"
+    // One side third-party, the other unconstrained → unconstrained
     if (existing.condition.domainType !== c.condition.domainType) {
       delete merged.condition.domainType;
     }
-    // 大小写敏感只有全部成员都敏感时才算敏感（否则会漏拦）
+    // Sensitive only if every member is, or requests would slip through
     if (!(existing.condition.isUrlFilterCaseSensitive && c.condition.isUrlFilterCaseSensitive)) {
       delete merged.condition.isUrlFilterCaseSensitive;
     }
@@ -425,12 +397,10 @@ function collapseByDomain(candidates: Map<string, Candidate>): {
 }
 
 /**
- * 按列表配额挑选拦截规则。
- *
- * 两段式：
- *   1. 每份列表先按自己的配额取（内部按价值分、再按域名层级浅的优先 ——
- *      层级浅的域名覆盖更广：`doubleclick.net` 比 `a.b.c.example.com` 值钱）
- *   2. 配额没用满的列表腾出的余量，再按全局价值分补满
+ * Pick block rules per list quota, in two passes:
+ *   1. each list takes up to its own quota, ranked by value then by shallower
+ *      domain (shallower covers more: `doubleclick.net` beats `a.b.c.example.com`)
+ *   2. quota left over by lists that did not fill theirs goes to the global ranking
  */
 function selectBlocksByQuota(
   blocks: Candidate[],
@@ -442,7 +412,7 @@ function selectBlocksByQuota(
 
   const bySource = new Map<string, Candidate[]>();
   for (const c of blocks) {
-    // 归并后的候选可能来自多个列表；配额归属取第一个来源
+    // Merged candidates can come from several lists; quota goes to the first source
     const key = c.sources.size ? [...c.sources][0]! : '(unknown)';
     const list = bySource.get(key);
     if (list) list.push(c);
@@ -472,17 +442,18 @@ function selectBlocksByQuota(
   return picked;
 }
 
-/** 域名层级数（越少越"上位"，覆盖越广）。非域名锚点返回很大值。 */
+/** Domain label count (fewer = broader). Non-domain anchors get a large value. */
 function labelDepth(c: Candidate): number {
   const m = /^\|\|([a-z0-9.-]+)\^/i.exec(c.condition.urlFilter ?? '');
   if (!m) return 99;
   return m[1]!.split('.').length;
 }
+
 /**
- * 单条规则里最多塞多少个域名。
+ * Max domains stuffed into one rule.
  *
- * 官方**没有文档化的上限**；实测 uBOL 单条规则装了约 3,500 个域名。
- * 这里取 2,000，留出足够余量，同时避免单条规则 JSON 过大。
+ * No documented official limit; uBOL was measured at ~3,500 domains per rule.
+ * 2,000 leaves headroom while keeping each rule's JSON small.
  */
 export const MAX_DOMAINS_PER_RULE = 2_000;
 
@@ -496,13 +467,11 @@ type PackGroup = {
 };
 
 /**
- * 把"纯域名锚点"候选打包成 `requestDomains` 规则。
+ * Pack bare domain anchors into `requestDomains` rules.
  *
- * 条件（同样是域名、同样的类型限制、同样是拦截或例外、同样 important）
- * 完全一致的域名归到一组，一组产出若干条规则（按 MAX_DOMAINS_PER_RULE 切）。
- *
- * 这一步是**覆盖面的决定性改进**：不做它，12 万个域名要被 3 万条预算砍掉 80%；
- * 做了它，几乎所有域名都能进规则集。
+ * Domains sharing an identical condition (same types, same block/allow, same
+ * important flag) form one group, split into rules of MAX_DOMAINS_PER_RULE.
+ * Without this, 120k domains lose 80% of themselves to the 30k budget.
  */
 function packDomainAnchors(list: Candidate[]): {
   groups: PackGroup[];
@@ -517,7 +486,7 @@ function packDomainAnchors(list: Candidate[]): {
     const m = /^\|\|([a-z0-9.-]+)\^$/i.exec(c.condition.urlFilter ?? '');
     if (!m) continue;
     if (!isValidRequestDomain(m[1]!)) continue;
-    // 带 initiatorDomains 的规则不适合打包成共享域名表（作用域不同）
+    // Rules with initiatorDomains cannot share one domain table (different scope)
     if (c.condition.initiatorDomains?.length) continue;
     if (c.condition.excludedInitiatorDomains?.length) continue;
 
@@ -540,8 +509,8 @@ function packDomainAnchors(list: Candidate[]): {
     g.domains.push(m[1]!.toLowerCase());
     for (const s of c.sources) {
       g.sources.add(s);
-      // 按**域名**计数（不是按组）：一个组会混合多份列表的域名，
-      // 按组累加会重复计数（曾经因此得出 11 万这种明显错误的数字）
+      // Count per *domain*, not per group: a group mixes domains from several
+      // lists, so accumulating per group double-counts (once produced 110k here)
       domainsBySource[s] = (domainsBySource[s] ?? 0) + 1;
     }
     packedDomains += 1;
@@ -552,13 +521,11 @@ function packDomainAnchors(list: Candidate[]): {
 }
 
 /**
- * 编译一批解析结果。
+ * Compile a batch of parsed filters.
  *
- * 顺序很重要：**先 badfilter 抵消 → 去重（合并来源）→ 按域名归并
- * → 域名打包 → 剩余部分按配额裁剪**。
- *
- * 裁剪时**优先保住全部例外规则** —— 例外是防站点损坏的主力，
- * 只留拦截不留例外会让站点直接坏掉。
+ * Order matters: badfilter cancellation → dedupe (merging sources) → collapse by
+ * domain → pack domains → trim the remainder by quota. Trimming keeps *all*
+ * exceptions first: they are the main defence against site breakage.
  */
 export function compileFilters(
   filters: ParsedFilter[],
@@ -578,10 +545,10 @@ export function compileFilters(
     dropped[reason] = (dropped[reason] ?? 0) + n;
   };
 
-  // `||*` 开头的模式被规范化成 `*` 开头的条数（会略微放宽，计入报告）
+  // Patterns normalized from `||*` to `*` (slightly wider; counted in the report)
   const normalizedPatterns = filters.filter((f) => !f.regex && f.pattern.startsWith('||*')).length;
 
-  // ① badfilter 抵消
+  // (1) badfilter cancellation
   const cancelled = new Set<string>();
   for (const f of filters) {
     if (f.badfilter) cancelled.add(badfilterKey(f));
@@ -605,7 +572,7 @@ export function compileFilters(
     const c = result.candidate;
     const existing = candidates.get(c.key);
     if (existing) {
-      // 去重：合并来源列表（共识信号），保留价值更高的条件
+      // Dedupe: merge source lists (consensus signal), keep the higher value
       for (const s of c.sources) existing.sources.add(s);
       existing.value = Math.max(existing.value, c.value);
       drop('duplicate');
@@ -614,9 +581,9 @@ export function compileFilters(
     }
   }
 
-  // 共识加成：出现在越多列表里，越可能是真广告/追踪域名。
-  // 必须在去重之后统一施加（去重时各条规则的 sources 才合并完整）。
-  // ⚠️ 不能对 12 万元素用展开运算符（Math.max(...arr) 会栈溢出）。
+  // Consensus bonus: the more lists mention a domain, the likelier it is genuine
+  // ad/tracking infrastructure. Applied after dedupe so `sources` is complete.
+  // ⚠️ Never spread 120k elements at once (Math.max(...arr) overflows the stack).
   let consensusSingle = 0;
   let consensusMulti = 0;
   let consensusMax = 0;
@@ -628,10 +595,10 @@ export function compileFilters(
   }
   const consensus = { single: consensusSingle, multi: consensusMulti, maxLists: consensusMax };
 
-  // ② 按域名归并（同一域名的多个变体压成一条，让预算覆盖更多域名）
+  // (2) Collapse by domain (variants of one domain become one wider rule)
   const { collapsed, mergedAway } = collapseByDomain(candidates);
 
-  // ③ 域名打包：把"纯域名锚点"压成 requestDomains 规则（覆盖面的决定性一步）
+  // (3) Pack domains into requestDomains rules (decisive for coverage)
   const all = [...collapsed.values()];
   const isPackable = (c: Candidate): boolean =>
     !c.regex &&
@@ -647,7 +614,7 @@ export function compileFilters(
   for (const g of groups) {
     for (let i = 0; i < g.domains.length; i += MAX_DOMAINS_PER_RULE) {
       packedRules.push({
-        id: 0, // 稍后统一编号
+        id: 0, // numbered below
         priority: g.exception
           ? g.important
             ? PRIORITY.listImportantAllow
@@ -661,12 +628,12 @@ export function compileFilters(
     }
   }
 
-  // ④ 剩余部分（路径规则、正则、带作用域的规则）按配额裁剪
+  // (4) Trim the remainder (path rules, regexes, scoped rules) by quota
   const exceptions = rest.filter((c) => c.exception);
   const blocks = rest.filter((c) => !c.exception);
 
-  // 例外优先保留。上限取 max(50, 25%)：小批量编译时 25% 会小到只有 1 条，
-  // 而例外正是防站点损坏的主力，不该在规模小时被掐掉。
+  // Exceptions first. The cap is max(50, 25%): on small compiles 25% can be as
+  // little as one rule, and exceptions are what prevents site breakage.
   const remainingBudget = Math.max(0, opts.budget - packedRules.length);
   const exceptionReserve = Math.min(
     exceptions.length,
@@ -682,7 +649,7 @@ export function compileFilters(
   const keptBlocks = selectBlocksByQuota(blocks, Math.max(0, blockBudget), opts);
   if (blocks.length > keptBlocks.length) drop('over-budget', blocks.length - keptBlocks.length);
 
-  // ⑤ 正则预算（DNR 对 regexFilter 有独立的、更小的限额）
+  // (5) Regex budget (DNR caps regexFilter separately and lower)
   let regexUsed = 0;
   const selected: Candidate[] = [];
   for (const c of [...keptExceptions, ...keptBlocks]) {
@@ -696,7 +663,7 @@ export function compileFilters(
     selected.push(c);
   }
 
-  // ⑥ 合并「打包规则」与「逐条规则」，统一编号，按 rulesetSize 分卷
+  // (6) Merge packed and per-rule rules, assign ids, split by rulesetSize
   const restRules: DnrListRule[] = selected.map((c) => ({
     id: 0,
     priority: c.exception
@@ -717,12 +684,12 @@ export function compileFilters(
     rulesets.push(rules.slice(i, i + opts.rulesetSize));
   }
 
-  // 分布统计：用于回答"我们丢掉了什么、还剩多少余地"
+  // Distribution stats: answer "what did we drop, how much room is left"
   const availableDomainAnchors = packable.length;
   const availableRegex = all.filter((c) => c.regex).length;
   const availableExceptions = all.filter((c) => c.exception).length;
 
-  // 每份列表实际覆盖了多少（按域名计数）
+  // How much each list actually covers (counted per domain)
   const keptByList: Record<string, number> = { ...domainsBySource };
   for (const c of [...keptBlocks, ...keptExceptions]) {
     for (const s of c.sources) keptByList[s] = (keptByList[s] ?? 0) + 1;

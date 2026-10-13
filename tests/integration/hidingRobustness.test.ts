@@ -7,30 +7,19 @@ import {
   verifyHiding,
 } from '../../src/content/engine.ts';
 
-/**
- * 「隐藏被打回去」的回归 —— 用户报告 1024cg 上「留下一个覆盖页面的层，
- * 所有链接都点不动」的真实根因。
- *
- * ## 事故
- *
- * 站点脚本用**同样带 `!important` 的内联样式**把 `display` 改回 `block`。
- * 同优先级下后写的赢，于是我们"已经隐藏"的元素又显示出来：
- * 那是一个 `position:fixed; z-index:9999`、覆盖 99.5% 视口的广告弹层，
- * **整页链接都点不动**，而 `data-adblow-hidden` 标记还挂着 —— 标记成了谎话。
- *
- * ## 两道防线
- *
- *   1. `hideElement` 同时设 `pointer-events:none` / `visibility:hidden` ——
- *      即使显示被改回来，**点击也能穿透到下面的链接**
- *   2. `verifyHiding` 复核并重新隐藏，且记录"顽固"元素
- */
+// Regression for "hidden elements come back": on 1024cg a `position:fixed; z-index:9999`
+// ad layer covering 99.5% of the viewport turned every link unclickable while
+// `data-adblow-hidden` still claimed it was hidden.
+//
+// Two defences: hideElement also sets pointer-events:none / visibility:hidden so clicks
+// pass through, and verifyHiding re-checks, re-hides, and records stubborn elements.
 
 function mount(html: string): HTMLElement {
   document.body.innerHTML = html;
   return document.body.firstElementChild as HTMLElement;
 }
 
-/** 模拟站点脚本"完整反制"：把三处都改回来（这才是真正需要复核的情形）。 */
+/** Simulates a full site counter-attack: all three properties reverted to visible. */
 function siteFightsBack(el: HTMLElement): void {
   el.style.setProperty('display', 'block', 'important');
   el.style.setProperty('visibility', 'visible', 'important');
@@ -56,7 +45,7 @@ describe('❗verifyHiding：复核并重新隐藏（真实事故回归）', () =
     const el = mount('<div class="popup-container"></div>') as HTMLElement;
     hideElement(el, 'heuristic');
 
-    // 模拟站点脚本用同样 !important 的内联样式反制
+    // Site re-asserts display with its own !important inline style.
     el.style.setProperty('display', 'block', 'important');
     el.style.setProperty('visibility', 'visible', 'important');
     assert.equal(isHidden(el), true, '标记还在（这正是"谎话"的那一刻）');
@@ -80,7 +69,7 @@ describe('❗verifyHiding：复核并重新隐藏（真实事故回归）', () =
   it('站点只把 display 改回来时仍然挡得住（三管齐下更抗打）', () => {
     const el = mount('<div class="popup-container"></div>') as HTMLElement;
     hideElement(el, 'heuristic');
-    // 只改 display：visibility:hidden 还挡着，元素依然不可见
+    // Only display reverted: visibility:hidden still applies, so the element stays hidden.
     el.style.setProperty('display', 'block', 'important');
     const audit = verifyHiding(document);
     assert.equal(audit.refought, 0, 'visibility 仍然生效 → 不算被改回来');

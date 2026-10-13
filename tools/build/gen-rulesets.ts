@@ -1,15 +1,11 @@
-/**
- * 构建期生成 DNR 静态规则集。
- *
- * 读 filters/*.txt（由 tools/filters/fetch-lists.mjs 抓取，不入版本库），
- * 解析 → 编译 → 按预算裁剪 → 产出 filters/generated/list-N.json 与 manifest 补丁。
- * build.mjs 随后把它们搬进 dist/ 并注入 manifest。
- *
- * ⚠️ 预算数字（BUDGET / RULESET_SIZE / REGEX_BUDGET）对应 MV3 的硬限制，
- * 见 docs/plans/2026-10-11-filter-list-integration.md。调整前先核对官方文档。
- *
- * 用法：node tools/build/gen-rulesets.ts [--budget N]
- */
+// Generates the DNR static rulesets at build time: reads filters/*.txt (fetched
+// by tools/filters/fetch-lists.mjs, not committed), parses -> compiles -> trims
+// to budget -> writes filters/generated/list-N.json plus a manifest patch that
+// build.mjs copies into dist/.
+// Budget numbers mirror MV3 hard limits (see
+// docs/plans/2026-10-11-filter-list-integration.md); check the official docs
+// before changing them.
+// Run: node tools/build/gen-rulesets.ts [--budget N]
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseList } from '../../src/engine/filterList/parse.ts';
@@ -34,23 +30,17 @@ const p = (rel: string) => fileURLToPath(new URL(rel, ROOT));
 const FILTERS_DIR = p('filters/');
 const OUT_DIR = p('filters/generated/');
 
-/** 静态规则总预算。MV3 的保证额度约 3 万条，留出余量。 */
+/** Total static-rule budget. MV3 guarantees about 30k; keep headroom. */
 const DEFAULT_BUDGET = 24_000;
-/** 单个静态规则集条数（分卷，便于将来按列表开关）。 */
+/** Rules per ruleset (shards allow toggling lists later). */
 const RULESET_SIZE = 4_000;
-/** 正则规则预算（DNR 对 regexFilter 有独立且更小的限额）。 */
+/** Regex budget (DNR caps regexFilter separately and lower). */
 const REGEX_BUDGET = 1_000;
 
-/**
- * 每份列表的配额。
- *
- * 实测六份列表覆盖的域名**基本互不重叠**（12 万候选里只有 59 条被多份列表
- * 同时提到），所以"多列表共识"没有区分度；而单纯按价值排序的结果由输入顺序
- * 决定，会把 EasyPrivacy 几乎全部挤掉。配额保证每份都有份额。
- *
- * 分配原则：**优先"拦视觉广告"，其次"拦追踪"** —— 用户的抱怨是干扰视线的
- * 广告，而隐私类列表在预算紧张时不该把广告额度吃掉。
- */
+// Per-list quota. Measured: the six lists barely overlap (59 of ~120k candidate
+// domains appear in more than one), so consensus carries no signal, and ranking
+// purely by value follows input order and crowds EasyPrivacy out. Quotas give
+// every list a share, favoring ad blocking over tracking.
 const LIST_QUOTAS: Record<string, number> = {
   'easylist-china': 7_000,
   easylist: 12_000,
@@ -108,7 +98,7 @@ for (const entry of meta.lists) {
   for (const c of parsed.cosmetic) {
     const f = parseCosmeticLine(c.raw);
     if (f) allCosmetic.push(f);
-    // 脚本注入规则也走 cosmetic 通道分类过来
+    // Scriptlet rules come through the same cosmetic channel
     const s = parseScriptletRule(c.raw);
     if (s) allScriptlets.push(s);
   }
@@ -133,9 +123,9 @@ const { rulesets, report } = compileFilters(allFilters, {
 
 mkdirSync(OUT_DIR, { recursive: true });
 
-// ⚠️ 构建期自检：规则不合法就直接失败。
-// 曾经的教训：119 条规则同时带 resourceTypes 与 excludedResourceTypes，
-// 结果是**整个扩展加载不起来**，而 Node 侧毫无迹象，只有开浏览器才暴露。
+// Build-time self-check: fail hard on invalid rules. 119 rules carrying both
+// resourceTypes and excludedResourceTypes once made the whole extension fail to
+// load, with no signal on the Node side.
 const problems = validateRulesets(rulesets);
 if (problems.length) {
   console.error(`\n规则集自检失败：${problems.length} 个问题（前 10 条）`);
@@ -168,7 +158,8 @@ const fullReport = {
   cosmeticFiltersAvailable: cosmeticTotal,
   perList,
   parseDropReasons: skipReasons,
-  // report 里已经含 budget / budgetUsed / budgetTruncated，放在后面覆盖同名键
+  // report already holds budget / budgetUsed / budgetTruncated; spread last to
+  // override same-named keys
   ...report,
 };
 writeFileSync(`${OUT_DIR}report.json`, JSON.stringify(fullReport, null, 2), 'utf8');
@@ -204,7 +195,7 @@ console.log(`\n未支持的语法（解析阶段）：`);
 for (const [reason, n] of Object.entries(skipReasons).sort((a, b) => b[1] - a[1])) {
   console.log(`  ${String(n).padStart(7)}  ${reason}`);
 }
-// ── cosmetic：按域名分片（第二期）────────────────────────────────
+// cosmetic: shard by domain
 
 const cosmeticIndex = buildCosmeticIndex(allCosmetic);
 const shards = shardIndex(cosmeticIndex, COSMETIC_SHARD_COUNT);
@@ -230,7 +221,7 @@ const cosmeticMeta = {
   ...cosmeticIndex.stats,
   domainCount: cosmeticIndex.hideByDomain.size,
   unhideDomainCount: cosmeticIndex.unhideByDomain.size,
-  /** 通用规则默认不注入（与 uBOL 一致），仅记录数量 */
+  /** Generic rules are not injected by default (same call as uBOL); count only */
   genericNotInjected: cosmeticIndex.genericHide.size,
 };
 writeFileSync(
@@ -255,26 +246,14 @@ console.log(
     `单片最大 ${(maxShardBytes / 1024).toFixed(1)} KB`,
 );
 
-// ── 脚本注入（第三期）────────────────────────────────────────────
-//
-// ⚠️ 投递方式经过一次**实测驱动的返工**：
-//
-// 最初按 uBOL 的做法，构建期把域名分组、manifest 为每组声明匹配域名。
-// 但实测发现**按域名的 match pattern 极贵**——2,500 个 pattern 让浏览器
-// 加载扩展时多花 2.4 秒（真实 UI 上就是"卡死"）：
-//
-//   完整 dist（60 条目 / 2500 pattern）  3093 ms
-//   合并成 1 条目（2500 pattern）        3114 ms   ← 代价按 pattern 数，不按条目数
-//   单条目 <all_urls>（1 pattern）        801 ms
-//   对照（不加载扩展）                     496 ms
-//
-// 因此改成：**一个 `<all_urls>` 的内容脚本 + 紧凑内联数据表**。
-// 数据必须内联（不能跨 world 取数据，否则会失去 `document_start`
-// 抢在页面脚本之前的时序保证），所以用控制字符分隔的紧凑编码压体积。
-//
-// 附带好处：之前因为"无法表达成 match pattern"而跳过的通配 TLD 域名
-// （`ticketmaster.*`）现在可以收回来 —— 运行期查表用的是 `domainKeysForHost`，
-// 它本来就支持通配键。
+// Scriptlet injection. Delivery was reworked after measurement: per-domain match
+// patterns (uBOL's approach) cost 2.4s at ~2,500 patterns, and the cost tracks
+// pattern count rather than entry count. So: one `<all_urls>` content script plus
+// a compact inlined data table -- inlined because fetching the data across worlds
+// would lose the `document_start` head start over page scripts.
+// Bonus: wildcard-TLD domains (`ticketmaster.*`), previously skipped as
+// unexpressible match patterns, are now included (the runtime lookup supports
+// wildcard keys).
 
 const scriptletIndex = buildScriptletIndex(allScriptlets);
 const usedNames = [
@@ -282,7 +261,7 @@ const usedNames = [
 ].sort();
 const nameIndex = new Map(usedNames.map((n, i) => [n, i]));
 
-/** 控制字符会破坏分隔，构建期替换掉。 */
+/** Control characters would break the separators; replace them at build time. */
 const clean = (s: string): string => s.replace(/[\u0000-\u001f]/g, ' ');
 
 const entries: string[] = [];
@@ -295,8 +274,8 @@ for (const domain of [...scriptletIndex.byDomain.keys()].sort()) {
 }
 
 const namesJoined = usedNames.join('\u0001');
-// 每条前面都加 `\u0004`，运行期就能用 `indexOf('\u0004域名\u0003')` 唯一定位，
-// 且 `a.com` 不会命中 `b.a.com`（带边界字符）
+// Prefixing every entry with `\u0004` lets the runtime pin one down with
+// `indexOf('\u0004domain\u0003')`, and stops `a.com` matching inside `b.a.com`.
 const packedData = entries.map((e) => `\u0004${e}`).join('');
 const dataFile = 'scriptlet-data.js';
 const dataSource =

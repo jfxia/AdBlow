@@ -1,10 +1,6 @@
-/**
- * `tools/filters/fetch-lists.mjs` 的类型声明。
- *
- * 需要它是因为 `tests/unit/listSources.test.ts` 要导入这个抓取脚本的纯函数
- * 来做「来源只限无付费白名单者」的回归 —— 没有声明文件时 `pnpm typecheck`
- * 会报 TS7016（测试能跑，但类型检查不过）。
- */
+// Type declarations for tools/filters/fetch-lists.mjs, needed because
+// tests/unit/listSources.test.ts imports its pure functions: without them
+// `pnpm typecheck` reports TS7016 even though the tests pass.
 
 export type ListSource = {
   id: string;

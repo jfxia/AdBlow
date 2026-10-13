@@ -8,14 +8,9 @@ import {
   runScriptlets,
 } from '../../src/inject/scriptlets.ts';
 
-/**
- * 脚本注入实现（第三期）—— MAIN world 行为。
- *
- * 这些脚本直接改写页面运行时，一旦出错就是"站点功能坏掉"而不是"广告漏拦"，
- * 所以每条都要有行为断言，并且**任何异常都不得外泄**。
- *
- * 测试在 jsdom window 上跑（runScriptlets 接收 win 参数，因此可测）。
- */
+// Third-phase scriptlet injection (MAIN world behaviour). These rewrite the page at
+// runtime, so a mistake breaks the site rather than merely missing an ad: every case
+// needs a behavioural assertion and no exception may escape. jsdom windows make it testable.
 
 function freshWindow(): Record<string, unknown> {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -101,7 +96,7 @@ describe('runScriptlets：行为断言', () => {
     runScriptlets([{ canonical: 'set-constant', args: ['adsEnabled', 'false'] }], win);
 
     assert.equal(win.adsEnabled, false);
-    win.adsEnabled = true; // 页面试图改写
+    win.adsEnabled = true; // page tries to overwrite
     assert.equal(win.adsEnabled, false, '写入应被忽略');
   });
 
@@ -114,7 +109,7 @@ describe('runScriptlets：行为断言', () => {
 
   it('❗set-constant：路径可穿过构造函数（`X.prototype.Y` 是最常见写法之一）', () => {
     const win = freshWindow();
-    // 造一个带原型属性的构造函数，模拟 Navigator.prototype.globalPrivacyControl
+    // Constructor with a prototype property, mimicking Navigator.prototype.globalPrivacyControl.
     class FakeNavigator {}
     Object.defineProperty(FakeNavigator.prototype, 'globalPrivacyControl', {
       configurable: true,
@@ -134,7 +129,7 @@ describe('runScriptlets：行为断言', () => {
 
   it('❗set-constant 的安全闸门：拒绝用原始值覆盖真实对象', () => {
     const win = freshWindow();
-    win.siteConfig = { adsEnabled: true }; // 站点的配置对象
+    win.siteConfig = { adsEnabled: true }; // the site's config object
     const result = runScriptlets(
       [{ canonical: 'set-constant', args: ['siteConfig', 'false'] }],
       win,
@@ -174,9 +169,8 @@ describe('runScriptlets：行为断言', () => {
     runScriptlets([{ canonical: 'no-setTimeout-if', args: ['adsbygoogle'] }], win);
 
     const setTimeoutFn = win.setTimeout as (cb: () => void, ms: number) => unknown;
-    // ⚠️ 不能用 `new Function` 造"源码含匹配词"的函数 —— 它在全局作用域，
-    // 赋值不到测试的局部变量（早期版本因此断言在错误前提下通过）。
-    // 用注释让**闭包函数**的源码包含匹配词即可。
+    // Don't build the "source contains the match word" function with `new Function`: it
+    // lives in global scope and can't assign the test's locals. A closure works instead.
     const adHandler = (): void => {
       /* adsbygoogle */
       ranAd = true;
@@ -194,7 +188,7 @@ describe('runScriptlets：行为断言', () => {
   it('❗no-setTimeout-if：延迟也参与匹配', async () => {
     const win = freshWindow();
     let ran = false;
-    // 规则只拦延迟 5000 的调用
+    // The rule only blocks calls with delay 5000.
     runScriptlets([{ canonical: 'no-setTimeout-if', args: ['adProbe', '5000'] }], win);
     const setTimeoutFn = win.setTimeout as (cb: () => void, ms: number) => unknown;
     const handler = (): void => {
@@ -202,12 +196,12 @@ describe('runScriptlets：行为断言', () => {
       ran = true;
     };
 
-    setTimeoutFn(handler, 10); // 延迟不匹配 → 应执行
+    setTimeoutFn(handler, 10); // delay doesn't match → runs
     await new Promise((r) => setTimeout(r, 40));
     assert.equal(ran, true, '延迟不匹配时不应拦');
 
     ran = false;
-    setTimeoutFn(handler, 5000); // 延迟匹配 → 应拦
+    setTimeoutFn(handler, 5000); // delay matches → blocked
     await new Promise((r) => setTimeout(r, 40));
     assert.equal(ran, false, '延迟匹配时应拦');
   });
@@ -219,7 +213,7 @@ describe('runScriptlets：行为断言', () => {
 
     let adClicks = 0;
     let normalClicks = 0;
-    // 处理函数源码里含匹配词
+    // The handler's source contains the match word.
     const adHandler = function adClickHandler(): void {
       adClicks += 1;
     };
@@ -333,7 +327,7 @@ describe('runScriptlets：行为断言', () => {
     runScriptlets([{ canonical: 'no-window-open-if', args: ['popunder-slot'] }], win);
     const openFn = win.open as (...a: unknown[]) => unknown;
 
-    // URL 干净，但 features 里带匹配词 → 也要拦
+    // Clean URL, but the features string carries the match word → must block too.
     assert.equal(openFn('about:blank', '_blank', 'popunder-slot=1'), null);
     assert.equal(called, 0);
     openFn('https://good.example.com/');
