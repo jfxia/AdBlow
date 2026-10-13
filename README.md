@@ -207,7 +207,7 @@ Please respect those licenses when redistributing anything built from this repos
 ## License
 
 1. **GPL-3.0** for the whole project
-2. **MIT or Apache-2.0 for the code**
+2. **MIT license for the code**
 
 
 ---
