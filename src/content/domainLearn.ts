@@ -88,6 +88,36 @@ export async function allPromotedDomains(store: KvStore): Promise<string[]> {
   return [...out].sort();
 }
 
+/**
+ * **全局**已晋级的域名 + **教会它的站点清单**。
+ *
+ * 为什么需要站点清单（2026-10-13 第二次同类事故后加的）：
+ * 自学习域名原本编译成**全局** DNR 规则。但"这个域名在本站是广告域名"
+ * 不等于"它在别的站点也是" —— 第三方 CDN 被多个站点共用时，
+ * 在 A 站学到的域名很可能正是 B 站自己的资源来源。
+ * 实测事故：某视频站的关键脚本与播放器库全部来自它自己的 CDN，
+ * 一旦该 CDN 域名被学走，整页渲染与功能一起崩掉
+ * （页面 JS 运行时创建的图片全部消失、播放器容器高度归零）。
+ *
+ * 返回 `Map<域名, 页面宿主[]>`，供 `learnedDomainRules` 写成
+ * `initiatorDomains` 条件 —— 把爆炸半径限制在教会它的站点内。
+ */
+export async function allPromotedDomainScopes(store: KvStore): Promise<Map<string, string[]>> {
+  const keys = (await store.keys()).filter((k) => k.startsWith(PREFIX)).sort();
+  const out = new Map<string, Set<string>>();
+  for (const key of keys) {
+    const pageHost = hostFromDomainsKey(key);
+    if (!pageHost) continue;
+    const current = (await store.get<DomainMap>(key)) ?? {};
+    for (const entry of Object.values(current)) {
+      if (!entry.promoted) continue;
+      if (!out.has(entry.host)) out.set(entry.host, new Set());
+      out.get(entry.host)!.add(pageHost);
+    }
+  }
+  return new Map([...out].map(([host, hosts]) => [host, [...hosts].sort()]));
+}
+
 export async function allDomainEntries(
   store: KvStore,
 ): Promise<{ pageHost: string; entries: DomainEntry[] }[]> {

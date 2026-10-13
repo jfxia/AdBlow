@@ -33,11 +33,41 @@ describe('learnedDomainRules：自学习域名 → DNR 拦截规则', () => {
     assert.ok(!SUBRESOURCE_TYPES.includes('media'));
   });
 
-  it('覆盖常见子资源类型', () => {
+  it('❗❗绝不拦 script / stylesheet / font（事故回归：曾让整页渲染崩掉）', () => {
+    // 2026-10-13 真实事故：用户报告某视频站开启过滤后"播放器、推荐栏被屏蔽"。
+    // 取证：服务端 HTML 只有 18 个 <img>，开启过滤后页面恰好只剩这 18 个
+    //（未开启时 67 个，多出的全是页面 JS 运行时创建的）；
+    // 播放器库 Hls 未定义、播放器容器 690x0。
+    // 该站的关键脚本（jquery / common.js / owl.carousel）与播放器库（plyr / hls.js）
+    // 全部来自它自己的 CDN —— 自学习把该 CDN 域名学成广告域名后，
+    // 整站的 CSS/JS 被拦，页面渲染与功能一起崩。
+    // 结构性保证：**自学习永远不可能弄坏页面自身的样式与脚本。**
     const types = learnedDomainRules(['ads.example.com'])[0]!.condition.resourceTypes;
-    for (const t of ['script', 'xmlhttprequest', 'sub_frame', 'ping', 'stylesheet']) {
+    for (const t of ['script', 'stylesheet', 'font']) {
+      assert.ok(!types.includes(t as never), `自学习规则不得拦 ${t}`);
+      assert.ok(!SUBRESOURCE_TYPES.includes(t as never));
+    }
+  });
+
+  it('覆盖真正有价值的类型（弹窗 / 信标 / 追踪）', () => {
+    const types = learnedDomainRules(['ads.example.com'])[0]!.condition.resourceTypes;
+    for (const t of ['sub_frame', 'xmlhttprequest', 'ping', 'websocket', 'object']) {
       assert.ok(types.includes(t as never), `缺少资源类型 ${t}`);
     }
+  });
+
+  it('❗爆炸半径：只在教会它的站点上生效', () => {
+    // "这个域名在本站是广告域名"不等于"它在别的站点也是"：
+    // 第三方 CDN 被多站共用时，A 站学到的域名很可能正是 B 站自己的资源来源。
+    const rules = learnedDomainRules([
+      { domain: 'ads.example.com', initiators: ['a.com', 'b.com', 'a.com'] },
+    ]);
+    assert.deepEqual(rules[0]!.condition.initiatorDomains, ['a.com', 'b.com'], '去重并排序');
+  });
+
+  it('兼容纯字符串入参（不写 initiatorDomains）', () => {
+    const rules = learnedDomainRules(['ads.example.com']);
+    assert.equal('initiatorDomains' in rules[0]!.condition, false);
   });
 
   it('按站点豁免：用户关掉的站点下不生效', () => {

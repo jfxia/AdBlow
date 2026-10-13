@@ -8,7 +8,7 @@ import {
   shardsForHost,
   type CosmeticShard,
 } from '../engine/filterList/cosmetic.ts';
-import { allPromotedDomains } from '../content/domainLearn.ts';
+import { allPromotedDomainScopes } from '../content/domainLearn.ts';
 import { migrateLearnedSchema } from '../content/learn.ts';
 import { disabledKey } from '../content/settings.ts';
 import { chromeLocal } from '../content/storage.ts';
@@ -102,8 +102,13 @@ async function syncDnrRules(): Promise<void> {
     const packRules = toDnrRules(usableRules(), ID_BASE);
     // 用户手动关掉的站点下要豁免全部网络规则，否则「关掉本站」只停了 DOM 层
     const excluded = await disabledHosts();
-    const learnedDomains = await allPromotedDomains(store);
-    const learnedRules = learnedDomainRules(learnedDomains, excluded);
+    // 自学习域名带上「教会它的站点」，把规则爆炸半径限制在这些站点内
+    // （见 learnedDomainRules 的说明：全局规则曾把站点自己的 CDN 拦掉，整页崩）
+    const scopes = await allPromotedDomainScopes(store);
+    const learnedRules = learnedDomainRules(
+      [...scopes].map(([domain, initiators]) => ({ domain, initiators })),
+      excluded,
+    );
 
     const desired = [...packRules, ...learnedRules];
 

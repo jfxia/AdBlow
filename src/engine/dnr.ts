@@ -17,6 +17,8 @@ export interface DnrRule {
     resourceTypes: ResourceType[];
     /** 这些发起方域名下不生效（用于「用户关掉了某站点」时豁免） */
     excludedInitiatorDomains?: string[];
+    /** 只在**这些发起方域名**下生效（用于把自学习规则的爆炸半径限制在教会它的站点） */
+    initiatorDomains?: string[];
   };
 }
 
