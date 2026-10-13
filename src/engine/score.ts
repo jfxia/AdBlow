@@ -84,17 +84,100 @@ function isAbsoluteUrl(u: string): boolean {
 }
 
 /**
+ * 还原被**站点 CDN 的 base64 路径**包装的真实地址。
+ *
+ * 实测形态（2026-10-13，某视频站）：
+ *   `https://cache-2610.sgvafw.com/base/aHR0cHM6Ly9uMDIyOC5jZG4uc3ZscWdoLmNvbS8…==.cache`
+ *   → `https://n0228.cdn.svlqgh.com/…`
+ *
+ * ⚠️ 为什么必须还原（这是本轮误判的根因之一）：
+ * 站点把**广告素材与内容缩略图都**代理到同一个 CDN 域名下，于是"跨站素材"判据
+ * 完全失效 —— 广告图看起来和内容图同源。不还原就分不清两者：
+ *   - 广告图真实来源：`n0228.cdn.svlqgh.com` / `adeh334g.uwcng.com` / `img.alicdn.com`…
+ *   - 内容图真实来源：站点自己的内容 CDN（本例 `fourhoi.com`，被整页大量使用）
+ * 还原后再交给既有的"跨站素材 / 内容 CDN"判据，两者自然分开。
+ */
+export function unwrapCdnUrl(url: string): string {
+  const m = /\/base\/([A-Za-z0-9+/=_-]{16,})/.exec(url);
+  if (!m) return url;
+  try {
+    const decoded = atob(m[1]!.replace(/-/g, '+').replace(/_/g, '/'));
+    return /^https?:\/\//i.test(decoded) ? decoded : url;
+  } catch {
+    return url;
+  }
+}
+
+/** base64 文本解码（标准与 URL-safe 两种字母表都试）。失败返回 null。 */
+function tryBase64Text(value: string): string | null {
+  if (!/^[A-Za-z0-9+/=_-]{16,4096}$/.test(value)) return null;
+  for (const variant of [value, value.replace(/-/g, '+').replace(/_/g, '/')]) {
+    try {
+      const padded = variant.padEnd(Math.ceil(variant.length / 4) * 4, '=');
+      const decoded = atob(padded);
+      // 只接受可打印文本，避免把二进制噪声当载荷
+      if (decoded.length > 8 && /^[\x20-\x7e\u00a0-\uffff]+$/.test(decoded)) return decoded;
+    } catch {
+      /* 换下一种字母表 */
+    }
+  }
+  return null;
+}
+
+/**
+ * 识别「**自家域名跳转**」包装的广告链接。
+ *
+ * 实测形态（2026-10-13，某视频站）：广告链接不直接指向外站，而是走自己的域名：
+ *   `http://<本站>/traffic/go?t=eyJraW5kIjoiYWQiLCJ1cmwiOiJodHRwczovLzE1My40My4yMzEuMjEx…`
+ *   `t` 的 base64 解码 → `{"kind":"ad","id":9668,"url":"https://153.43.231.211:63776/?…","host":"…"}`
+ *
+ * 站点这样做是为了**绕过跨站判据**（也让广告统计更可控）。但载荷自己写了
+ * `"kind":"ad"` —— 那是确定性证据，比几何/命名推断都硬。
+ *
+ * 返回 `declaredAd`（载荷明确声明是广告）与 `target`（载荷里的落地页）。
+ * 两者都拿不到时返回空结果，调用方忽略。
+ */
+export function unwrapAdRedirect(
+  href: string,
+  base: string,
+): { declaredAd: boolean; target: string | null } {
+  const none = { declaredAd: false, target: null };
+  if (!href || href.length < 24) return none;
+  let parsed: URL;
+  try {
+    parsed = new URL(href, base);
+  } catch {
+    return none;
+  }
+
+  for (const [, value] of parsed.searchParams) {
+    const decoded = tryBase64Text(value);
+    if (!decoded) continue;
+    const declaredAd =
+      /"kind"\s*:\s*"ads?"/i.test(decoded) ||
+      /"type"\s*:\s*"ads?"/i.test(decoded) ||
+      /"(?:isAd|is_ad)"\s*:\s*true/i.test(decoded) ||
+      /"ads?"\s*:\s*true/i.test(decoded);
+    const target = /https?:\/\/[^\s"'\\]+/i.exec(decoded)?.[0] ?? null;
+    if (declaredAd || target) return { declaredAd, target };
+  }
+  return none;
+}
+
+/**
  * 取媒体地址。
  *
  * 必须先看 src 是否**绝对地址**再退回 data-src：
  * 该站用 `src=占位图 + data-src=真实图` 做懒加载，若因为 src 存在就直接采用，
  * 跨站的真实图会被整批漏掉。
+ *
+ * 另外要**还原 CDN 的 base64 包装**，否则广告素材与内容图看起来同源（见 unwrapCdnUrl）。
  */
 function mediaUrl(el: Element): string {
   const src = el.getAttribute('src') ?? '';
-  if (isAbsoluteUrl(src)) return src;
   const lazy = el.getAttribute('data-src') ?? '';
-  return lazy || src;
+  const chosen = isAbsoluteUrl(src) ? src : lazy || src;
+  return unwrapCdnUrl(chosen);
 }
 
 /** 命名分：SSP 标记与强命名同分（都是确定性证据），弱命名减半。 */
@@ -202,6 +285,28 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
         } else {
           behavior += 4;
           reasons.add('cross-site-link');
+        }
+      } else {
+        // 同一站点：可能是「自家域名跳转」包装的广告链接（实测形态见 unwrapAdRedirect）。
+        // 载荷自己声明 `"kind":"ad"` 是确定性证据，按跨站外链同分处理。
+        const wrapped = unwrapAdRedirect(href, base);
+        if (wrapped.declaredAd) {
+          behavior += 4;
+          reasons.add('ad-redirect-link');
+        } else if (wrapped.target) {
+          try {
+            const target = new URL(wrapped.target);
+            if (
+              registrableDomain(target.hostname) !== pageReg &&
+              !isSameBrand(target.hostname, ctx.pageHost)
+            ) {
+              // 只是"包装了外链"：可能是正常的外链跳转服务，给低分（不能单独触发隐藏）
+              behavior += 1;
+              reasons.add('wrapped-cross-site-link');
+            }
+          } catch {
+            /* 载荷里的地址不可解析，忽略 */
+          }
         }
       }
       const search = parsed.search.toLowerCase();

@@ -95,6 +95,52 @@ describe('looksLikeContentBlock：面积', () => {
   });
 });
 
+describe('❗广告轮播不能被"素材成片"门槛放过', () => {
+  const adImgs = (n: number): string =>
+    Array.from({ length: n }, (_, i) => `<img src="https://ads.a${i}.net/x.png">`).join('');
+  const contentImgs = (n: number): string =>
+    Array.from({ length: n }, () => '<img src="https://content.cdn.net/t.jpg">').join('');
+
+  it('3 张广告域素材的轮播（.streamer-box2 真实形态）→ 仍然隐藏', () => {
+    // 2026-10-13：修完"播放器/推荐栏误杀"后用户反馈"广告图片并未被屏蔽"。
+    // 运行时 DOM 显示站点把广告挂进 ul.streamer-box2，里面有 3 张广告图。
+    // 只按"素材数 > 2 就放过"会把这种广告轮播当成内容列表漏掉。
+    const el = root(
+      `<ul class="streamer-box2">${adImgs(3)}${crossLinks(1)}</ul>`,
+    ).firstElementChild!;
+    document.body.appendChild(el);
+    assert.notEqual(judge()(el), null, '广告轮播必须仍被隐藏');
+  });
+
+  it('❗对照：同样数量但来自内容 CDN 的素材 → 仍然不隐藏', () => {
+    const judgeWithCdn = createJudge(
+      () => true,
+      'example.com',
+      1600 * 900,
+      6,
+      new Set(['cdn.net']),
+    );
+    const el = root(`<div class="zzz">${contentImgs(4)}${crossLinks(2)}</div>`).firstElementChild!;
+    document.body.appendChild(el);
+    assert.equal(judgeWithCdn(el), null, '内容 CDN 的成片素材仍是内容列表');
+  });
+
+  it('广告域素材再多也不构成"内容列表"（混入内容素材时才按内容算）', () => {
+    const judgeWithCdn = createJudge(
+      () => true,
+      'example.com',
+      1600 * 900,
+      6,
+      new Set(['cdn.net']),
+    );
+    const el = root(
+      `<div class="zzz">${adImgs(10)}${crossLinks(2)}</div>`,
+    ).firstElementChild!;
+    document.body.appendChild(el);
+    assert.notEqual(judgeWithCdn(el), null, '10 张广告图不是内容列表');
+  });
+});
+
 describe('❗createJudge 第③档：纯行为证据不得隐藏内容区块', () => {
   it('脚本创建 + 跨站链接 + 成片缩略图（推荐栏形状）→ 不隐藏', () => {
     const el = root(

@@ -1,5 +1,5 @@
 import { isInjected, type PristineIndex } from '../engine/pristine.ts';
-import { scoreNode, registrableDomain, isSameBrand } from '../engine/score.ts';
+import { scoreNode, registrableDomain, isSameBrand, unwrapAdRedirect } from '../engine/score.ts';
 import { crossSiteResourceDomains, pageWideMediaDomains } from '../engine/domains.ts';
 import { NAMING_STRONG, NAMING_WEAK, namingSignal } from '../engine/lexicon.ts';
 import { generalizeSelector, isSelectorSafe } from '../engine/selector.ts';
@@ -363,7 +363,11 @@ export function createJudge(
     // 视频播放器与推荐栏都是**脚本运行时创建**（injected=true），
     // 而它们的封面/视频流来自跨站 CDN → 于是被这一档拦掉。
     // 没有命名证据时，广告的形态是"小、素材少"；又大又满是缩略图的块是内容。
-    if (injected(el) && behavior >= threshold && !looksLikeContentBlock(el, viewportArea)) {
+    if (
+      injected(el) &&
+      behavior >= threshold &&
+      !looksLikeContentBlock(el, viewportArea, { pageHost: host, contentCdnDomains })
+    ) {
       return hit();
     }
 
@@ -373,7 +377,7 @@ export function createJudge(
 
 /** 纯行为档允许隐藏的最大面积（占视口比例）：再大就不是广告，是内容区块。 */
 export const BEHAVIOR_ONLY_MAX_AREA_RATIO = 0.25;
-/** 纯行为档允许的最大素材数量：广告素材通常 1–2 张，内容列表是成片的。 */
+/** 纯行为档允许的最大**内容素材**数量：广告素材通常 1–2 张，内容列表是成片的。 */
 export const BEHAVIOR_ONLY_MAX_MEDIA = 2;
 
 /**
@@ -384,19 +388,54 @@ export const BEHAVIOR_ONLY_MAX_MEDIA = 2;
  *   - 推荐栏：脚本创建、成片 CDN 缩略图、面积很大
  * 这两类在旧实现里都会拿到 6 分以上被隐藏。
  *
+ * ⚠️ **素材判据必须按"来源"算，不能只按数量**（同日第二次修正）：
+ * 修完播放器/推荐栏后用户反馈"广告图片并未被屏蔽" —— 站点把广告挂进
+ * `ul.streamer-box2`，里面有 3 张广告图。若只要"素材数 > 2"就放过，
+ * 这种**广告轮播**会被当成内容列表漏掉。
+ * 正确判据是：**来自本站内容 CDN（或同源）的成片素材**才算内容列表；
+ * 来自广告域名的素材再多也只是广告轮播。
+ *
  * 判据刻意保守（只在**没有命名证据**时生效）：带 `.ad-slot` 这类强命名的
  * 大块仍然照拦（验收第 10/13/14 条的整屏视频广告就靠命名）。
  */
-export function looksLikeContentBlock(el: Element, viewportArea: number): boolean {
+export function looksLikeContentBlock(
+  el: Element,
+  viewportArea: number,
+  ctx?: { pageHost?: string; contentCdnDomains?: ReadonlySet<string> },
+): boolean {
   // ① 面积大
   if (viewportArea > 0) {
     const r = el.getBoundingClientRect();
     if ((r.width * r.height) / viewportArea > BEHAVIOR_ONLY_MAX_AREA_RATIO) return true;
   }
-  // ② 素材成片（内容列表 / 缩略图墙）
-  if (el.querySelectorAll('img,picture,video,source,canvas').length > BEHAVIOR_ONLY_MAX_MEDIA) {
-    return true;
+
+  // ② 素材成片（内容列表 / 缩略图墙）—— 只统计**内容来源**的素材
+  const cdn = ctx?.contentCdnDomains;
+  const pageReg = ctx?.pageHost ? registrableDomain(ctx.pageHost) : null;
+  let contentMedia = 0;
+  for (const m of Array.from(el.querySelectorAll('img,picture,source,canvas'))) {
+    // 已经处理过的素材不重复采信（与 scoreNode 的守卫同源）
+    if (m.parentElement?.closest(`[${HIDDEN_ATTR}]`)) continue;
+    const raw =
+      m.getAttribute('src') ?? m.getAttribute('data-src') ?? m.getAttribute('srcset') ?? '';
+    if (!raw) continue;
+    let host: string | null = null;
+    try {
+      host = new URL(raw.split(/\s+/)[0]!, `https://${ctx?.pageHost ?? 'localhost'}`).hostname;
+    } catch {
+      continue;
+    }
+    const reg = registrableDomain(host);
+    // 同源素材、或站点内容 CDN 上的素材 → 算内容
+    const isContentSource = (pageReg !== null && reg === pageReg) || (cdn?.has(reg ?? '') ?? false);
+    if (isContentSource) contentMedia += 1;
   }
+  // 没有内容 CDN 知识时退回"数全部素材"（保守：宁可少隐藏）
+  const mediaCount = cdn && cdn.size > 0
+    ? contentMedia
+    : el.querySelectorAll('img,picture,video,source,canvas').length;
+  if (mediaCount > BEHAVIOR_ONLY_MAX_MEDIA) return true;
+
   // ③ 视频 / 播放器容器
   if (el.matches('video,iframe') || el.querySelector('video') !== null) return true;
   if (el.matches('[class*="player"],[id*="player"],[class*="video-"],[id*="video-"]')) return true;
@@ -702,11 +741,27 @@ export function findOverlayAds(
  */
 export const LINK_FARM_MIN_DOMAINS = 5;
 
+/**
+ * 一坨「**自家域名跳转**且载荷声明是广告」的链接数量下限。
+ *
+ * 实测（2026-10-13）：站点把广告链接走自己的域名
+ * （`/traffic/go?t=<base64 {"kind":"ad","url":"https://广告落地页"}>`），
+ * 于是跨站判据完全看不到它，而容器又因为后代太多（>12）不采信后代信号 ——
+ * 结果整个广告轮播容器（`.streamer-container2` / `ul.streamer-box2`，
+ * 里面 10 个广告位）完全没被隐藏，用户反馈"广告图片并未被屏蔽"。
+ *
+ * 载荷自己写了 `"kind":"ad"`，这是确定性证据，与"5 个不同外站域名"同级。
+ */
+export const AD_REDIRECT_BLOCK_MIN = 3;
+
 /** 可能承载链接农场的容器标签。不包含 body/html/main/article（它们装着正文）。 */
 const FARM_TAGS = 'div,ul,ol,section,aside,nav,footer,dl,table';
 
 /**
- * 找出链接农场块。
+ * 找出**聚合型广告/垃圾块**：
+ *   - 链接农场：挂着 ≥5 个互不相同的外站域名
+ *   - 自家跳转广告块：挂着 ≥3 个载荷声明是广告的跳转链接
+ *     （站点用这种方式绕过跨站判据，见 AD_REDIRECT_BLOCK_MIN）
  *
  * 只返回**最深**的那些候选：父级往往也满足条件（甚至整个 footer 都满足），
  * 但隐藏最深的那层就足以清掉农场，而且不会连带抹掉同层容器里的正常内容
@@ -717,6 +772,7 @@ export function findLinkFarms(
   opts: { host: string; minDomains?: number },
 ): Element[] {
   const min = opts.minDomains ?? LINK_FARM_MIN_DOMAINS;
+  const base = `https://${opts.host}`;
   const pageReg = registrableDomain(opts.host);
 
   const candidates: Element[] = [];
@@ -730,14 +786,19 @@ export function findLinkFarms(
     if (el.querySelector(`[${HIDDEN_ATTR}][${REASON_ATTR}="linkfarm"]`) !== null) continue;
 
     const domains = new Set<string>();
+    let adRedirects = 0;
     for (const a of Array.from(el.querySelectorAll('a[href]'))) {
       const href = a.getAttribute('href') ?? '';
       if (!href || href.startsWith('#') || href.startsWith('javascript:')) continue;
       try {
-        const parsed = new URL(href, `https://${opts.host}`);
+        const parsed = new URL(href, base);
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
         const reg = registrableDomain(parsed.hostname);
-        if (!reg || reg === pageReg) continue;
+        if (!reg || reg === pageReg) {
+          // 同一站点：可能是「自家域名跳转」包装的广告（载荷里写明 kind=ad）
+          if (unwrapAdRedirect(href, base).declaredAd) adRedirects += 1;
+          continue;
+        }
         // 同品牌的镜像/备用域名不算"另一个域名" —— 实测 dgav36 的
         // 「最新镜像网址」目录页正文就是几十个这样的域名，按跨站算会把正文
         // 整块判成链接农场（用户报告的误杀）。
@@ -747,7 +808,17 @@ export function findLinkFarms(
         /* 忽略非法 URL */
       }
     }
-    if (domains.size < min) continue;
+    // 判据一：挂着 ≥5 个互不相同的外站域名（链接农场）
+    const farmByDomains = domains.size >= min;
+    // 判据二：≥3 个「自家跳转 + 载荷声明是广告」的链接。
+    // ⚠️ 这条**必须同时有广告命名**（2026-10-13 实测误伤）：
+    // 一个通用包装（`div.text-center`）里恰好夹着几个跳转广告链接时，
+    // 只看链接数会把整块正文（实测 39 个内容卡片）一起隐藏。
+    // 加上命名要求后，`ul.streamer-box2`（streamer）/`#topBanner`（banner）这类
+    // 明确的广告容器才走这条判据，通用包装被排除。
+    const blockByRedirects =
+      adRedirects >= AD_REDIRECT_BLOCK_MIN && namingSignal(el).strength >= NAMING_WEAK;
+    if (!farmByDomains && !blockByRedirects) continue;
     if (holdsRealContent(el)) continue;
     // 导航（自身或内部）不是链接农场 —— 用户报告过「导航列表被屏蔽」。
     // ⚠️ 但**伪装成导航的广告位**要留出退路：如果它自己带着广告强命名

@@ -88,6 +88,27 @@ describe('词库：弱命名（需要旁证，单独不足以判定）', () => {
   it('horizontal-banner 是弱档 —— 它需要跨站外链旁证才会被隐藏', () => {
     assert.equal(strength('<div class="horizontal-banner"></div>'), NAMING_WEAK);
   });
+
+  it('❗驼峰连写必须切词（实测漏拦：站点把横幅广告叫 .topBanner）', () => {
+    // 2026-10-13：修完"播放器/推荐栏误杀"后用户反馈"广告图片并未被屏蔽"。
+    // 运行时 DOM 显示站点把横幅挂进 `.topBanner` —— 而 `topbanner` 与 `banner`
+    // 不是同一个词，旧实现完全匹配不到词表项。
+    assert.equal(strength('<div class="topBanner"></div>'), NAMING_WEAK, 'topBanner 应命中 banner');
+    assert.equal(strength('<div id="globalBannerTop"></div>'), NAMING_WEAK);
+    assert.equal(strength('<div class="adCard0"></div>'), NAMING_STRONG, 'adCard0 → ad card 0');
+  });
+
+  it('❗streamer 是弱档（站点广告轮播容器 .streamer-box2）', () => {
+    assert.equal(strength('<ul class="streamer-box2"></ul>'), NAMING_WEAK);
+    assert.equal(strength('<div class="streamer-container2"></div>'), NAMING_WEAK);
+  });
+
+  it('❗驼峰切词不得制造新的误伤', () => {
+    // 切开后仍不应命中：这些词里没有广告术语
+    for (const cls of ['topBar', 'sideBar', 'progressBar', 'toolBar', 'scrollBar']) {
+      assert.equal(strength(`<div class="${cls}"></div>`), NAMING_NONE, cls);
+    }
+  });
 });
 
 describe('词库：误伤守卫（含 "ad" 字母的正常词绝不能命中）', () => {

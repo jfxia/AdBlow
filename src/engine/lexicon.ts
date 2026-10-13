@@ -105,6 +105,13 @@ const WEAK_TOKENS = new Set([
   // 粘性横幅（底部/顶部固定条）。在正常 UI 里 `sticky` 也用于粘性页头，
   // 所以只作为弱词：必须另有跨站链接/素材等旁证才成立。
   'sticky',
+  // 广告轮播容器（2026-10-13 实测漏拦）。
+  // 真实案例：站点用 `Banner2` 类把广告挂进 `.streamer-container2` /
+  // `ul.streamer-box2`，里面 3 张广告图来自 3 个不同的广告域名。
+  // 收成弱词而不是强词：直播站的"主播卡片"也可能叫 streamer。
+  'streamer',
+  'couplet',
+  'piaofu',
 ]);
 
 /**
@@ -148,7 +155,13 @@ export function namingSignal(el: Element): NamingSignal {
   }
 
   // ③ 整词匹配
-  const tokens = hay.toLowerCase().split(SPLIT).filter(Boolean);
+  //
+  // ⚠️ 分词前必须**切开驼峰与数字边界**（2026-10-13 实测漏拦）：
+  // 站点把顶部横幅广告命名为 `.topBanner`，而 `topbanner` 与 `banner` 不是同一个词，
+  // 于是这个明显的广告容器完全匹配不到任何词表项。
+  // 切开后 `topBanner` → `top banner` ✓、`adCard0` → `ad card 0` ✓。
+  const normalized = hay.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  const tokens = normalized.split(SPLIT).filter(Boolean);
   const strong: string[] = [];
   const weak: string[] = [];
 

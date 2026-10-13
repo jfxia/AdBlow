@@ -12,7 +12,7 @@
  * CDN，学它就会把正文图全废掉。
  */
 
-import { isIpLiteral, registrableDomain } from './score.ts';
+import { isIpLiteral, registrableDomain, unwrapCdnUrl } from './score.ts';
 
 /** 带外链的资源选择器（不含 a[href]：那是点击目标，不是加载资源）。 */
 const RESOURCE_SELECTOR = [
