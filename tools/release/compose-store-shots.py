@@ -50,15 +50,23 @@ def rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
 
 
 def compose_options(path: str) -> str:
-    """按原图背景色补到 1280×800。"""
+    """把 options 原始截图规整为 1280×800。
+
+    原始图可能是"整页"尺寸（宽高都超 1280×800），所以要**先裁到 1280×800**
+    再按底色补足，而不是只裁不缩放 —— 直接 paste 会让画布右边/下边露出空白。
+    """
     im = Image.open(path).convert("RGB")
     bg = im.getpixel((2, im.size[1] - 2))  # 左下角取样：页面底色
     canvas = Image.new("RGB", (W, H), bg)
-    # 居中横向放置；顶部对齐时更像"页面截图"
-    canvas.paste(im, (0, 0))
-    out = path.replace("store-1280x800-options", "store-1280x800-options")
+    # 从左上角取 1280×800 视口范围（页面内容自上而下，取顶部即可）
+    view = im.crop((0, 0, min(W, im.size[0]), min(H, im.size[1])))
+    canvas.paste(view, (0, 0))
+    out = path.replace("raw-options", "store-1280x800-options")
     canvas.save(out, "PNG", optimize=True)
-    return f"{os.path.basename(out)}  {im.size[0]}x{im.size[1]} → {W}x{H}（底色补白 {bg}）"
+    return (
+        f"{os.path.basename(out)}  原始 {im.size[0]}x{im.size[1]} → 取 "
+        f"{view.size[0]}x{view.size[1]} → {W}x{H}（底色补白 {bg}）"
+    )
 
 
 def autocrop_content(im: Image.Image, margin: int = 0) -> Image.Image:
@@ -133,7 +141,7 @@ def compose_popup(path: str) -> str:
 
 def main() -> None:
     print("合成商店截图\n")
-    for path in sorted(glob.glob(os.path.join(STORE, "store-1280x800-options-*.png"))):
+    for path in sorted(glob.glob(os.path.join(STORE, "raw-options-*.png"))):
         print("  " + compose_options(path))
     for path in sorted(glob.glob(os.path.join(STORE, "raw-popup-2x-*.png"))):
         print("  " + compose_popup(path))
