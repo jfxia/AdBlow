@@ -7,6 +7,10 @@
     "message": "自研广告过滤器：行为检测 + 自学习规则，配合 EasyList 系列表拦截弹窗、浮层、视频广告与点击劫持。",
     "description": "应用商店与扩展管理页显示的简介（≤132 字符）。"
   },
+  "appTitle": {
+    "message": "AdBlow-广告清理",
+    "description": "界面里的产品标题（popup/options 的页面标题与品牌行）。各语言同步翻译破折号后的说明，产品名不译。"
+  },
 
   "popupReading": { "message": "读取中…" },
   "popupNotApplicable": { "message": "当前页面不适用" },
@@ -29,7 +33,7 @@
     "message": "清空 $1 上 AdBlow 学到的全部规则？"
   },
 
-  "optionsTitle": { "message": "AdBlow 规则管理" },
+  "optionsTitle": { "message": "规则管理" },
   "optionsLede": {
     "message": "这里列出 AdBlow 在各站点上自己学到的隐藏规则，可逐条撤销。"
   },

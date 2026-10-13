@@ -20,7 +20,15 @@ import { fileURLToPath } from 'node:url';
 const root = new URL('../../', import.meta.url);
 const p = (rel) => fileURLToPath(new URL(rel, root));
 
-const DIST = p('dist');
+/**
+ * 输出目录，可用环境变量 `ADBLOW_DIST` 覆盖。
+ *
+ * 为什么需要：`dist/` 会被**正在加载该扩展的浏览器**占用（Windows 下
+ * 目录删除会 EPERM）。此时 `ADBLOW_DIST=dist-release pnpm build` 就能在别处
+ * 出一份干净产物，而不必关掉浏览器（也不必去杀进程 —— 实测杀掉会被守护进程
+ * 立刻重启，而且可能是用户自己的浏览器）。
+ */
+const DIST = process.env.ADBLOW_DIST ? p(process.env.ADBLOW_DIST) : p('dist');
 
 /** 自研 TS 转换插件。 */
 const adblowTs = {

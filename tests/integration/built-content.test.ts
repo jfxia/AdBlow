@@ -13,7 +13,12 @@ import { pilotPack } from '../../src/rules/sites/pilot.ts';
  * 需要先 `pnpm build`。dist/ 不存在时跳过并明确提示（用 `pnpm verify` 可一并完成）。
  */
 
-const distPath = new URL('../../dist/content.js', import.meta.url);
+// 支持 ADBLOW_DIST：浏览器正加载 dist/ 时（Windows 下目录被占用）改用备用产物目录，
+// 否则这组冒烟测试会被整体跳过（跳过是静默的，只体现为总数变少，容易误判成"测试丢了"）。
+const distPath = new URL(
+  `../../${process.env.ADBLOW_DIST ?? 'dist'}/content.js`,
+  import.meta.url,
+);
 const hasDist = existsSync(distPath);
 
 const fixture = readFileSync(new URL('../fixtures/pilot-category.html', import.meta.url), 'utf8');

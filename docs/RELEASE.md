@@ -16,6 +16,29 @@ node tools/release/package.mjs          # 构建 + 审计 + 打包 zip
 python tools/release/compose-store-shots.py   # 商店截图合成（需先跑 _probe/gen-store-shots.mjs）
 ```
 
+> **Windows 提示**：若浏览器正以"加载解压缩扩展"的方式加载 `dist/`，该目录会被占用，
+> 构建时 `rmSync(dist)` 会报 `EPERM`。此时用
+> `ADBLOW_DIST=dist-release node tools/release/package.mjs` 在备用目录构建并打包即可
+> （构建脚本、打包脚本、E2E 脚本与探针都支持这个环境变量）。
+> 不要去杀浏览器进程：实测 Edge 的实际浏览器进程与启动器不是同一个，
+> 杀掉启动器没用，而真身可能被守护进程重启。
+
+## 界面文案
+
+界面里的产品标题为 `appTitle`，各语言：
+
+| 语言 | 标题 |
+|---|---|
+| 中文（简体） | AdBlow-广告清理 |
+| English | AdBlow-Ad Cleaner |
+| 日本語 | AdBlow-広告クリーナー |
+| Français | AdBlow-Nettoyeur de pubs |
+| Español | AdBlow-Limpiador de anuncios |
+
+它同时用于 popup / options 的页面 `<title>` 与页面里的品牌行。
+**manifest 的 `name` 仍是 `AdBlow`**（即扩展管理页与商店列表显示的正式名称）——
+若要一并改成带后缀的名称，改 `_locales/*/messages.json` 的 `extName` 即可。
+
 ## 二、商店后台要填的内容
 
 - **名称**：AdBlow（`_locales/*/messages.json` 的 `extName`，各语言一致）

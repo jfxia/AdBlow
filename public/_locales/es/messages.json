@@ -7,6 +7,10 @@
     "message": "Bloquea ventanas emergentes, superposiciones, anuncios de vídeo y secuestro de clics mediante detección de comportamiento y autoaprendizaje.",
     "description": "Texto de la tienda y de la gestión de extensiones (máx. 132 caracteres)."
   },
+  "appTitle": {
+    "message": "AdBlow-Limpiador de anuncios",
+    "description": "Título del producto dentro de la interfaz (títulos de página y línea de marca). El nombre no se traduce; traducir la parte tras el guion."
+  },
 
   "popupReading": { "message": "Cargando…" },
   "popupNotApplicable": { "message": "No se aplica a esta página" },
@@ -33,7 +37,7 @@
     "message": "¿Borrar todas las reglas que AdBlow aprendió en $1?"
   },
 
-  "optionsTitle": { "message": "Gestión de reglas de AdBlow" },
+  "optionsTitle": { "message": "Gestión de reglas" },
   "optionsLede": {
     "message": "Reglas de ocultación que AdBlow aprendió por su cuenta, sitio por sitio. Puedes revocar cualquiera de ellas."
   },

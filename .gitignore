@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# 备用产物目录：浏览器正加载 dist/ 时用它构建（见 tools/build/build.mjs 的 ADBLOW_DIST）
+dist-release/
 coverage/
 
 # pnpm 把内容寻址存储建在工程根目录，绝不能入库

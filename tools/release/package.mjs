@@ -29,7 +29,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = new URL('../../', import.meta.url);
 const p = (rel) => fileURLToPath(new URL(rel, root));
-const DIST = p('dist');
+// 与构建脚本共用同一个输出目录覆盖（浏览器正加载 dist 时也能打包）
+const DIST = process.env.ADBLOW_DIST ? p(process.env.ADBLOW_DIST) : p('dist');
 const RELEASE_DIR = p('release');
 
 // ── 1) 先构建（除非显式跳过）──

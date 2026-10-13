@@ -7,6 +7,10 @@
     "message": "Blocks pop-ups, overlays, video ads and click hijacking via behavior detection, self-learning rules and EasyList lists.",
     "description": "Store / extension-management blurb (max 132 characters)."
   },
+  "appTitle": {
+    "message": "AdBlow-Ad Cleaner",
+    "description": "Product title shown inside the UI (page titles and brand row). The name stays; translate the part after the hyphen."
+  },
 
   "popupReading": { "message": "Loading…" },
   "popupNotApplicable": { "message": "Not applicable to this page" },
@@ -29,7 +33,7 @@
     "message": "Clear all rules AdBlow learned on $1?"
   },
 
-  "optionsTitle": { "message": "AdBlow rule manager" },
+  "optionsTitle": { "message": "Rule manager" },
   "optionsLede": {
     "message": "Hiding rules AdBlow learned on its own, site by site. You can revoke any of them individually."
   },

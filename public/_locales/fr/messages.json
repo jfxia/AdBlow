@@ -7,6 +7,10 @@
     "message": "Bloque les pop-ups, superpositions, publicités vidéo et détournements de clic par détection comportementale et auto-apprentissage.",
     "description": "Texte affiché dans le store et la gestion des extensions (132 caractères max)."
   },
+  "appTitle": {
+    "message": "AdBlow-Nettoyeur de pubs",
+    "description": "Titre du produit dans l'interface (titres de page et ligne de marque). Le nom reste ; traduire la partie après le tiret."
+  },
 
   "popupReading": { "message": "Chargement…" },
   "popupNotApplicable": { "message": "Non applicable à cette page" },
@@ -33,7 +37,7 @@
     "message": "Effacer toutes les règles apprises par AdBlow sur $1 ?"
   },
 
-  "optionsTitle": { "message": "Gestion des règles AdBlow" },
+  "optionsTitle": { "message": "Gestion des règles" },
   "optionsLede": {
     "message": "Voici les règles de masquage qu'AdBlow a apprises seul, site par site. Vous pouvez les révoquer une par une."
   },

@@ -24,7 +24,7 @@ const EDGE_CANDIDATES = [
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
 ];
 
-const EXT = fileURLToPath(new URL('../../dist', import.meta.url));
+const EXT = fileURLToPath(new URL(`../../${process.env.ADBLOW_DIST ?? 'dist'}`, import.meta.url));
 const E2E_DIR = fileURLToPath(new URL('../../_probe/e2e/', import.meta.url));
 const EXT_PORT = 9811;
 const LAND_PORT = 9812;
