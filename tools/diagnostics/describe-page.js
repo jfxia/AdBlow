@@ -29,6 +29,43 @@
 
   // ── ① 被隐藏的元素，按原因聚合 ──
   const hidden = Array.from(document.querySelectorAll('[' + H + ']'));
+
+  // ── ①b 关键区域状态：区分「被隐藏」与「根本没加载出来」 ──
+  //
+  // 为什么必须有这一节（2026-10-13）：用户报告"视频窗口/推荐栏被过滤"，
+  // 但诊断显示我们只隐藏了 2 个广告元素 —— 说明问题不在 DOM 隐藏，
+  // 而在**这些区块压根没渲染出来**（脚本没加载/执行=网络层拦截）。
+  // 这一节就是用来分清这两种情况的。
+  const areaState = (sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return { found: false };
+    const s = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    return {
+      found: true,
+      sel: desc(el),
+      display: s.display,
+      visibility: s.visibility,
+      size: Math.round(r.width) + 'x' + Math.round(r.height),
+      hiddenByUs: el.closest('[' + H + ']') !== null,
+    };
+  };
+  const imgs = Array.from(document.querySelectorAll('img'));
+  const keyAreas = {
+    播放器容器: areaState('#player, [class*="player"], [id*="player"]'),
+    视频标签数: document.querySelectorAll('video').length,
+    播放器库Hls: typeof window.Hls,
+    推荐网格_videoGrid: document.querySelectorAll('.video-grid').length,
+    推荐卡_videoCard: document.querySelectorAll('.video-card').length,
+    导航: areaState('nav, .navbar, [class*="navbar"]'),
+    标签云数: document.querySelectorAll('.tag').length,
+    图片: imgs.filter((i) => (i.naturalWidth || 0) > 0).length + '/' + imgs.length + ' 已加载',
+    我们的MAIN_world脚本: typeof window.__adblowScriptlets,
+  };
+  console.log('%c[关键区域状态]', 'font-weight:bold');
+  for (const [k, v] of Object.entries(keyAreas)) {
+    console.log('  ' + k + ': ' + (typeof v === 'object' ? JSON.stringify(v) : String(v)));
+  }
   const byReason = new Map();
   for (const el of hidden) {
     const reason = el.getAttribute(R) || '(未标原因：可能来自 site pack 或更早版本)';
@@ -137,6 +174,8 @@
     'URL: ' + location.href,
     '页面文字量: ' + textOf(document.body).length,
     'AdBlow 隐藏元素总数: ' + hidden.length,
+    '关键区域状态（区分"被隐藏"与"根本没加载"）:',
+    JSON.stringify(keyAreas, null, 1),
     '被隐藏元素（按原因 + 凭哪条证据）:',
     JSON.stringify(
       [...byReason].map(([reason, items]) => ({
