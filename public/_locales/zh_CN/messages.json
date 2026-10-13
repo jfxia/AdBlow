@@ -1,15 +1,12 @@
 {
-  "extName": {
-    "message": "AdBlow",
-    "description": "产品名，所有语言保持一致，不翻译。"
-  },
+  "extName": { "message": "AdBlow" },
   "extDesc": {
     "message": "自研广告过滤器：行为检测 + 自学习规则，配合 EasyList 系列表拦截弹窗、浮层、视频广告与点击劫持。",
-    "description": "应用商店与扩展管理页显示的简介（≤132 字符）。"
+    "description": "Store listing and extension-management summary. Must stay within 132 characters."
   },
   "appTitle": {
     "message": "AdBlow-广告清理",
-    "description": "界面里的产品标题（popup/options 的页面标题与品牌行）。各语言同步翻译破折号后的说明，产品名不译。"
+    "description": "Product title shown in the popup/options UI (page title and brand row). Keep the product name as-is; translate only the part after the hyphen."
   },
 
   "popupReading": { "message": "读取中…" },

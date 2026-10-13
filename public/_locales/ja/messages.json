@@ -1,15 +1,12 @@
 {
-  "extName": {
-    "message": "AdBlow",
-    "description": "製品名。全言語で同一。"
-  },
+  "extName": { "message": "AdBlow" },
   "extDesc": {
     "message": "動作検出と自己学習ルール、EasyList 系フィルタで、ポップアップ・オーバーレイ・動画広告・クリックハイジャックを遮断します。",
-    "description": "ストアと拡張機能管理画面に表示される説明（132 文字以内）。"
+    "description": "Store listing and extension-management summary. Must stay within 132 characters."
   },
   "appTitle": {
     "message": "AdBlow-広告クリーナー",
-    "description": "UI 内の製品タイトル（ページタイトルとブランド行）。製品名は訳さず、ハイフン以降を翻訳。"
+    "description": "Product title shown in the popup/options UI (page title and brand row). Keep the product name as-is; translate only the part after the hyphen."
   },
 
   "popupReading": { "message": "読み込み中…" },

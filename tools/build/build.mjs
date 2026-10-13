@@ -178,13 +178,36 @@ if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
     for (const key of used) if (!(key in cat)) problems.push(`${loc} 缺少 ${key}`);
     for (const key of Object.keys(cat)) if (!(key in base)) problems.push(`${loc} 多出 ${key}`);
   }
+
+  /**
+   * `description` 是**给译者的注释**（不会显示给用户）。两条约束：
+   *   1. 用英文 —— 翻译平台按英文注释工作
+   *   2. 各语言**完全一致** —— 它是说明，不是需要逐语言翻译的文案
+   * 曾经把它逐语言翻译了一遍（同一句注释写 5 份），还写过"产品名不翻译"这类
+   * 零信息量的句子；这条校验防止再漂回去。
+   */
+  const descSeen = new Map();
+  for (const [loc, cat] of catalogs) {
+    for (const [key, entry] of Object.entries(cat)) {
+      const desc = entry.description;
+      if (typeof desc !== 'string' || !desc) continue;
+      if (/[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]/.test(desc)) {
+        problems.push(`${loc} 的 ${key}.description 不是英文：${desc.slice(0, 40)}`);
+      }
+      const first = descSeen.get(key);
+      if (!first) descSeen.set(key, { desc, loc });
+      else if (first.desc !== desc) {
+        problems.push(`${key}.description 在各语言间不一致（${first.loc} vs ${loc}）`);
+      }
+    }
+  }
   if (problems.length) {
     console.error(`语言包校验失败：\n  ${problems.join('\n  ')}`);
     process.exit(1);
   }
   console.log(
     `语言包：${locales.length} 种（${locales.sort().join(', ')}），默认 ${defaultLocale}，` +
-      `界面共用 ${used.size} 个 key，全部一致`,
+      `界面共用 ${used.size} 个 key，全部一致；${descSeen.size} 条译者注释均为英文且各语言一致`,
   );
 }
 

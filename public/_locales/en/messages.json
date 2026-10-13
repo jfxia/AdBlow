@@ -1,15 +1,12 @@
 {
-  "extName": {
-    "message": "AdBlow",
-    "description": "Product name — kept identical in every language."
-  },
+  "extName": { "message": "AdBlow" },
   "extDesc": {
     "message": "Blocks pop-ups, overlays, video ads and click hijacking via behavior detection, self-learning rules and EasyList lists.",
-    "description": "Store / extension-management blurb (max 132 characters)."
+    "description": "Store listing and extension-management summary. Must stay within 132 characters."
   },
   "appTitle": {
     "message": "AdBlow-Ad Cleaner",
-    "description": "Product title shown inside the UI (page titles and brand row). The name stays; translate the part after the hyphen."
+    "description": "Product title shown in the popup/options UI (page title and brand row). Keep the product name as-is; translate only the part after the hyphen."
   },
 
   "popupReading": { "message": "Loading…" },
