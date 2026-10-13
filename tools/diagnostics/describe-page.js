@@ -156,16 +156,27 @@
   }
 
   // ── ② 正文/导航类元素里，有哪些被隐藏了 ──
+  //
+  // ⚠️ 分类器要能区分"真的是正文/导航"与"本身就是广告块"（2026-10-13 收紧）：
+  // 旧版把 ul/ol 一律当内容，于是广告轮播 `ul.streamer-box2`（0 文字、10 个外链）
+  // 每次都被报成"正文被隐藏"，发回来反而是噪音。现在要求
+  //   - 有实质文字（≥30 字），或含标题/段落等正文结构；
+  //   - 且判据不属于 linkfarm/overlay/click-layer/fake-close 这类**本身即广告**的原因。
   const CONTENT = 'article, main, nav, header, footer, .content, .post, .entry, .article, .nav, .menu, .sidebar, ul, ol';
+  const AD_ONLY_REASONS = new Set(['linkfarm', 'overlay', 'click-layer', 'fake-close']);
   const contentHidden = [];
   for (const el of Array.from(document.querySelectorAll(CONTENT))) {
     const hid = el.closest('[' + H + ']');
     if (!hid) continue;
+    const reason = hid.getAttribute(R) || '(未标)';
+    if (AD_ONLY_REASONS.has(reason)) continue;
     const t = textOf(el);
+    const hasProse = el.querySelector('h1,h2,h3,h4,p,article') !== null;
+    if (t.length < 30 && !hasProse) continue;
     contentHidden.push({
       element: desc(el),
       被隐藏的祖先: desc(hid),
-      原因: hid.getAttribute(R) || '(未标)',
+      原因: reason,
       文字字数: t.length,
       链接数: el.querySelectorAll('a[href]').length,
       摘录: t.slice(0, 40),
