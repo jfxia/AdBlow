@@ -41,3 +41,17 @@ python tools/release/compose-store-shots.py --force   # 明确要求覆盖时才
    打开「规则管理」→ 同样截取。
 
 截图完成后**立刻提交**，不要留在工作区。
+
+### 整屏截图要转成商店要求的尺寸
+
+商店只接受 **1280×800 或 640×400**，整屏截图（1920×1080 等）会被直接拒。用：
+
+```bash
+# 等比缩放 + 补边（内容全保留，最安全）
+python tools/release/fit-store-shot.py <你的截图.png> store/store-1280x800-popup-zhCN.png
+
+# 等比缩放 + 居中裁剪（画面更满，边缘会被切掉一点）
+python tools/release/fit-store-shot.py <你的截图.png> <输出.png> --crop
+```
+
+只做尺寸变换，不改动画面内容。若填错尺寸，最终清单会明确打印实际尺寸供核对。
