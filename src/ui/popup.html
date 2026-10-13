@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title data-i18n="appTitle"></title>
+    <link rel="stylesheet" href="ui.css" />
+    <style>
+      /* popup-only layout: size and sticky footer. Tokens come from ui.css */
+      body {
+        width: 320px;
+      }
+      header.brand {
+        padding: 11px 13px;
+        border-bottom: 1px solid var(--line);
+      }
+      main {
+        padding: 12px 13px 13px;
+        display: flex;
+        flex-direction: column;
+        gap: 11px;
+      }
+      .host {
+        font-weight: 650;
+        font-size: 13.5px;
+        word-break: break-all;
+        line-height: 1.35;
+      }
+      .host::before {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+        margin-right: 7px;
+        vertical-align: 2px;
+      }
+      #notice {
+        color: var(--muted);
+        font-size: 12.5px;
+        background: var(--bg-soft);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: 9px 11px;
+      }
+      .switch-row {
+        background: var(--bg-soft);
+      }
+      footer {
+        display: flex;
+        gap: 8px;
+        padding: 10px 13px;
+        border-top: 1px solid var(--line);
+        background: var(--bg-soft);
+      }
+      footer button:first-child {
+        margin-right: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="brand">
+      <img src="icons/icon-32.png" alt="" aria-hidden="true" />
+      <b data-i18n="appTitle"></b>
+      <span class="version" id="version"></span>
+    </header>
+
+    <main>
+      <div class="host" id="host" data-i18n="popupReading"></div>
+      <div id="notice" hidden></div>
+
+      <div class="card switch-row" id="toggle-row" hidden>
+        <input type="checkbox" id="enabled" />
+        <label class="switch" for="enabled" data-i18n-aria="popupToggleAria"></label>
+        <label for="enabled" data-i18n="popupToggleLabel"></label>
+      </div>
+
+      <dl class="stats" id="stats" hidden>
+        <div class="stat">
+          <dt data-i18n="popupStatRule"></dt>
+          <dd id="stat-rule">0</dd>
+        </div>
+        <div class="stat">
+          <dt data-i18n="popupStatHeuristic"></dt>
+          <dd id="stat-heuristic">0</dd>
+        </div>
+        <div class="stat">
+          <dt data-i18n="popupStatLearned"></dt>
+          <dd id="stat-learned">0</dd>
+        </div>
+      </dl>
+      <p class="hint" id="stats-hint" hidden></p>
+    </main>
+
+    <footer>
+      <button id="open-options" data-i18n="popupOpenOptions"></button>
+      <button id="clear-site" class="danger" data-i18n="popupClearSite"></button>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
