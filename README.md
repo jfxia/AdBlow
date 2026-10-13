@@ -206,9 +206,8 @@ Please respect those licenses when redistributing anything built from this repos
 
 ## License
 
-1. **GPL-3.0** for the whole project — simplest to reason about given the bundled lists.
-2. **MIT or Apache-2.0 for the code**, with a clear notice that built artifacts bundle
-   third-party GPL/CC BY-SA data and inherit those obligations.
+1. **GPL-3.0** for the whole project
+2. **MIT or Apache-2.0 for the code**
 
 
 ---
