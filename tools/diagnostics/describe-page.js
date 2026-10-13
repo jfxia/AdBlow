@@ -10,10 +10,34 @@
  * 它只读取页面现状并打印，**不会修改任何东西**。
  * 用来回答：哪些元素被隐藏了、是哪个机制干的、它们是不是正文/导航，
  * 以及有多少链接被别的元素盖住点不动。
+ *
+ * ## ⚠️ 确定性测量（v3）
+ *
+ * 前两版是"粘上就测"，于是两次测量的**时机/懒加载进度不同**会污染对比
+ * （实测用户 ON/OFF 两次的图片数差了 49，但无法排除是懒加载进度差异）。
+ * 现在脚本会先**自己滚到底、再滚回顶部并等待**，再开始测量 ——
+ * 这样 ON 与 OFF 两次的结果才可比。
  */
-(() => {
+(async () => {
   const R = 'data-adblow-reason';
   const H = 'data-adblow-hidden';
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ── 确定性准备：滚一遍触发懒加载，再回到顶部 ──
+  try {
+    const total = document.body.scrollHeight;
+    for (let y = 0; y < total; y += Math.max(400, Math.floor(innerHeight * 0.8))) {
+      scrollTo(0, y);
+      await sleep(220);
+    }
+    scrollTo(0, document.body.scrollHeight);
+    await sleep(1200);
+    scrollTo(0, 0);
+    await sleep(800);
+  } catch {
+    /* 忽略 */
+  }
 
   const desc = (el) => {
     if (!el || !el.tagName) return '(null)';
@@ -23,6 +47,23 @@
 
   // 注意：对已隐藏元素读 innerText 永远是空（元素不可见），必须用 textContent
   const textOf = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim();
+
+  /**
+   * 把站点 CDN 的 base64 路径还原成**真实来源域名**。
+   * 形如 `https://cache-2610.sgvafw.com/base/<base64 of https://fourhoi.com/...>.cache`
+   * —— 还原后才能分清"丢的是广告图还是内容图"。
+   */
+  const realSource = (url) => {
+    const m = /\/base\/([A-Za-z0-9+/=_-]+)/.exec(url || '');
+    if (!m) return null;
+    try {
+      const decoded = atob(m[1].replace(/-/g, '+').replace(/_/g, '/'));
+      const h = /^https?:\/\/([^/]+)/.exec(decoded);
+      return h ? h[1] : decoded.slice(0, 40);
+    } catch {
+      return null;
+    }
+  };
 
   const vw = innerWidth;
   const vh = innerHeight;
@@ -60,6 +101,28 @@
     导航: areaState('nav, .navbar, [class*="navbar"]'),
     标签云数: document.querySelectorAll('.tag').length,
     图片: imgs.filter((i) => (i.naturalWidth || 0) > 0).length + '/' + imgs.length + ' 已加载',
+    /**
+     * ❗图片按**真实来源域名**归类 —— ON/OFF 两次对比时，
+     * 一眼就能看出丢的是广告图（广告域）还是内容图（站点自己的 CDN）。
+     */
+    图片来源域名: (() => {
+      const m = {};
+      for (const i of imgs) {
+        const raw = i.getAttribute('src') || '';
+        const real = realSource(raw);
+        let key = '（非 base64 路径）';
+        if (real) key = real;
+        else {
+          try {
+            key = new URL(raw, location.href).hostname;
+          } catch {
+            /* 忽略 */
+          }
+        }
+        m[key] = (m[key] || 0) + 1;
+      }
+      return m;
+    })(),
     我们的MAIN_world脚本: typeof window.__adblowScriptlets,
   };
   console.log('%c[关键区域状态]', 'font-weight:bold');

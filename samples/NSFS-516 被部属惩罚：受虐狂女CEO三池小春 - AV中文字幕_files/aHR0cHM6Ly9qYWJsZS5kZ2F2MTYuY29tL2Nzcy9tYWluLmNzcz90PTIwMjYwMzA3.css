@@ -1,0 +1,239 @@
+.cookiesBanner,
+.alert.alert-warning,
+.bn-title-mobile{
+    display: none !important;
+}
+.video-block{
+    width: 100%;
+}
+.footer-links {
+    color: white;
+    text-align: center;
+    padding: 20px 0; /* 给上方和下方留出一些内边距 */
+    margin-top: 30px; /* 给 footer 上方留一些外边距，避免和内容紧挨着 */
+}
+
+/* 设置链接样式 */
+.footer-links a {
+    color: white;
+    text-decoration: none;
+    margin: 10px 15px; /* 上下 10px，左右 15px */
+    font-size: 14px;
+
+    /* 添加以下属性隐藏多余文字 */
+    display: inline-block; /* 确保 text-overflow 生效 */
+    max-width: 100px; /* 设置一个最大宽度，根据需要调整 */
+    overflow: hidden; /* 超出部分隐藏 */
+    text-overflow: ellipsis; /* 用省略号表示被隐藏的文字 */
+    white-space: nowrap; /* 禁止换行 */
+    text-align: center; /* 居中对齐文字 */
+}
+
+/* 让链接在鼠标悬停时显示高亮 */
+.footer-links a:hover {
+    text-decoration: underline;
+    color: #ff6600;
+}
+
+/* 响应式设计：调整链接布局为网格布局，每行显示 4 个 */
+@media (max-width: 768px) {
+    .footer-links {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr); /* 每行 4 列 */
+        gap: 15px 10px; /* 增加上下和左右的网格间距 */
+        justify-items: center; /* 水平居中 */
+        padding: 15px 0; /* 减少内边距 */
+    }
+
+    .footer-links a {
+        margin: 0; /* 移除单独的外边距，使用网格间距 */
+        font-size: 14px;
+    }
+}
+
+@media (max-width: 480px) {
+    /* 在更小屏幕上保持 1 行 4 个链接，但字体更大 */
+    .footer-links a {
+        font-size: 14px; /* 更大的字体 */
+    }
+
+    .footer-links {
+        gap: 20px 10px; /* 为小屏幕增加更多的间隔 */
+    }
+}
+
+
+
+/* 图标广告容器 */
+.adhidden {
+    display: none !important;
+}
+
+.icon-ads,
+.remaining-ads {
+    display: flex;
+    flex-wrap: wrap; /* 允许换行 */
+    justify-content: center; /* 水平居中 */
+    gap: 10px; /* 子元素之间的间距 */
+    padding: 5px;
+    max-width: 1320px;
+    margin: 0 auto;
+}
+.icon-ad {
+    width: calc(20% - 10px); /* 每行显示 5 个广告 */
+    text-align: center;
+    display: flex;
+    flex-direction: column; /* 子元素纵向排列 */
+    align-items: center; /* 子元素水平居中 */
+    overflow: visible; /* 确保子元素不会被裁剪 */
+}
+
+.icon-image-container {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1; /* 保证正方形比例 */
+    overflow: hidden; /* 保持图片裁剪 */
+    border-radius: 10px;
+    background-color: #000; /* 确保图片容器背景色 */
+    flex-shrink: 0; /* 确保图片容器不会被压缩 */
+}
+
+
+.icon-image {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* 图片按比例裁剪填充 */
+}
+
+.icon-title {
+    font-size: 14px; /* 字体大小 */
+    line-height: 1; /* 设置行高 */
+    margin-top: 5px; /* 图片与标题之间的间距 */
+    max-width: calc(4em); /* 1 个字宽度约等于 1em */
+    overflow: hidden; /* 超出部分隐藏 */
+    text-overflow: ellipsis; /* 显示省略号 */
+    white-space: nowrap; /* 禁止换行 */
+    text-align: center; /* 标题居中 */
+    color: #fff; /* 设置文字颜色 */
+}
+
+/* 按钮容器样式，用于居中整个页面 */
+.toggle-button-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    padding: 10px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.toggle-button {
+    flex: 0 0 calc(100%);
+    padding: 10px 20px;
+    background-color: #007bff;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.toggle-button:hover {
+    background-color: #0056b3;
+}
+
+/* PC端调整按钮宽度 */
+@media (min-width: 1024px) {
+    .toggle-button {
+        flex: 0 0 calc(25% - 10px);
+    }
+    .icon-ad {
+        width: calc(10% - 10px); /* 在PC端时一行10个图标 */
+        height: 60px;
+    }
+}
+
+/* 默认隐藏广告 */
+.mobile-only {
+    display: none;
+}
+
+/* 移动设备显示广告 */
+@media (max-width: 768px) {
+    .mobile-only {
+        display: block;
+    }
+}
+
+#videoContainer {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+}
+/* PC 高度为 510px，移动端为 300px */
+#videoContainer {
+    height: 100%;}
+
+#videoContainer.mobile {
+    height: 100%;
+}
+
+.video-js {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+#playButton {
+    position: absolute;
+    width: 80px;
+    height: 80px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    z-index: 2;
+}
+#playButton::after {
+    content: '';
+    display: block;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 15px 0 15px 30px;
+    border-color: transparent transparent transparent black;
+    margin-left: 5px;
+}
+.video-js .vjs-big-play-button {
+    display: none !important;
+}
+.googlelink{
+    position: absolute;
+    opacity: 0;
+}
+
+/* 第一个owl-carousel图片宽高比3:2 */
+#site-content > .jable-carousel:first-of-type .video-img-box .img-box {
+    position: relative;
+    width: 100%;
+    padding-top: 66.67%; /* 3:2比例 = 2/3 ≈ 66.67% */
+    overflow: hidden;
+}
+
+#site-content > .jable-carousel:first-of-type .video-img-box .img-box img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* 保持比例铺满容器，裁剪溢出部分 */
+}

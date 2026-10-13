@@ -1,0 +1,40 @@
+(() => {
+  'use strict';
+  const supported = new Set(['zh-cn','zh-tw','en','ja','ko','ms','th','de','fr','vi','id','fil','hi','pt','ru','ar','es']);
+  const normalize = value => {
+    const code = String(value || '').toLowerCase().replace('_', '-');
+    if (code === 'zh') return 'zh-cn';
+    return supported.has(code) ? code : supported.has(code.split('-')[0]) ? code.split('-')[0] : '';
+  };
+  const pathCode = normalize(location.pathname.split('/').filter(Boolean)[0]);
+  const stored = ['hdavx_language_v2','vjav-language','txxx-language','site-language','language','lang'].map(key => normalize(localStorage.getItem(key))).find(Boolean);
+  const language = pathCode || normalize(document.documentElement.lang) || stored || 'zh-cn';
+  const packs = {
+    'zh-cn':['我的会员中心','管理当前项目的收藏、片单与本机观看记录。','我的收藏','查看收藏的影片','我的片单','管理个人片单','退出当前账号','公开片单','观看记录','记录只保存在当前浏览器','分享设定','私有片单','仅自己可见，适合个人收藏整理','其他会员可以浏览和分享','创建片单'],
+    'zh-tw':['我的會員中心','管理目前專案的收藏、片單與本機觀看記錄。','我的收藏','查看收藏的影片','我的片單','管理個人片單','登出目前帳號','公開片單','觀看記錄','記錄只儲存在目前瀏覽器','分享設定','私人片單','僅自己可見，適合個人收藏整理','其他會員可以瀏覽和分享','建立片單'],
+    en:['My account','Manage favorites, playlists, and local watch history for this site.','My favorites','View saved videos','My playlists','Manage personal playlists','Sign out','Public playlists','Watch history','History is stored only in this browser','Sharing','Private playlist','Only visible to you','Other members can browse and share it','Create playlist'],
+    ja:['マイアカウント','このサイトのお気に入り、プレイリスト、視聴履歴を管理します。','お気に入り','保存した動画を見る','マイリスト','個人プレイリストを管理','ログアウト','公開プレイリスト','視聴履歴','履歴はこのブラウザにのみ保存されます','共有設定','非公開プレイリスト','自分だけが閲覧できます','他の会員が閲覧・共有できます','プレイリストを作成'],
+    ko:['내 회원 센터','이 사이트의 즐겨찾기, 재생목록 및 시청 기록을 관리합니다.','즐겨찾기','저장한 동영상 보기','내 재생목록','개인 재생목록 관리','로그아웃','공개 재생목록','시청 기록','기록은 현재 브라우저에만 저장됩니다','공유 설정','비공개 재생목록','나만 볼 수 있습니다','다른 회원이 보고 공유할 수 있습니다','재생목록 만들기'],
+    de:['Mein Konto','Favoriten, Playlists und lokalen Verlauf dieser Website verwalten.','Meine Favoriten','Gespeicherte Videos ansehen','Meine Playlists','Persönliche Playlists verwalten','Abmelden','Öffentliche Playlists','Wiedergabeverlauf','Der Verlauf wird nur in diesem Browser gespeichert','Freigabe','Private Playlist','Nur für dich sichtbar','Andere Mitglieder können sie ansehen und teilen','Playlist erstellen'],
+    fr:['Mon compte','Gérez les favoris, playlists et l’historique local de ce site.','Mes favoris','Voir les vidéos enregistrées','Mes playlists','Gérer mes playlists','Se déconnecter','Playlists publiques','Historique','L’historique est conservé uniquement dans ce navigateur','Partage','Playlist privée','Visible uniquement par vous','Les autres membres peuvent la consulter et la partager','Créer la playlist'],
+    es:['Mi cuenta','Gestiona favoritos, listas y el historial local de este sitio.','Mis favoritos','Ver vídeos guardados','Mis listas','Gestionar listas personales','Cerrar sesión','Listas públicas','Historial','El historial solo se guarda en este navegador','Compartir','Lista privada','Solo visible para ti','Otros miembros pueden verla y compartirla','Crear lista'],
+    pt:['Minha conta','Gerencie favoritos, playlists e histórico local deste site.','Meus favoritos','Ver vídeos salvos','Minhas playlists','Gerenciar playlists pessoais','Sair','Playlists públicas','Histórico','O histórico fica salvo apenas neste navegador','Compartilhamento','Playlist privada','Visível apenas para você','Outros membros podem ver e compartilhar','Criar playlist'],
+    ru:['Мой аккаунт','Управляйте избранным, плейлистами и локальной историей сайта.','Избранное','Смотреть сохранённые видео','Мои плейлисты','Управление плейлистами','Выйти','Публичные плейлисты','История просмотров','История хранится только в этом браузере','Доступ','Приватный плейлист','Виден только вам','Другие участники могут смотреть и делиться','Создать плейлист'],
+    th:['บัญชีของฉัน','จัดการรายการโปรด เพลย์ลิสต์ และประวัติการรับชมของเว็บไซต์นี้','รายการโปรด','ดูวิดีโอที่บันทึกไว้','เพลย์ลิสต์ของฉัน','จัดการเพลย์ลิสต์ส่วนตัว','ออกจากระบบ','เพลย์ลิสต์สาธารณะ','ประวัติการรับชม','ประวัติจะถูกเก็บไว้ในเบราว์เซอร์นี้เท่านั้น','การแชร์','เพลย์ลิสต์ส่วนตัว','มีเพียงคุณที่ดูได้','สมาชิกอื่นสามารถดูและแชร์ได้','สร้างเพลย์ลิสต์'],
+    vi:['Tài khoản của tôi','Quản lý video yêu thích, danh sách phát và lịch sử xem của trang này.','Yêu thích','Xem video đã lưu','Danh sách của tôi','Quản lý danh sách cá nhân','Đăng xuất','Danh sách công khai','Lịch sử xem','Lịch sử chỉ được lưu trong trình duyệt này','Chia sẻ','Danh sách riêng tư','Chỉ bạn có thể xem','Thành viên khác có thể xem và chia sẻ','Tạo danh sách'],
+    id:['Akun saya','Kelola favorit, daftar putar, dan riwayat lokal situs ini.','Favorit saya','Lihat video tersimpan','Daftar putar saya','Kelola daftar pribadi','Keluar','Daftar putar publik','Riwayat tontonan','Riwayat hanya disimpan di browser ini','Berbagi','Daftar putar pribadi','Hanya terlihat oleh Anda','Anggota lain dapat melihat dan membagikannya','Buat daftar putar'],
+    ms:['Akaun saya','Urus kegemaran, senarai main dan sejarah tontonan laman ini.','Kegemaran saya','Lihat video disimpan','Senarai main saya','Urus senarai peribadi','Log keluar','Senarai main awam','Sejarah tontonan','Sejarah hanya disimpan dalam pelayar ini','Perkongsian','Senarai main peribadi','Hanya anda boleh melihatnya','Ahli lain boleh melihat dan berkongsi','Cipta senarai main'],
+    fil:['Aking account','Pamahalaan ang mga paborito, playlist, at lokal na history ng site na ito.','Mga paborito','Tingnan ang naka-save na video','Mga playlist ko','Pamahalaan ang personal na playlist','Mag-sign out','Mga pampublikong playlist','History ng panonood','Sa browser na ito lamang naka-save ang history','Pagbabahagi','Pribadong playlist','Ikaw lamang ang makakakita','Maaaring tingnan at ibahagi ng ibang miyembro','Gumawa ng playlist'],
+    hi:['मेरा खाता','इस साइट के पसंदीदा वीडियो, प्लेलिस्ट और स्थानीय इतिहास प्रबंधित करें।','मेरे पसंदीदा','सहेजे गए वीडियो देखें','मेरी प्लेलिस्ट','निजी प्लेलिस्ट प्रबंधित करें','साइन आउट','सार्वजनिक प्लेलिस्ट','देखने का इतिहास','इतिहास केवल इसी ब्राउज़र में सहेजा जाता है','साझाकरण','निजी प्लेलिस्ट','केवल आपको दिखाई देगी','अन्य सदस्य इसे देख और साझा कर सकते हैं','प्लेलिस्ट बनाएँ'],
+    ar:['حسابي','إدارة المفضلة وقوائم التشغيل وسجل المشاهدة المحلي لهذا الموقع.','المفضلة','عرض الفيديوهات المحفوظة','قوائمي','إدارة القوائم الشخصية','تسجيل الخروج','قوائم عامة','سجل المشاهدة','يُحفظ السجل في هذا المتصفح فقط','إعدادات المشاركة','قائمة خاصة','مرئية لك فقط','يمكن للأعضاء الآخرين عرضها ومشاركتها','إنشاء قائمة'],
+  };
+  const pack = packs[language] || packs.en;
+  function text(selector,index){const element=document.querySelector(selector);if(element&&element.textContent!==pack[index])element.textContent=pack[index]}
+  function apply(){
+    const dialog=document.querySelector('.sm-member-dialog');
+    if(dialog?.classList.contains('is-authenticated')){text('.sm-dialog-inner>h2',0);text('.sm-dialog-inner>p',1)}
+    text('[data-sm-member-menu] [data-sm-favorites] b',2);text('[data-sm-member-menu] [data-sm-favorites] small',3);text('[data-sm-member-menu] [data-sm-playlists] b',4);text('[data-sm-member-menu] [data-sm-playlists] small',5);text('[data-sm-member-menu]>[data-sm-logout]',6);text('[data-sm-public]',7);text('[data-sm-local-history]',8);text('[data-sm-local-history]+small',9);
+    text('.sm-visibility legend',10);text('.sm-visibility input[value="0"]+span b',11);text('.sm-visibility input[value="0"]+span small',12);text('.sm-visibility input[value="1"]+span b',7);text('.sm-visibility input[value="1"]+span small',13);text('.sm-create>button',14);
+  }
+  apply();new MutationObserver(apply).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class','hidden']});
+})();
