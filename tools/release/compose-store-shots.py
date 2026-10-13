@@ -56,6 +56,13 @@ def compose_options(path: str) -> str:
     再按底色补足，而不是只裁不缩放 —— 直接 paste 会让画布右边/下边露出空白。
     """
     im = Image.open(path).convert("RGB")
+    # Guard: refuse to build a deliverable from an undersized capture, so a bad raw
+    # can never silently become the store screenshot.
+    if im.size[0] < W or im.size[1] < H:
+        raise SystemExit(
+            f"[!!] {os.path.basename(path)} is {im.size[0]}x{im.size[1]}, smaller than the "
+            f"required {W}x{H} — re-capture before composing."
+        )
     bg = im.getpixel((2, im.size[1] - 2))  # 左下角取样：页面底色
     canvas = Image.new("RGB", (W, H), bg)
     # 从左上角取 1280×800 视口范围（页面内容自上而下，取顶部即可）
