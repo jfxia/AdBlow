@@ -364,6 +364,17 @@ export function createJudge(
 }
 
 /**
+ * 绝对不允许隐藏的根元素。
+ *
+ * 隐藏 `<body>` / `<html>` 等于**清空整个页面** —— 这在任何情况下都不是
+ * 合法的广告处理动作。加这条硬性不变量有两个理由：
+ *   1. 它是最后一道"整页消失"保险（比页级预算更硬）
+ *   2. 实测踩到过：某个测试把 `data-adblow-hidden` 留在了 `<body>` 上，
+ *      说明引擎确实有可能把根元素判成目标
+ */
+const NEVER_HIDE_TAGS = new Set(['HTML', 'BODY', 'HEAD']);
+
+/**
  * 用内联样式隐藏。
  *
  * 为什么不用样式表：内联 `!important` 在作者源里优先级最高，不会被站点后续
@@ -386,6 +397,7 @@ export function createJudge(
  *   必须能一眼看出是规则包、启发式、覆盖层、链接农场还是列表 cosmetic 干的。
  */
 export function hideElement(el: Element, reason?: string): void {
+  if (NEVER_HIDE_TAGS.has(el.tagName)) return;
   el.setAttribute('data-adblow-hidden', '1');
   if (reason) el.setAttribute(REASON_ATTR, reason);
   const style = (el as HTMLElement).style;
@@ -669,6 +681,12 @@ export function findLinkFarms(
   const candidates: Element[] = [];
   for (const el of Array.from(root.querySelectorAll(FARM_TAGS))) {
     if (isInsideHidden(el)) continue;
+    // ❗里面已经有被隐藏的农场 → 这是**同一个农场的外层容器**，不要再吃一层。
+    // 实测（dgav40）：一个页脚农场被逐层隐藏了 4 层
+    // （#script_seo_links → .footer-links → section.footer-partners → .container），
+    // 每轮父容器都"装着同一批外链"于是又被判定一次。这正是"外层容器被吃掉"
+    // 的机制 —— 已经处理过的证据不该被重复采信。
+    if (el.querySelector(`[${HIDDEN_ATTR}][${REASON_ATTR}="linkfarm"]`) !== null) continue;
 
     const domains = new Set<string>();
     for (const a of Array.from(el.querySelectorAll('a[href]'))) {

@@ -169,8 +169,24 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
   const pageReg = registrableDomain(ctx.pageHost);
   const base = `https://${ctx.pageHost}`;
 
+  /**
+   * ❗已经被我们隐藏的后代不再贡献证据。
+   *
+   * 为什么必须这样（实测发现）：隐藏一个广告/农场之后，**它的父容器仍然
+   * "装着同一批外链、同一批素材"**，于是下一轮又被判定为广告，逐层往上吃 ——
+   * 症状就是"外层容器连同正文一起消失"。
+   * 实测证据：dgav40 一个页脚农场被连隐藏了 4 层
+   * （`#script_seo_links` → `.footer-links` → `section.footer-partners` → `.container`）。
+   *
+   * 已经处理过的证据不该被重复采信：父容器若没有**自己的**新证据，
+   * 就不该被隐藏。
+   */
+  const alreadyHandled = (node: Element): boolean =>
+    node.parentElement?.closest('[data-adblow-hidden]') !== null;
+
   const addLinks = (links: Element[]): void => {
     for (const a of links) {
+      if (alreadyHandled(a)) continue;
       const href = a.getAttribute('href') ?? '';
       if (!isAbsoluteUrl(href)) continue; // 站内相对链接不算
       let parsed: URL;
@@ -198,6 +214,7 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
 
   const addMedia = (media: Element[]): void => {
     for (const m of media) {
+      if (alreadyHandled(m)) continue;
       const url = mediaUrl(m);
       if (!isAbsoluteUrl(url)) continue;
       let parsed: URL;
@@ -223,6 +240,7 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
 
   const addIframes = (frames: Element[]): void => {
     for (const f of frames) {
+      if (alreadyHandled(f)) continue;
       const src = f.getAttribute('src') ?? '';
       // about:blank / srcdoc / javascript: 的 iframe 是脚本注入内容的常见载体
       if (!isAbsoluteUrl(src)) {
