@@ -208,12 +208,11 @@ node tools/e2e/acceptance.mjs   # 23 类广告，在真实浏览器里实测
 
 过滤列表是各自维护者的成果，不在本仓库里，构建时抓取：
 
-| 列表 | 许可 |
-|---|---|
-| [EasyList](https://easylist.to/)、[EasyList China](https://easylist.to/)、[EasyPrivacy](https://easylist.to/) | GPLv3 / CC BY-SA 3.0 |
-| [uBlock Origin assets](https://github.com/uBlockOrigin/uAssets)（filters、privacy、badware） | GPLv3 |
+- EasyList、EasyList China、EasyPrivacy： GPL v3 / CC BY-SA 3.0 
 
-再分发由本仓库构建出来的任何东西时，请遵守上述许可。
+- uBlock Origin assets（filters、privacy、badware）：  GPL v3 
+
+再分发由本仓库构建出来的任何交付物时，请遵守上述许可。
 
 ## 许可
 
