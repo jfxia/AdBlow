@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import glob
 import os
+import sys
 
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -49,7 +50,7 @@ def rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
     return mask
 
 
-def compose_options(path: str) -> str:
+def compose_options(path: str, force: bool = False) -> str:
     """把 options 原始截图规整为 1280×800。
 
     原始图可能是"整页"尺寸（宽高都超 1280×800），所以要**先裁到 1280×800**
@@ -69,6 +70,12 @@ def compose_options(path: str) -> str:
     view = im.crop((0, 0, min(W, im.size[0]), min(H, im.size[1])))
     canvas.paste(view, (0, 0))
     out = path.replace("raw-options", "store-1280x800-options")
+    if os.path.exists(out) and not force:
+        # 交付物是**手工挑选**的资产（见 store/README.md）：默认绝不覆盖。
+        return (
+            f"{os.path.basename(out)}  已存在，跳过（要覆盖请加 --force）"
+            f"  ← 现有 {Image.open(out).size[0]}x{Image.open(out).size[1]}"
+        )
     canvas.save(out, "PNG", optimize=True)
     return (
         f"{os.path.basename(out)}  原始 {im.size[0]}x{im.size[1]} → 取 "
@@ -110,7 +117,7 @@ def autocrop_content(im: Image.Image, margin: int = 0) -> Image.Image:
     )
 
 
-def compose_popup(path: str) -> str:
+def compose_popup(path: str, force: bool = False) -> str:
     """品牌渐变底 + 圆角白卡片 + 阴影，居中放 popup 的 2 倍图。"""
     raw = Image.open(path).convert("RGBA")
     popup = autocrop_content(raw)
@@ -139,6 +146,9 @@ def compose_popup(path: str) -> str:
     canvas.alpha_composite(card, (sx, sy))
 
     out = path.replace("raw-popup-2x", "store-1280x800-popup")
+    if os.path.exists(out) and not force:
+        # 交付物可能被手工替换过（见 store/README.md）→ 默认绝不覆盖
+        return f"{os.path.basename(out)}  已存在，跳过（要覆盖请加 --force）"
     canvas.convert("RGB").save(out, "PNG", optimize=True)
     return (
         f"{os.path.basename(out)}  原图 {raw.size[0]}x{raw.size[1]} → 裁到 {card_w}x{card_h}(2x)"
@@ -147,17 +157,19 @@ def compose_popup(path: str) -> str:
 
 
 def main() -> None:
-    print("合成商店截图\n")
+    force = "--force" in sys.argv
+    print("合成商店截图" + ("（--force：允许覆盖已有交付物）" if force else "") + "\n")
     for path in sorted(glob.glob(os.path.join(STORE, "raw-options-*.png"))):
-        print("  " + compose_options(path))
+        print("  " + compose_options(path, force))
     for path in sorted(glob.glob(os.path.join(STORE, "raw-popup-2x-*.png"))):
-        print("  " + compose_popup(path))
+        print("  " + compose_popup(path, force))
 
     print("\n最终素材：")
     for path in sorted(glob.glob(os.path.join(STORE, "store-1280x800-*.png"))):
         im = Image.open(path)
         size_ok = im.size == (W, H)
-        print(f"  {os.path.basename(path):44s} {im.size[0]}x{im.size[1]}  {'[OK]' if size_ok else '[!!] 尺寸不合规'}")
+        note = "" if size_ok else "（手工素材，未必是 1280x800 —— 见 store/README.md，不要自动覆盖）"
+        print(f"  {os.path.basename(path):44s} {im.size[0]}x{im.size[1]}  {note}")
 
 
 if __name__ == "__main__":

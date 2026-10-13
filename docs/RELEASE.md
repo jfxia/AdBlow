@@ -8,6 +8,10 @@
 | 商店列表图标 | `store/icon-300.png`（300×300） |
 | 商店截图 | `store/store-1280x800-options-{zhCN,enUS}.png`、`store/store-1280x800-popup-{zhCN,enUS}.png` |
 
+> ⚠️ **截图是手工资产，不是构建产物**：见 [`store/README.md`](../store/README.md)。
+> 它们可能是"访问真实站点后点开弹窗"的整屏截图，尺寸未必是 1280×800 那种精确值，
+> **看起来不规整是正常的**。不要自动覆盖，也不要 `git checkout` 还原；改完立刻提交。
+
 重新生成：
 
 ```bash
