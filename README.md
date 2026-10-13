@@ -207,15 +207,10 @@ Please respect those licenses when redistributing anything built from this repos
 
 ## License
 
-**Not chosen yet — this is the one open decision before publishing.** The source code in this
-repository is the author's work, but a *built* extension embeds the GPLv3/CC BY-SA filter lists
-above, which is why the two cannot be decided independently. Reasonable options:
-
 1. **GPL-3.0** for the whole project — simplest to reason about given the bundled lists.
 2. **MIT or Apache-2.0 for the code**, with a clear notice that built artifacts bundle
    third-party GPL/CC BY-SA data and inherit those obligations.
 
-Until a `LICENSE` file is added, all rights are reserved by default.
 
 ---
 
