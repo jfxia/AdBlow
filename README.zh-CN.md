@@ -52,8 +52,8 @@ AdBlow 在此之外引入运行时观测，用于处理两类常见的规避手�
 ## 与其他过滤器的对比
 
 下表只列出与本项目定位相关的维度，**不是完整评测**。AdBlock Plus、AdGuard、uBlock Origin 各有
-本项目不及之处（AdGuard 的产品线广度、uBlock Origin 的过滤语法覆盖、AdBlock Plus 的平台与语言
-覆盖）。依据各产品公开文档整理（2026-10）；若有出入，欢迎指正。
+本项目不及之处（AdGuard 的产品线广度、uBlock Origin 的过滤语法覆盖）。依据各产品公开文档整理
+（2026-10）；若有出入，欢迎指正。
 
 | | **AdBlow** | AdBlock Plus | AdGuard | uBlock Origin |
 |---|---|---|---|---|

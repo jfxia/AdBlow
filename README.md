@@ -59,8 +59,8 @@ carries one.
 
 Only the dimensions this project's positioning depends on are listed; this is not a full
 evaluation. AdBlock Plus, AdGuard and uBlock Origin each lead on something AdBlow does not
-(AdGuard's product breadth, uBlock Origin's filter-syntax coverage, AdBlock Plus's platform and
-language reach). Compiled from public documentation in October 2026; corrections are welcome.
+(AdGuard's product breadth, uBlock Origin's filter-syntax coverage). Compiled from public
+documentation in October 2026; corrections are welcome.
 
 | | **AdBlow** | AdBlock Plus | AdGuard | uBlock Origin |
 |---|---|---|---|---|
