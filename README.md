@@ -218,71 +218,15 @@ public/            manifest, _locales, icons
 
 ### Architecture
 
-```mermaid
-flowchart TB
-  lists["Filter lists<br/>EasyList family, fetched at build time"]
-  subgraph build["Build pipeline"]
-    compile["Compiler<br/>dedupe, validate, pack domains"]
-  end
-  subgraph sw["Background service worker"]
-    rulesets["Static DNR rulesets (6)"]
-    dynamic["Dynamic rules<br/>learned domains, site packs"]
-    shards["Element-hiding shards (256)<br/>served on demand"]
-    stats["Per-site settings and statistics<br/>chrome.storage.local"]
-  end
-  subgraph isolated["Content script - isolated world"]
-    pristine["Pristine snapshot and diff"]
-    judge["Ad-likeness scoring"]
-    hide["Hiding: display + visibility + pointer-events"]
-    verify["Verification pass: re-hide what the site restores"]
-    learn["Self-learning store"]
-    wall["Anti-adblock wall detection"]
-  end
-  subgraph main["Content script - MAIN world"]
-    guards["window.open, click-hijack and storage guards"]
-    runtime["Scriptlet runtime (13 canonical rules)"]
-  end
-  page["Page under test"]
+<img src="docs/diagrams/architecture-en.png" width="880" alt="AdBlow architecture: filter lists compiled into rulesets and hiding shards, four layers from the service worker down to the MAIN world">
 
-  lists --> compile --> rulesets
-  compile --> shards
-  compile --> runtime
-  rulesets -->|"blocks requests"| page
-  dynamic -->|"blocks requests"| page
-  shards --> hide
-  pristine --> judge --> hide --> verify
-  hide --> learn
-  learn -->|"promoted rules"| dynamic
-  stats --- learn
-  wall -->|"neutralised only after confirmation"| hide
-  guards --> page
-  runtime --> page
-```
+*Source: [`architecture-en.mmd`](docs/diagrams/architecture-en.mmd). Rendered with Mermaid into a committed PNG, so it also displays where GitHub's client-side Mermaid does not run.*
 
 ### Request and judgement flow
 
-```mermaid
-flowchart TD
-  start["document_start"] --> a["MAIN world: guards installed, scriptlets applied"]
-  a --> b["Isolated world: pristine snapshot of the document"]
-  b --> c["Requests matched against static DNR rulesets"]
-  c --> d["Scan: site packs, list hiding rules, behaviour scoring"]
-  d --> e{"Judged ad-like?"}
-  e -->|"yes"| f["Hide with display, visibility and pointer-events; record the reason"]
-  e -->|"no"| g["Leave untouched"]
-  f --> h["Verification pass: a site that restores display is re-hidden"]
-  h --> i["Record hits"]
-  i --> j{"3 cumulative hits?"}
-  j -->|"yes"| k["Promote: learned selector or learned domain rule, scoped to this site"]
-  j -->|"no"| l["Keep observing"]
-  k --> m["Rule manager: review, revoke, export"]
-  d --> n["Wall detection - read only, never modifies the page"]
-  n --> o{"Wall found?"}
-  o -->|"yes"| p["Popup reports it; the page is left exactly as it is"]
-  p --> q{"Confirmed for this site?"}
-  q -->|"yes"| r["Hide the gate, restore the content it hid; ad blocking stays on"]
-  q -->|"no"| p
-```
+<img src="docs/diagrams/flow-en.png" width="560" alt="AdBlow request and judgement flow, including the point where an anti-adblock wall waits for the user to confirm">
+
+*Source: [`flow-en.mmd`](docs/diagrams/flow-en.mmd). Rendered with Mermaid into a committed PNG.*
 
 ## Safety invariants
 

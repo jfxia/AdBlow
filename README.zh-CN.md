@@ -198,71 +198,15 @@ public/            manifest、_locales、图标
 
 ### 架构
 
-```mermaid
-flowchart TB
-  lists["过滤列表<br/>EasyList 系列，构建期抓取"]
-  subgraph build["构建流水线"]
-    compile["编译器<br/>去重、校验、域名打包"]
-  end
-  subgraph sw["后台 service worker"]
-    rulesets["静态 DNR 规则集（6 卷）"]
-    dynamic["动态规则<br/>自学习域名、站点规则包"]
-    shards["元素隐藏分片（256 个）<br/>按需下发"]
-    stats["站点设置与统计<br/>chrome.storage.local"]
-  end
-  subgraph isolated["内容脚本 - 隔离世界"]
-    pristine["原始快照与差分"]
-    judge["广告相似度打分"]
-    hide["隐藏：display + visibility + pointer-events"]
-    verify["复核：站点复原后再隐藏"]
-    learn["自学习记录"]
-    wall["反过滤墙检测"]
-  end
-  subgraph main["内容脚本 - MAIN world"]
-    guards["window.open、点击劫持、存储写入防护"]
-    runtime["脚本注入运行时（13 个规范规则）"]
-  end
-  page["页面"]
+<img src="docs/diagrams/architecture-zh.png" width="880" alt="AdBlow 系统架构：过滤列表编译为规则集与隐藏分片，四层从后台 service worker 一直到 MAIN world">
 
-  lists --> compile --> rulesets
-  compile --> shards
-  compile --> runtime
-  rulesets -->|"拦截请求"| page
-  dynamic -->|"拦截请求"| page
-  shards --> hide
-  pristine --> judge --> hide --> verify
-  hide --> learn
-  learn -->|"晋级的规则"| dynamic
-  stats --- learn
-  wall -->|"仅在用户确认后中和"| hide
-  guards --> page
-  runtime --> page
-```
+*图源：[`architecture-zh.mmd`](docs/diagrams/architecture-zh.mmd)。用 Mermaid 渲染为 PNG 一并提交，因此在 GitHub 客户端 Mermaid 不生效的环境下也能正常显示。*
 
 ### 处理流程
 
-```mermaid
-flowchart TD
-  start["document_start"] --> a["MAIN world：安装防护、应用脚本注入"]
-  a --> b["隔离世界：对文档拍摄原始快照"]
-  b --> c["请求与静态 DNR 规则集匹配"]
-  c --> d["扫描：站点规则包、列表隐藏规则、行为打分"]
-  d --> e{"判定为广告？"}
-  e -->|"是"| f["以 display、visibility、pointer-events 隐藏，并记录依据"]
-  e -->|"否"| g["不做处理"]
-  f --> h["复核：站点把 display 改回来时再次隐藏"]
-  h --> i["累计命中次数"]
-  i --> j{"累计命中 3 次？"}
-  j -->|"是"| k["晋级：学习选择器或学习域名规则，仅作用于本站点"]
-  j -->|"否"| l["继续观察"]
-  k --> m["规则管理：查看、逐条撤销、导出"]
-  d --> n["反过滤墙检测 —— 只读，绝不改动页面"]
-  n --> o{"检测到墙？"}
-  o -->|"是"| p["弹窗告知；页面保持原样"]
-  p --> q{"用户已确认处理本站点？"}
-  q -->|"是"| r["隐藏遮罩、恢复被它遮挡的正文；广告拦截保持不变"]
-  q -->|"否"| p
-```
+<img src="docs/diagrams/flow-zh.png" width="560" alt="AdBlow 处理流程，含反过滤墙等待用户确认的环节">
+
+*图源：[`flow-zh.mmd`](docs/diagrams/flow-zh.mmd)。用 Mermaid 渲染为提交的 PNG。*
 
 ## 安全约束
 
