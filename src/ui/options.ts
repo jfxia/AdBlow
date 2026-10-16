@@ -194,6 +194,37 @@ async function render(): Promise<void> {
   for (const site of sites) container.appendChild(renderSite(site.host, site.entries));
 }
 
+/**
+ * Show which filter-list revision is bundled.
+ *
+ * The lists are compiled into packaged static rulesets, and MV3 has no API to
+ * replace those remotely, so this date is the only way to tell whether the
+ * installed build still carries fresh rules. Read from the extension's own
+ * `list-info.json`; if it is missing (older build), show nothing rather than a
+ * misleading placeholder.
+ */
+async function showListData(): Promise<void> {
+  const target = el('listdata');
+  try {
+    const url = chrome.runtime.getURL('list-info.json');
+    const info = (await (await fetch(url)).json()) as {
+      listsFetchedAt?: string | null;
+      lists?: string[];
+      networkRules?: number | null;
+    };
+    const when = info.listsFetchedAt ? new Date(info.listsFetchedAt) : null;
+    if (!when || Number.isNaN(when.getTime())) return;
+    const date = when.toISOString().slice(0, 10);
+    target.textContent = t('optionsListData', [
+      date,
+      String(info.lists?.length ?? 0),
+      String(info.networkRules ?? 0),
+    ]);
+  } catch {
+    /* 没有这个文件（旧产物或未构建）时静默跳过 */
+  }
+}
+
 el('refresh').addEventListener('click', () => void render());
 
 el('export').addEventListener('click', async () => {
@@ -215,3 +246,4 @@ el('export').addEventListener('click', async () => {
 
 applyI18n();
 void render();
+void showListData();

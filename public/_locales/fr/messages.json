@@ -49,6 +49,9 @@
   "optionsSummary": {
     "message": "$1 sélecteur(s) actif(s) / $2 au total · $3 domaine(s) bloqué(s) / $4 au total"
   },
+  "optionsListData": {
+    "message": "Listes de filtres intégrées : récupérées le $1 · $2 listes · $3 règles réseau"
+  },
   "optionsPillActive": { "message": "Active" },
   "optionsPillObserving": { "message": "En observation" },
   "optionsPillBlocked": { "message": "Bloqué" },

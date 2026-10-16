@@ -49,6 +49,9 @@
   "optionsSummary": {
     "message": "セレクタ $1 件が有効 / 全 $2 件 · ドメイン $3 件を遮断 / 全 $4 件"
   },
+  "optionsListData": {
+    "message": "内蔵フィルタリスト：$1 取得 · $2 リスト · $3 ネットワークルール"
+  },
   "optionsPillActive": { "message": "有効" },
   "optionsPillObserving": { "message": "観察中" },
   "optionsPillBlocked": { "message": "遮断中" },

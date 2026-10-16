@@ -45,6 +45,9 @@
   "optionsSummary": {
     "message": "选择器 $1 条生效 / 共 $2 条 · 域名 $3 个已拦截 / 共 $4 个"
   },
+  "optionsListData": {
+    "message": "内置过滤列表数据：抓取于 $1，共 $2 份列表、$3 条网络规则"
+  },
   "optionsPillActive": { "message": "已生效" },
   "optionsPillObserving": { "message": "观察中" },
   "optionsPillBlocked": { "message": "已拦截" },

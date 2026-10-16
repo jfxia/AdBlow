@@ -102,7 +102,14 @@ pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 + store icon)
 pnpm package        # build + audit + zip -> release/adblow-<version>-edge.zip
+pnpm update-lists   # refresh the filter lists and rebuild everything
 ```
+
+Filter lists are compiled into static rulesets at build time, and MV3 offers no way to replace a
+static ruleset remotely — so **list freshness equals release frequency**: refreshing the lists
+means shipping a new version. The rule manager shows the fetch date of the bundled lists; the
+trade-offs, including the measured DNR quota numbers, are written up in
+[filter list updates](docs/LIST-UPDATES.md) (Chinese).
 
 Requirements: Node.js 24+, pnpm, and Python 3 with Pillow (icons and store screenshots only).
 
@@ -198,24 +205,17 @@ Stated plainly, because a README that only lists wins is not useful:
 Filter lists are the work of their maintainers and are **not** part of this repository; they
 are fetched at build time:
 
-| List | License |
-|---|---|
-| [EasyList](https://easylist.to/), [EasyList China](https://easylist.to/), [EasyPrivacy](https://easylist.to/) | GPLv3 / CC BY-SA 3.0 |
-| [uBlock Origin assets](https://github.com/uBlockOrigin/uAssets) (filters, privacy, badware) | GPLv3 |
+- EasyList、EasyList China、EasyPrivacy： GPL v3 / CC BY-SA 3.0 
+
+- uBlock Origin assets（filters、privacy、badware）：  GPL v3 
 
 Please respect those licenses when redistributing anything built from this repository.
 
 ## License
 
-**Not chosen yet — this is the one open decision before publishing.** The source code in this
-repository is the author's work, but a *built* extension embeds the GPLv3/CC BY-SA filter lists
-above, which is why the two cannot be decided independently. Reasonable options:
+1. **GPL-3.0** for the whole project
+2. **MIT license for the code**
 
-1. **GPL-3.0** for the whole project — simplest to reason about given the bundled lists.
-2. **MIT or Apache-2.0 for the code**, with a clear notice that built artifacts bundle
-   third-party GPL/CC BY-SA data and inherit those obligations.
-
-Until a `LICENSE` file is added, all rights are reserved by default.
 
 ---
 

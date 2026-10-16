@@ -121,7 +121,13 @@ pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 以及商店图标）
 pnpm package        # 构建 + 审计 + 打包，产出 release/adblow-<版本>-edge.zip
+pnpm update-lists   # 刷新过滤列表并整包重建：抓取 → 编译 → 构建 → 测试 → 打包
 ```
+
+过滤列表在构建时编译进静态规则集，而 MV3 没有远程替换静态规则集的接口，所以**列表的新鲜度
+等于发版频率**：刷新列表就是发一个新版本。规则管理页会显示内置列表的抓取日期，方便判断手上
+这份规则是不是过期了。定期发版与运行时增量更新两条路线的取舍、以及实测到的配额数字，见
+[过滤列表的更新策略](docs/LIST-UPDATES.md)。
 
 需要 Node.js 24 以上和 pnpm；生成图标与商店截图时还要用到 Python 3 和 Pillow。
 
@@ -208,19 +214,27 @@ node tools/e2e/acceptance.mjs   # 23 类广告，在真实浏览器里实测
 
 过滤列表是各自维护者的成果，不在本仓库里，构建时抓取：
 
-| 列表 | 许可 |
-|---|---|
-| [EasyList](https://easylist.to/)、[EasyList China](https://easylist.to/)、[EasyPrivacy](https://easylist.to/) | GPLv3 / CC BY-SA 3.0 |
-| [uBlock Origin assets](https://github.com/uBlockOrigin/uAssets)（filters、privacy、badware） | GPLv3 |
+- EasyList、EasyList China、EasyPrivacy： GPL v3 / CC BY-SA 3.0 
 
+<<<<<<< HEAD
 再分发由本仓库构建出来的任何东西时，请遵守上述许可。
+=======
+- uBlock Origin assets（filters、privacy、badware）：  GPL v3 
+>>>>>>> a80027efba5e7e24dc03c7aa5854d21a995d09cd
 
-## 许可
+再分发由本仓库构建出来的任何交付物时，请遵守上述许可。
 
+<<<<<<< HEAD
 
 1. **整个项目用 GPL-3.0。** 考虑到内嵌的列表，这是最容易讲清楚的一种。
 2. **代码用 MIT 或 Apache-2.0**，同时明确声明构建产物内嵌第三方的 GPL / CC BY-SA 数据，
    并继承相应的义务。
+=======
+## License
+
+1. **整个项目：GPL-3.0。** 
+2. **代码：MIT License**。
+>>>>>>> a80027efba5e7e24dc03c7aa5854d21a995d09cd
 
 
 ---

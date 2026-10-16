@@ -13,6 +13,7 @@
     "build": "node tools/build/build.mjs",
     "verify": "node tools/build/build.mjs && node tests/run-all.ts",
     "package": "node tools/release/package.mjs",
+    "update-lists": "node tools/release/update-lists.mjs",
     "recon": "node tools/recon/snapshot.mjs"
   },
   "devDependencies": {

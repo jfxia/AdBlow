@@ -279,6 +279,42 @@ if (existsSync(rulesetPatch)) {
       `（已注入 manifest）`,
   );
 
+  /**
+   * Publish which filter-list revision this build carries.
+   *
+   * Static rulesets are packaged files and MV3 has no API to replace them
+   * remotely, so refreshing lists means shipping a new extension version.
+   * Without this file neither users nor we can tell how old the bundled data is,
+   * and "is my list stale?" is the first question when an ad slips through or a
+   * page breaks. The rule manager reads it.
+   */
+  {
+    const meta = existsSync(p('filters/meta.json'))
+      ? JSON.parse(readFileSync(p('filters/meta.json'), 'utf8'))
+      : {};
+    const stats = existsSync(p('filters/generated/report.json'))
+      ? JSON.parse(readFileSync(p('filters/generated/report.json'), 'utf8'))
+      : {};
+    const scriptletCount = existsSync(scriptletManifestPath)
+      ? JSON.parse(readFileSync(scriptletManifestPath, 'utf8')).entries
+      : null;
+    const listInfo = {
+      builtAt: new Date().toISOString(),
+      listsFetchedAt: meta.fetchedAt ?? null,
+      lists: (stats.perList ?? []).map((l) => l.id),
+      networkRules: stats.compiled ?? null,
+      exceptions: stats.exceptions ?? null,
+      cosmeticAvailable: stats.cosmeticFiltersAvailable ?? null,
+      scriptletDomains: scriptletCount,
+    };
+    writeFileSync(`${DIST}/list-info.json`, JSON.stringify(listInfo, null, 2), 'utf8');
+    report.push(['list-info.json', statSync(`${DIST}/list-info.json`).size, 'copy']);
+    console.log(
+      `规则数据来源：${listInfo.lists.length} 份列表，抓取于 ${listInfo.listsFetchedAt ?? '未知'}` +
+        `（网络规则 ${listInfo.networkRules ?? '?'} 条 + 例外 ${listInfo.exceptions ?? '?'} 条）`,
+    );
+  }
+
   // Cosmetic shards are read by the SW and messaged to content scripts, so
   // web_accessible_resources is not needed (one less fingerprint surface).
   const cosmeticDir = p('filters/generated');

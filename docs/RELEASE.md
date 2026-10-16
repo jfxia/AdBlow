@@ -1,5 +1,8 @@
 # AdBlow 发布清单（Microsoft Edge 加载项商店）
 
+**商店页面**：https://microsoftedge.microsoft.com/addons/detail/adblow/omfepilfkagfdjejmdlkkphecllioion
+（已上架，v1.0.0）
+
 ## 一、产物
 
 | 用途 | 文件 |
@@ -100,3 +103,20 @@ AdBlow 的行为**全部在本地**，没有任何服务端：
 copyleft 许可，允许**个人使用**，但**闭源分发**存在许可冲突。
 当前发布形态是"提交到商店的打包扩展"，请自行确认是否符合你的分发意图
 （详见 `docs/plans/2026-10-11-filter-list-integration.md` 的许可一节）。
+
+## 七、上架之后：过滤列表怎么更新
+
+静态规则集是打包文件，**MV3 没有远程替换它的接口**，所以列表的新鲜度等于发版频率：
+
+```bash
+pnpm update-lists          # 抓取 → 编译 → 构建 → 测试 → 打包，并打印刷新前后的列表日期
+# 改 package.json 的 version，再跑一次 pnpm package
+# 上传 release/adblow-<版本>-edge.zip
+```
+
+- **节奏**：每月一次；遇到明显误杀或漏拦，随版本一起发。
+- 审核通过后，已安装用户会在数小时内自动更新。
+- 规则管理页会显示内置列表的抓取日期（`list-info.json`），这是判断"用户手上规则是否过期"
+  的唯一依据，报障时先看这一行。
+- 想把更新做到"不发版"也行，但要守住六条边界（尤其"只下数据不下代码"，脚本注入必须随包），
+  详见 [`docs/LIST-UPDATES.md`](LIST-UPDATES.md)。

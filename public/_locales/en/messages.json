@@ -45,6 +45,9 @@
   "optionsSummary": {
     "message": "$1 selector(s) active / $2 total · $3 domain(s) blocked / $4 total"
   },
+  "optionsListData": {
+    "message": "Built-in filter lists: fetched $1 · $2 lists · $3 network rules"
+  },
   "optionsPillActive": { "message": "Active" },
   "optionsPillObserving": { "message": "Observing" },
   "optionsPillBlocked": { "message": "Blocked" },

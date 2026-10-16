@@ -44,6 +44,16 @@
         background: var(--accent-soft);
         max-width: 78ch;
       }
+      /* 内置列表版本：说明性文字，比正文更弱，读得到但不抢视线 */
+      .listdata {
+        color: var(--muted);
+        font-size: 12px;
+        margin: 0 0 14px;
+        font-variant-numeric: tabular-nums;
+      }
+      .listdata:empty {
+        display: none;
+      }
       .bar {
         display: flex;
         gap: 8px;
@@ -108,6 +118,11 @@
       <p class="lede" data-i18n="optionsLede"></p>
 
       <div class="warn" data-i18n="optionsWarn"></div>
+
+      <!-- 内置过滤列表的版本信息：静态规则集是打包文件，MV3 无法远程替换，
+           所以"这份规则是哪天的"必须显示出来，用户报问题时才有依据。
+           内容由 options.js 填入（读 dist/list-info.json），没有该文件时留空。 -->
+      <p class="listdata" id="listdata"></p>
 
       <div class="bar">
         <button id="export" data-i18n="optionsExport"></button>

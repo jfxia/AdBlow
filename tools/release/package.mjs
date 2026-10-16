@@ -69,6 +69,20 @@ for (const html of ['popup.html', 'options.html']) {
   }
 }
 
+/**
+ * Resources the JavaScript reads at runtime through `chrome.runtime.getURL(...)`.
+ *
+ * These are invisible to a manifest/HTML scan, so the audit used to delete them as
+ * leftovers. That is exactly what happened to `list-info.json` (the bundled filter
+ * list revision shown by the rule manager): the dev build showed it, the packaged
+ * build silently did not. Scan the built scripts instead of hard-coding filenames,
+ * so any future getURL resource is covered automatically.
+ */
+for (const js of readdirSync(DIST).filter((f) => f.endsWith('.js'))) {
+  const body = readFileSync(`${DIST}/${js}`, 'utf8');
+  for (const m of body.matchAll(/getURL\(\s*['"]([^'"]+)['"]\s*\)/g)) add(m[1]);
+}
+
 // directories: locales plus the three rule-data sets (read on demand by the
 // content script / SW). listFiles must stay a pure listing: an earlier version had
 // one walk both list and mark reachable, so everything looked reachable and the
