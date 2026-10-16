@@ -7,7 +7,7 @@
 **An ad blocker that judges ads by how a page behaves — not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-631%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-633%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 
 [中文说明](README.zh-CN.md)
@@ -97,7 +97,7 @@ A store release (`adblow-1.0.0-edge.zip`) is prepared but not published yet.
 ## Build and package
 
 ```bash
-pnpm test           # 631 unit + integration tests, in-process
+pnpm test           # 633 unit + integration tests, in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 + store icon)
@@ -148,7 +148,7 @@ tools/
   e2e/             23-category in-browser acceptance suite, live-site pilot
   release/         audit, zip, store screenshots
   diagnostics/     copy-paste console snippets for triaging a broken page
-tests/             631 unit + integration tests (jsdom)
+tests/             633 unit + integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -171,7 +171,7 @@ wrong at least once:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts     # 631 tests, 0 failures
+node tests/run-all.ts     # 633 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 23 ad categories, measured in a real browser
 ```
 
@@ -205,16 +205,26 @@ Stated plainly, because a README that only lists wins is not useful:
 Filter lists are the work of their maintainers and are **not** part of this repository; they
 are fetched at build time:
 
-- EasyList、EasyList China、EasyPrivacy： GPL v3 / CC BY-SA 3.0 
-
-- uBlock Origin assets（filters、privacy、badware）：  GPL v3 
+| List | License |
+|---|---|
+| [EasyList](https://easylist.to/), [EasyList China](https://easylist.to/), [EasyPrivacy](https://easylist.to/) | GPL-3.0 / CC BY-SA 3.0 |
+| [uBlock Origin assets](https://github.com/uBlockOrigin/uAssets) (filters, privacy, badware) | GPL-3.0 |
 
 Please respect those licenses when redistributing anything built from this repository.
 
 ## License
 
-1. **GPL-3.0** for the whole project
-2. **MIT license for the code**
+The project as a whole is distributed under **GPL-3.0** — see [LICENSE](LICENSE). The original
+source code in this repository is additionally offered under **MIT** — see
+[LICENSE-MIT](LICENSE-MIT) — so you may reuse that code under MIT terms.
+
+Why two layers: a built extension embeds the GPL-3.0 / CC BY-SA filter data listed above, and
+that part cannot be relicensed under MIT, which is what makes the whole distribution GPL-3.0.
+The code written here (engine, UI, build and release tooling, tests) is unaffected, so it carries
+a permissive MIT grant as well.
+
+The third-party filter lists are not part of this repository; they are fetched at build time and
+keep their own licenses.
 
 
 ---

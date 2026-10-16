@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "description": "AdBlow —— 自研 MV3 广告过滤器：行为检测 + 自学习规则 + EasyList 系过滤列表。",
+  "license": "GPL-3.0-only",
   "scripts": {
     "test": "node tests/run-all.ts",
     "typecheck": "tsc --noEmit",

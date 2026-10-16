@@ -7,7 +7,7 @@
 **判断一个元素是不是广告，不只看过滤列表，还看它在页面上怎么表现。**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![测试](https://img.shields.io/badge/tests-631%20passing-brightgreen)](#测试与验收)
+[![测试](https://img.shields.io/badge/tests-633%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与语言)
 
 [English](README.md)
@@ -116,7 +116,7 @@ pnpm build          # 产出 dist/
 ## 构建与打包
 
 ```bash
-pnpm test           # 631 项单元与集成测试，在单进程里跑完
+pnpm test           # 633 项单元与集成测试，在单进程里跑完
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 以及商店图标）
@@ -166,7 +166,7 @@ tools/
   e2e/             23 类真实浏览器验收；活站端到端
   release/         审计、打 zip、生成商店截图
   diagnostics/     可直接粘进控制台的诊断脚本，用来查某个站点被弄坏的原因
-tests/             631 项单元与集成测试（jsdom）
+tests/             633 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
 
@@ -186,7 +186,7 @@ public/            manifest、_locales、图标
 ## 测试与验收
 
 ```bash
-node tests/run-all.ts           # 631 项测试，0 失败
+node tests/run-all.ts           # 633 项测试，0 失败
 node tools/e2e/acceptance.mjs   # 23 类广告，在真实浏览器里实测
 ```
 
@@ -214,28 +214,23 @@ node tools/e2e/acceptance.mjs   # 23 类广告，在真实浏览器里实测
 
 过滤列表是各自维护者的成果，不在本仓库里，构建时抓取：
 
-- EasyList、EasyList China、EasyPrivacy： GPL v3 / CC BY-SA 3.0 
-
-<<<<<<< HEAD
-再分发由本仓库构建出来的任何东西时，请遵守上述许可。
-=======
-- uBlock Origin assets（filters、privacy、badware）：  GPL v3 
->>>>>>> a80027efba5e7e24dc03c7aa5854d21a995d09cd
+| 列表 | 许可 |
+|---|---|
+| [EasyList](https://easylist.to/)、[EasyList China](https://easylist.to/)、[EasyPrivacy](https://easylist.to/) | GPL-3.0 / CC BY-SA 3.0 |
+| [uBlock Origin assets](https://github.com/uBlockOrigin/uAssets)（filters、privacy、badware） | GPL-3.0 |
 
 再分发由本仓库构建出来的任何交付物时，请遵守上述许可。
 
-<<<<<<< HEAD
-
-1. **整个项目用 GPL-3.0。** 考虑到内嵌的列表，这是最容易讲清楚的一种。
-2. **代码用 MIT 或 Apache-2.0**，同时明确声明构建产物内嵌第三方的 GPL / CC BY-SA 数据，
-   并继承相应的义务。
-=======
 ## License
 
-1. **整个项目：GPL-3.0。** 
-2. **代码：MIT License**。
->>>>>>> a80027efba5e7e24dc03c7aa5854d21a995d09cd
+本项目整体按 **GPL-3.0** 分发，全文见 [LICENSE](LICENSE)；本仓库原创的源代码同时提供
+**MIT** 授权，全文见 [LICENSE-MIT](LICENSE-MIT)，你可以按 MIT 使用这些代码。
 
+分两层是因为：构建出来的扩展会内嵌上表里 GPL-3.0 / CC BY-SA 的过滤列表数据，这部分不能按
+MIT 授权，所以整个交付物按 GPL-3.0 分发；而本仓库自己的代码（引擎、界面、构建与发布脚本、
+测试）与之无关，额外给出 MIT，方便别人复用。
+
+第三方过滤列表不属于本仓库，构建时抓取，各自的许可见上表。
 
 ---
 
