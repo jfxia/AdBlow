@@ -1,7 +1,11 @@
-// Fetches the filter lists at build time. The lists are NOT committed (filters/
-// is in .gitignore): the EasyList family is GPLv3 / CC BY-SA 3.0 dual licensed,
-// so shipping them in the package would carry copyleft duties (see
-// docs/plans/2026-10-11-filter-list-integration.md, "License").
+// Fetches the filter lists at build time. The lists are NOT committed (filters/ is
+// in .gitignore) for two practical reasons -- not because the licences forbid it:
+// the EasyList family is GPLv3 / CC BY-SA 3.0, so redistributing it is allowed as long
+// as the terms travel with it (this repository is GPL-3.0, see the licence section of
+// the README). What committing would cost is freshness and repository size: the six
+// lists are ~10 MB of text that upstream rewrites daily, and a clone would carry every
+// stale revision. Fetching at build time is what upstream expects and what other
+// blockers do. See docs/plans/2026-10-11-filter-list-integration.md, "License".
 // Only lists without a paid allowlist are included -- no Acceptable Ads list.
 // Run: node tools/filters/fetch-lists.mjs [--force]
 import { mkdirSync, writeFileSync, existsSync, statSync, readFileSync } from 'node:fs';
@@ -76,11 +80,49 @@ const FORBIDDEN_SOURCE_PATTERNS = [
 /** Header markers that betray a paid-allowlist lineage. */
 const FORBIDDEN_HEADER_MARKERS = ['acceptable ads', 'acceptableads', 'exceptionrules'];
 
+/**
+ * Alternative URLs for a list source, tried in order after the primary one.
+ *
+ * Why this exists: two of the upstream hosts (raw.githubusercontent.com, easylist.to) are
+ * unreachable from some networks -- commonly blocked, and slow where they are not. Without a
+ * fallback, `pnpm filters` fails there and nobody can build from source, which is exactly the
+ * complaint that led to this code. The mirrors below were verified reachable and of matching
+ * size: jsDelivr serves GitHub repository contents, and adblockplus.org publishes the EasyList
+ * files directly.
+ *
+ * Derived from the URL rather than listed per source, so a newly added source gets fallbacks
+ * for free and there is no second place to keep in sync.
+ */
+export function mirrorUrls(url) {
+  const out = [];
+
+  const gh = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(url);
+  if (gh) {
+    const [, owner, repo, branch, path] = gh;
+    out.push(`https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}/${path}`);
+  }
+
+  const easylist = /^https:\/\/easylist\.to\/easylist\/([^/]+)$/.exec(url);
+  if (easylist) {
+    const file = easylist[1];
+    out.push(`https://easylist-downloads.adblockplus.org/${file}`);
+    out.push(`https://cdn.jsdelivr.net/gh/easylist/easylist@gh-pages/${file}`);
+  }
+
+  // The China list lives in its own GitHub repository, which jsDelivr mirrors.
+  if (url === 'https://easylist-downloads.adblockplus.org/easylistchina.txt') {
+    out.push('https://cdn.jsdelivr.net/gh/easylist/easylistchina@master/easylistchina.txt');
+  }
+
+  return out;
+}
+
 /** Validate the source config; returns problems (empty means pass). */
 export function checkNoPaidWhitelist(sources = LIST_SOURCES) {
   const problems = [];
   for (const s of sources) {
-    const haystack = `${s.id} ${s.url}`.toLowerCase();
+    // Mirrors count too: a fallback URL must not smuggle in a paid-allowlist list.
+    const haystack = [s.id, s.url, ...mirrorUrls(s.url)].join(' ').toLowerCase();
     for (const bad of FORBIDDEN_SOURCE_PATTERNS) {
       if (haystack.includes(bad)) {
         problems.push(`来源 ${s.id} 命中付费白名单特征 "${bad}"：${s.url}`);
@@ -168,13 +210,42 @@ async function fetchOne(source, force) {
     };
   }
 
-  const res = await fetch(source.url, { headers: { 'user-agent': UA } });
-  if (!res.ok) throw new Error(`${source.id}: HTTP ${res.status}`);
-  const text = await res.text();
-  if (text.length < 1024) throw new Error(`${source.id}: 内容过短（${text.length} B），可能抓取失败`);
+  // Primary URL first, then the mirrors; the first one that returns a plausible body wins.
+  const candidates = [source.url, ...mirrorUrls(source.url)];
+  let text = null;
+  let used = null;
+  let lastError = '未知';
+  for (const candidate of candidates) {
+    try {
+      const res = await fetch(candidate, { headers: { 'user-agent': UA } });
+      if (!res.ok) {
+        lastError = `HTTP ${res.status}`;
+        continue;
+      }
+      const body = await res.text();
+      if (body.length < 1024) {
+        lastError = `内容过短（${body.length} B）`;
+        continue;
+      }
+      text = body;
+      used = candidate;
+      break;
+    } catch (e) {
+      lastError = String(e.message).slice(0, 80);
+    }
+  }
+  if (text === null) {
+    throw new Error(
+      `${source.id}: 原站与 ${candidates.length - 1} 个镜像全部失败（最后一个错误：${lastError}）。` +
+        `可在能访问的机器上执行 pnpm filters 后，把 filters/ 目录复制过来。`,
+    );
+  }
+
   writeFileSync(path, text, 'utf8');
   return {
     ...source,
+    url: used,
+    viaMirror: used !== source.url,
     bytes: text.length,
     cached: false,
     stats: summarizeList(text),
@@ -202,7 +273,8 @@ async function main() {
       results.push(r);
       const s = r.stats;
       console.log(
-        `${r.cached ? '缓存' : '下载'} ${r.id.padEnd(16)} ${String(Math.round(r.bytes / 1024)).padStart(5)} KB  ` +
+        `${r.cached ? '缓存' : r.viaMirror ? '下载(镜像)' : '下载'} ${r.id.padEnd(16)} ` +
+          `${String(Math.round(r.bytes / 1024)).padStart(5)} KB  ` +
           `网络=${String(s.network).padStart(6)} 例外=${String(s.exceptions).padStart(5)} ` +
           `cosmetic=${String(s.cosmetic).padStart(5)} 扩展=${String(s.extended).padStart(4)} ` +
           `脚本=${String(s.scriptlets).padStart(5)} HTML=${String(s.html).padStart(4)}`,

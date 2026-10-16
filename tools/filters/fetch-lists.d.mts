@@ -26,6 +26,7 @@ export declare const LIST_SOURCES: ListSource[];
 export declare const FORBIDDEN_SOURCE_PATTERNS: string[];
 export declare const FORBIDDEN_HEADER_MARKERS: string[];
 
+export declare function mirrorUrls(url: string): string[];
 export declare function checkNoPaidWhitelist(sources?: ListSource[]): string[];
 export declare function scanTextForPaidWhitelist(text: string): string[];
 export declare function summarizeList(text: string): ListStats;
