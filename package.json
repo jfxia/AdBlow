@@ -5,6 +5,9 @@
   "type": "module",
   "description": "AdBlow —— 自研 MV3 广告过滤器：行为检测 + 自学习规则 + EasyList 系过滤列表。",
   "license": "GPL-3.0-only",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "test": "node tests/run-all.ts",
     "typecheck": "tsc --noEmit",
@@ -16,6 +19,7 @@
     "package": "node tools/release/package.mjs",
     "update-lists": "node tools/release/update-lists.mjs",
     "version:bump": "node tools/release/version-bump.mjs",
+    "release:auto": "node tools/release/auto-release.mjs",
     "release:github": "node tools/release/github-release.mjs",
     "recon": "node tools/recon/snapshot.mjs"
   },

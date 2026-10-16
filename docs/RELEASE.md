@@ -133,7 +133,7 @@ AdBlow 的行为**全部在本地**，没有任何服务端：
 - [x] `version` 为 `x.y.z`（1.0.2），由 `package.json` 单一来源注入
 - [x] manifest 与界面用到的每个文案 key 在 5 种语言里都存在
 - [x] 5 种语言在真实 Edge 里逐个 `--lang` 实测，文案正确、无空文案、无文字溢出
-- [x] 822 项测试通过 · 24 类干扰视线广告验收 **24/24** · 试点站 E2E 全通过
+- [x] 865 项测试通过 · 24 类干扰视线广告验收 **24/24** · 试点站 E2E 全通过
 
 ## 七、许可证（已确定）
 
@@ -176,4 +176,36 @@ pnpm release:github --publish
 - GitHub Release 正文由 `pnpm release:github` 从该文件读取，找不到就拒绝发布；
 - 同一份文本就是商店后台"新版说明"字段的内容，不再从临时文件手工复制；
 - v1.0.1 与 v1.0.2 的说明已迁入 [`docs/release-notes/`](release-notes/)，v1.0.0 及更早没有留下同格式的文件。
+
+## 十、自动发版（定时任务）
+
+`.github/workflows/auto-release.yml` 每周一 03:17 UTC 执行一次，做的是"抓列表 → 判断有没有变 → 变了才发版"：
+
+1. 抓取六份过滤列表并重新编译规则集，跑 `pnpm typecheck` 与全部测试（测试不过就不发）；
+2. `pnpm release:auto` 把六份列表**正文**的 sha256 与编译产物计数组成指纹，与受版本控制的
+   [`tools/release/baseline.json`](../tools/release/baseline.json) 比较；
+3. **指纹没变**：打印结论后结束——不升版本、不提交、不发 Release。`filters/meta.json` 的 `fetchedAt`
+   与 `report.json` 的 `generatedAt` / `listFetchedAt` 都不参与比较，列表头部的
+   `! Version:` / `! Last modified:` / `! Checksum:` 也不参与（它们不是规则行），所以"只是重新抓了一次"
+   不会被误判成有变化；
+4. **指纹变了**：升 patch 版本（同时改写两份 README 与本文件的版本引用）、按变化生成
+   `docs/release-notes/<新版本>.md`（已存在则保留不动）、打包、提交并推送，最后 `pnpm release:github --publish`
+   建 Release 并上传附件（顺序不能反：`release:github` 要求 HEAD 已在远端）；
+5. **基线文件不存在**（第一次配置，或指纹结构升级）时：只写入基线并结束，不发版；
+6. **抓取不完整时拒绝判断**：配置的列表（[`tools/filters/fetch-lists.mjs`](../tools/filters/fetch-lists.mjs)
+   的 `LIST_SOURCES`）少抓了一份、或基线里有而本次指纹里没有的列表，都按错误处理而不是"列表被改掉了"——
+   否则一次网络失败会被当成规则变化，发出一个缺了整份列表的版本。确实要移除某个列表来源时，先删掉基线文件
+   再重跑：那只记录新基线，下一次运行才会发版。
+
+本地判断用 `pnpm release:auto`：默认 dry-run，只判断并打印结论；`--write` 才写文件。
+`--decision-file <路径>` 把结论写成 JSON（dry-run 下也会写，供 CI 读取；路径应放在工作区之外）。
+
+手动触发：仓库 **Actions → auto-release → Run workflow**；输入项 `publish` 默认不勾选，不勾选时只报告
+结论、不写任何文件。
+
+关闭自动发版：注释或删除 workflow 里的 `schedule` 一段（保留 `workflow_dispatch` 即变成纯手动），
+或在 Actions 页面直接禁用该 workflow。
+
+失败是显式失败：任何一步报错，流水线就以非零退出码结束，不会有"看起来成功但什么都没发"的中间状态；
+`concurrency` 保证同一时间只有一个实例在跑，避免两次运行各自推一个提交。
 

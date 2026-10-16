@@ -24,12 +24,39 @@ export type SnapshotReport = ProblemReport & {
 
 export type Attachment = { role: string; path: string; name: string };
 
+export type FingerprintCounts = Record<string, number>;
+
+export type Fingerprint = {
+  schema: number;
+  lists: Record<string, string>;
+  counts: FingerprintCounts;
+  digest: string;
+};
+
+export type FingerprintChange = {
+  kind: string;
+  key: string;
+  from: string | number | null;
+  to: string | number | null;
+};
+
+export type AutoReleaseDecision = {
+  decision: string;
+  reason: string;
+  problems: string[];
+  changes: FingerprintChange[];
+};
+
 export declare const RELEASE_NOTES_DIR: string;
 export declare const DEFAULT_SNAPSHOT_MAX_AGE_DAYS: number;
 export declare const VERSION_FILES: string[];
 export declare const DEFAULT_REPO: string;
 export declare const VERSION_REF_RULES: RefRule[];
 export declare const TEST_COUNT_REF_RULES: RefRule[];
+export declare const BASELINE_PATH: string;
+export declare const FINGERPRINT_SCHEMA: number;
+export declare const FINGERPRINT_COUNT_FIELDS: string[];
+export declare const AUTO_RELEASE_DECISIONS: string[];
 
 export declare function isSemver(value: unknown): boolean;
 export declare function compareSemver(a: string, b: string): number;
@@ -101,3 +128,45 @@ export declare function parseCredentialOutput(text: string): {
 };
 export declare function describeToken(token: string | null | undefined): string;
 export declare function repoFromRemoteUrl(url: string): string | null;
+
+export declare function hashText(text: unknown): string;
+export declare function normalizeListText(text: unknown): string;
+export declare function hashListText(text: unknown): string;
+export declare function shortHash(hash: unknown): string;
+export declare function sortedRecord<T>(input: Record<string, T> | null | undefined): Record<string, T>;
+export declare function digestOf(input: {
+  schema: number;
+  lists: Record<string, string>;
+  counts: FingerprintCounts;
+}): string;
+export declare function projectCounts(report: unknown): { counts: FingerprintCounts; missing: string[] };
+export declare function buildFingerprint(input: {
+  lists: { name: string; text: string }[];
+  report: unknown;
+  schema?: number;
+}): { fingerprint: Fingerprint | null; problems: string[] };
+export declare function diffFingerprints(
+  from: { lists?: Record<string, string>; counts?: FingerprintCounts } | null | undefined,
+  to: { lists?: Record<string, string>; counts?: FingerprintCounts } | null | undefined,
+): FingerprintChange[];
+export declare function decideAutoRelease(input: {
+  baseline: unknown;
+  current: Fingerprint | null;
+}): AutoReleaseDecision;
+export declare function nextPatchVersion(version: string): string | null;
+export declare function describeFingerprintChange(change: FingerprintChange | null | undefined): string;
+export declare function buildAutoReleaseNotes(input: {
+  version: string;
+  fingerprint: Fingerprint | null;
+  changes?: FingerprintChange[];
+  fetchedAt?: string | null;
+  date?: string | null;
+}): string;
+export declare function decisionReport(input: {
+  decision: AutoReleaseDecision;
+  currentVersion: string;
+  nextVersion?: string | null;
+  baselinePath: string;
+  wrote?: string[];
+  recordedAt: string;
+}): Record<string, unknown>;

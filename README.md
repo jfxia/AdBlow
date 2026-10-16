@@ -7,7 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-822%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-865%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 
 [中文说明](README.zh-CN.md)
@@ -171,7 +171,7 @@ step is required. If they are unreachable altogether, the same lists are attache
 ## Build and package
 
 ```bash
-pnpm test           # 822 unit and integration tests, run in-process
+pnpm test           # 865 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -235,6 +235,13 @@ upload is safe. The store package and a snapshot of the filter lists (`filters/*
 `meta.json`, named after the fetch date) are the two attachments. `--offline` and `--rehearse` exist
 for rehearsals only and cannot be combined with `--publish`.
 
+The same steps can run unattended: `.github/workflows/auto-release.yml` runs weekly, and
+`pnpm release:auto` decides whether anything is worth releasing by comparing a fingerprint of the
+six lists — the sha256 of their rule bodies plus the compiled counts — against the version-controlled
+baseline `tools/release/baseline.json`. A week in which upstream changed nothing means no version
+bump, no commit and no release. The workflow can also be started by hand from the Actions tab, where
+the `publish` input defaults to a report-only run that writes nothing.
+
 ## Project layout
 
 The implementation is divided into four layers, each narrowing the scope and privileges of the
@@ -262,7 +269,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             822 unit and integration tests (jsdom)
+tests/             865 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -287,7 +294,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 822 tests, 0 failures
+node tests/run-all.ts           # 865 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 

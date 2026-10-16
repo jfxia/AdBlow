@@ -1,0 +1,165 @@
+# Automatic release for AdBlow.
+#
+# MV3 static rulesets cannot be replaced remotely, so the freshness of the bundled
+# filter lists equals the release frequency. This workflow is that frequency: it
+# refetches the six lists, and publishes a patch release ONLY when the rules actually
+# changed, i.e. when the fingerprint of the lists plus the compiled counts differs from
+# the version-controlled baseline `tools/release/baseline.json`. A week in which
+# upstream changed nothing produces no commit and no release -- a scheduled job that
+# bumps the version every week would train everyone to ignore the version number.
+#
+# Every judgement lives in `pnpm release:auto` (tools/release/auto-release.mjs), which
+# runs the same way on a laptop; this file only orchestrates existing commands. The
+# YAML is not executable outside GitHub Actions, which is exactly why the decision is
+# not implemented here.
+#
+# Why the step order below:
+#   1. fetch + compile before judging -- the fingerprint is computed from those outputs;
+#   2. typecheck and tests before any judgement -- a red tree must never be released;
+#   3. judge with --write only when this run may publish -- a manual trigger without the
+#      input checked must leave the checkout untouched;
+#   4. package, commit and push BEFORE release:github -- that tool refuses to publish
+#      unless HEAD is already the commit on the remote (its gate reads git ls-remote),
+#      and the version inside the zip has to match package.json.
+name: auto-release
+
+on:
+  schedule:
+    # Weekly, Monday 03:17 UTC. Not on the hour: the top of the hour is the busiest slot
+    # in GitHub's scheduler and runs scheduled there are delayed the most.
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Actually bump, commit, push and publish (leave unchecked to only report)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # the built-in GITHUB_TOKEN is enough; no personal access token is needed
+
+concurrency:
+  group: auto-release
+  # Never cancel a run that may be in the middle of a push, and never let two runs race
+  # on the same branch: both would judge the same baseline and both would push.
+  cancel-in-progress: false
+
+jobs:
+  auto-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Scheduled runs release on their own; a manual run releases only when the input is
+      # checked, so pressing "Run workflow" is safe by default.
+      AUTO_PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish == true }}
+      DECISION_FILE: ${{ runner.temp }}/adblow-auto-release.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history: release:github verifies that HEAD is the commit on the remote
+          # and reads the branch's upstream, which a shallow single-commit checkout
+          # cannot answer.
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        # Before setup-node: `cache: pnpm` needs pnpm on PATH to locate the store.
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # package.json engines states >=24 (the README states the same). The major is
+          # pinned rather than resolved from the range: the suite is verified on 24, and
+          # `node tests/run-all.ts` depends on unflagged TypeScript type stripping.
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch the filter lists
+        # --force: the whole point of the schedule is a fresh fetch; filters/ is not
+        # committed, so a cached copy would be the previous run's data.
+        run: pnpm filters --force
+
+      - name: Compile the rulesets
+        run: pnpm rulesets
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Tests
+        run: node tests/run-all.ts
+
+      - name: Judge the fingerprint (report only, writes nothing)
+        if: env.AUTO_PUBLISH != 'true'
+        run: pnpm release:auto -- --decision-file "$DECISION_FILE"
+
+      - name: Judge the fingerprint and apply it (baseline / patch bump / notes)
+        if: env.AUTO_PUBLISH == 'true'
+        run: pnpm release:auto -- --write --decision-file "$DECISION_FILE"
+
+      - name: Read the verdict
+        id: verdict
+        run: |
+          echo "decision=$(jq -r .decision "$DECISION_FILE")" >> "$GITHUB_OUTPUT"
+          echo "next_version=$(jq -r '.nextVersion // "-"' "$DECISION_FILE")" >> "$GITHUB_OUTPUT"
+
+      - name: Stop here when nothing changed
+        if: steps.verdict.outputs.decision == 'no-change'
+        run: |
+          {
+            echo "### No release"
+            echo
+            echo "The filter lists and the compiled counts are identical to \`tools/release/baseline.json\`."
+            echo "No version bump, no commit, no GitHub release."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop here when this run only reports
+        if: env.AUTO_PUBLISH != 'true'
+        run: |
+          {
+            echo "### Report only (nothing was written)"
+            echo
+            echo "Verdict: \`${{ steps.verdict.outputs.decision }}\`"
+            echo
+            echo "Re-run with the \`publish\` input checked to bump, commit, push and publish."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package the extension
+        if: env.AUTO_PUBLISH == 'true' && steps.verdict.outputs.decision == 'release'
+        run: pnpm package
+
+      - name: Commit and push the version, the notes and the baseline
+        # release and baseline-init both leave files to commit; no-change and error do not.
+        if: env.AUTO_PUBLISH == 'true' && (steps.verdict.outputs.decision == 'release' || steps.verdict.outputs.decision == 'baseline-init')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Everything release:auto wrote lives in the working tree (version references,
+          # generated release notes, baseline); dist/, filters/ and release/ are ignored.
+          git add --all
+          git commit --message "$(jq -r .commitMessage "$DECISION_FILE")"
+          # release:github compares HEAD with @{upstream} and with git ls-remote; make the
+          # tracking ref explicit instead of relying on what checkout left behind.
+          git branch --set-upstream-to="origin/${{ github.ref_name }}" "${{ github.ref_name }}"
+          git push origin "HEAD:${{ github.ref_name }}"
+
+      - name: Publish the GitHub release
+        if: env.AUTO_PUBLISH == 'true' && steps.verdict.outputs.decision == 'release'
+        env:
+          # The built-in token; a personal access token would expire and is not required.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm release:github -- --publish
+
+      - name: Summarise the release
+        if: env.AUTO_PUBLISH == 'true' && steps.verdict.outputs.decision == 'release'
+        run: |
+          {
+            echo "### Released v${{ steps.verdict.outputs.next_version }}"
+            echo
+            jq -r '.changes[] | "- \(.kind): \(.key)"' "$DECISION_FILE"
+          } >> "$GITHUB_STEP_SUMMARY"

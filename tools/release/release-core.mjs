@@ -1,16 +1,20 @@
 /**
  * Pure logic behind the release tooling: version references, tags, the three-way
  * version check, workspace gates, filter-list snapshot freshness, release-note
- * lookup, attachment selection and credential parsing.
+ * lookup, attachment selection, credential parsing, and the fingerprint that decides
+ * whether a scheduled run has anything to release at all.
  *
- * Nothing here touches the file system, the network or a child process, so every
- * rule below is unit-testable without a repository, a git remote or credentials.
- * The command line wrappers (version-bump.mjs, github-release.mjs) own the I/O.
+ * Nothing here touches the file system, the network or a child process (`node:crypto`
+ * is used for hashing, which is a pure function of its input), so every rule below is
+ * unit-testable without a repository, a git remote or credentials. The command line
+ * wrappers (version-bump.mjs, github-release.mjs, auto-release.mjs) own the I/O.
  *
  * Message style: every problem string is meant to be printed as-is and to say what
  * failed AND how to fix it, because a release gate that only says "check failed"
  * costs more time than it saves.
  */
+
+import { createHash } from 'node:crypto';
 
 /** Directory holding one release-notes file per version (version-controlled). */
 export const RELEASE_NOTES_DIR = 'docs/release-notes';
@@ -553,4 +557,408 @@ function lineAt(text, index) {
 function basename(p) {
   const parts = String(p).split(/[\\/]/);
   return parts[parts.length - 1];
+}
+
+/* ---------------------------------------------------------------------------------
+ * Automatic release: is there anything new to release?
+ *
+ * MV3 static rulesets cannot be replaced remotely, so the freshness of the filter
+ * lists equals the release frequency. That makes a scheduled release useful -- and a
+ * scheduled release that bumps the version on every run useless, because it would
+ * publish identical packages weekly and train everyone to ignore the version number.
+ *
+ * The decision therefore rests on a fingerprint of the fetched lists plus the compiled
+ * counts, compared against a baseline file that is under version control:
+ *
+ *   fingerprint = { schema, lists: { <list id>: sha256(rule body) }, counts, digest }
+ *
+ * Two properties matter, and both are deliberate:
+ *
+ * 1. NO TIMESTAMP IS PART OF THE FINGERPRINT. `filters/meta.json` (fetchedAt) and the
+ *    `generatedAt` / `listFetchedAt` fields of `filters/generated/report.json` change
+ *    on every fetch, so including any of them would make every scheduled run look like
+ *    a change. The counts are read from an explicit allow-list of fields instead of
+ *    hashing the whole report, so a future timestamp field cannot leak in either.
+ *
+ * 2. THE LIST HASH COVERS THE RULE BODY ONLY. Upstream rewrites the header of every
+ *    EasyList-family file on each publication (`! Version:`, `! Last modified:`,
+ *    `! Checksum:`, `! Commit:`), and those lines are not rules. `normalizeListText`
+ *    drops exactly the lines the compiler drops (`src/engine/filterList/parse.ts`:
+ *    `!`/`[` comments and `#if|#endif|#include|@include` directives), so header churn
+ *    alone cannot trigger a release while a single changed rule can.
+ * ------------------------------------------------------------------------------ */
+
+/** Repository-relative path of the fingerprint baseline (version-controlled). */
+export const BASELINE_PATH = 'tools/release/baseline.json';
+
+/** Shape version of the baseline file; a change means "re-baseline, release nothing". */
+export const FINGERPRINT_SCHEMA = 1;
+
+/**
+ * `filters/generated/report.json` fields that make up the fingerprint, in report order.
+ *
+ * An allow-list, not the whole object: every timestamp in that file changes per run, and
+ * so does anything the compiler may start reporting later. `budget` is included because a
+ * budget change alters which rules survive truncation.
+ */
+export const FINGERPRINT_COUNT_FIELDS = [
+  'input',
+  'compiled',
+  'exceptions',
+  'packedDomains',
+  'packedRules',
+  'rulesetCount',
+  'budget',
+];
+
+/** The four verdicts of the automatic-release judgement. */
+export const AUTO_RELEASE_DECISIONS = ['no-change', 'release', 'baseline-init', 'error'];
+
+/** sha256 of a string, hex encoded. */
+export function hashText(text) {
+  return createHash('sha256').update(String(text ?? ''), 'utf8').digest('hex');
+}
+
+/**
+ * Reduce a filter list to the lines that can affect the compiled ruleset.
+ *
+ * Mirrors the classifier in `src/engine/filterList/parse.ts`: blank lines, `!`/`[`
+ * comments and `#if`/`#endif`/`#include`/`@include` directives are skipped there, so
+ * they are skipped here too -- anything else (network, cosmetic, scriptlet, HTML) is
+ * kept verbatim, only trimmed.
+ *
+ * @param {string} text
+ * @returns {string} the rule body, one trimmed rule per line
+ */
+export function normalizeListText(text) {
+  const out = [];
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '') continue;
+    if (line.startsWith('!') || line.startsWith('[')) continue;
+    if (/^#(if|endif|include|@include)/.test(line)) continue;
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** Hash of the rule body of one list (see `normalizeListText`). */
+export function hashListText(text) {
+  return hashText(normalizeListText(text));
+}
+
+/** First 12 hex characters of a hash: enough to compare by eye in a log line. */
+export function shortHash(hash) {
+  return String(hash ?? '').slice(0, 12);
+}
+
+/** A record with its keys sorted, so a digest never depends on insertion order. */
+export function sortedRecord(input) {
+  const out = {};
+  for (const key of Object.keys(input ?? {}).sort()) out[key] = input[key];
+  return out;
+}
+
+/** The digest of a fingerprint's content: `{ schema, lists, counts }` and nothing else. */
+export function digestOf({ schema, lists, counts }) {
+  return hashText(JSON.stringify({ schema, lists: sortedRecord(lists), counts: sortedRecord(counts) }));
+}
+
+/**
+ * Read the fingerprint counts out of a compile report.
+ *
+ * @param {unknown} report parsed `filters/generated/report.json`
+ * @returns {{ counts: Record<string, number>, missing: string[] }}
+ */
+export function projectCounts(report) {
+  const counts = {};
+  const missing = [];
+  for (const field of FINGERPRINT_COUNT_FIELDS) {
+    const value = report && typeof report === 'object' ? report[field] : undefined;
+    if (typeof value === 'number' && Number.isFinite(value)) counts[field] = value;
+    else missing.push(field);
+  }
+  return { counts, missing };
+}
+
+/**
+ * Build the fingerprint of the lists that were just fetched and compiled.
+ *
+ * @param {{ lists: { name: string, text: string }[], report: unknown, schema?: number }} input
+ * @returns {{ fingerprint: null | { schema: number, lists: Record<string, string>,
+ *   counts: Record<string, number>, digest: string }, problems: string[] }}
+ *   `fingerprint` is null when the inputs are unusable; the problems say what to fix
+ */
+export function buildFingerprint({ lists, report, schema = FINGERPRINT_SCHEMA }) {
+  const problems = [];
+  const hashed = {};
+
+  if (!Array.isArray(lists) || lists.length === 0) {
+    problems.push('no filter list was read — fetch them first: pnpm filters --force');
+  }
+  for (const item of lists ?? []) {
+    const name = String(item?.name ?? '').trim();
+    if (!name) {
+      problems.push('a filter list has no name');
+      continue;
+    }
+    const body = normalizeListText(item?.text);
+    if (body === '') {
+      problems.push(
+        `the filter list ${name} has no rule line at all (comments only) — ` +
+          'the download is truncated or the file is not a filter list',
+      );
+      continue;
+    }
+    hashed[name] = hashText(body);
+  }
+
+  const { counts, missing } = projectCounts(report);
+  for (const field of missing) {
+    problems.push(
+      `filters/generated/report.json has no numeric ${field} — recompile the rulesets: pnpm rulesets`,
+    );
+  }
+
+  if (problems.length > 0) return { fingerprint: null, problems };
+  return {
+    fingerprint: {
+      schema,
+      lists: sortedRecord(hashed),
+      counts: sortedRecord(counts),
+      digest: digestOf({ schema, lists: hashed, counts }),
+    },
+    problems,
+  };
+}
+
+/**
+ * Per-field difference between two fingerprints, so the log can name what moved.
+ *
+ * @param {{ lists?: Record<string, string>, counts?: Record<string, number> }} from
+ * @param {{ lists?: Record<string, string>, counts?: Record<string, number> }} to
+ * @returns {{ kind: string, key: string, from: string | number | null,
+ *   to: string | number | null }[]}
+ */
+export function diffFingerprints(from, to) {
+  const changes = [];
+  const compare = (group, kind) => {
+    const a = sortedRecord((from ?? {})[group]);
+    const b = sortedRecord((to ?? {})[group]);
+    for (const key of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) {
+      if (!(key in a)) changes.push({ kind: `${kind}-added`, key, from: null, to: b[key] });
+      else if (!(key in b)) changes.push({ kind: `${kind}-removed`, key, from: a[key], to: null });
+      else if (a[key] !== b[key]) changes.push({ kind: `${kind}-changed`, key, from: a[key], to: b[key] });
+    }
+  };
+  compare('lists', 'list');
+  compare('counts', 'count');
+  return changes;
+}
+
+/**
+ * The judgement: release, do nothing, or (re)write the baseline first.
+ *
+ * `baseline-init` is the "record, do not release" verdict. It covers the first run in a
+ * repository (no baseline yet) and a fingerprint shape change. Both are deliberately
+ * non-releasing: a run that cannot compare against a known-good state must never be the
+ * run that publishes a version, or the very first configuration would ship a release for
+ * rules that were already in the repository.
+ *
+ * @param {{ baseline: unknown, current: object | null }} input
+ *   `baseline` is the parsed baseline file, or null when the file does not exist
+ * @returns {{ decision: string, reason: string, problems: string[], changes: object[] }}
+ */
+export function decideAutoRelease({ baseline, current }) {
+  const empty = { problems: [], changes: [] };
+
+  if (!current) {
+    return {
+      decision: 'error',
+      reason: 'the fingerprint of the current lists could not be built',
+      problems: ['the current fingerprint is missing — fix the problems reported above'],
+      changes: [],
+    };
+  }
+  if (baseline === null || baseline === undefined) {
+    return {
+      ...empty,
+      decision: 'baseline-init',
+      reason: 'there is no baseline in the repository yet: this run records one and releases nothing',
+    };
+  }
+  if (typeof baseline !== 'object' || Array.isArray(baseline)) {
+    return {
+      decision: 'error',
+      reason: 'the baseline file is not a JSON object',
+      problems: [
+        'the baseline is not a JSON object — delete it and re-run to establish a new one',
+      ],
+      changes: [],
+    };
+  }
+  if (baseline.schema !== current.schema) {
+    return {
+      ...empty,
+      decision: 'baseline-init',
+      reason:
+        `the baseline carries schema ${JSON.stringify(baseline.schema)} and this tool writes ` +
+        `schema ${current.schema}: the baseline is rewritten and nothing is released this run`,
+    };
+  }
+
+  // A baseline whose digest does not describe its own content cannot be trusted to say
+  // "unchanged": it was edited by hand, or written by something else.
+  const recomputed = digestOf({
+    schema: baseline.schema,
+    lists: baseline.lists ?? {},
+    counts: baseline.counts ?? {},
+  });
+  if (baseline.digest !== recomputed) {
+    return {
+      decision: 'error',
+      reason: 'the baseline digest does not match the baseline content',
+      problems: [
+        'the digest in the baseline does not match its own lists/counts — the file was edited ' +
+          'by hand; delete it and re-run to establish a new baseline',
+      ],
+      changes: [],
+    };
+  }
+
+  const changes = diffFingerprints(baseline, current);
+  // A list the baseline knows but this run did not fetch is an incomplete fetch, not a
+  // release: publishing from it would ship a package whose ruleset silently lost a list.
+  const missing = changes.filter((change) => change.kind === 'list-removed').map((change) => change.key);
+  if (missing.length > 0) {
+    return {
+      decision: 'error',
+      reason: `${missing.length} list(s) of the baseline were not fetched`,
+      problems: [
+        `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} in the baseline but missing from ` +
+          'this fingerprint — an incomplete fetch must not become a release: re-run ' +
+          'pnpm filters --force. If a source was removed deliberately, delete the baseline and ' +
+          're-run to record the new set of lists',
+      ],
+      changes,
+    };
+  }
+  if (changes.length > 0) {
+    return {
+      decision: 'release',
+      reason: `${changes.length} fingerprint change(s) against the baseline`,
+      problems: [],
+      changes,
+    };
+  }
+  if (baseline.digest !== current.digest) {
+    return {
+      decision: 'error',
+      reason: 'every fingerprint field matches, yet the digests differ',
+      problems: [
+        'every field of the baseline matches the current fingerprint but the digests differ — ' +
+          'the baseline was written by a different version of this tool; delete it and re-run',
+      ],
+      changes: [],
+    };
+  }
+
+  return {
+    ...empty,
+    decision: 'no-change',
+    reason: 'the filter lists and the compiled counts match the baseline',
+  };
+}
+
+/** The next patch version, or null when the input is not `x.y.z`. */
+export function nextPatchVersion(version) {
+  if (!isSemver(version)) return null;
+  const [major, minor, patch] = String(version).split('.').map(Number);
+  return `${major}.${minor}.${patch + 1}`;
+}
+
+/** One line describing a fingerprint change, for the log and the release notes. */
+export function describeFingerprintChange(change) {
+  const { kind, key, from, to } = change ?? {};
+  if (kind === 'list-changed') return `${key}: rule body changed (${shortHash(from)} -> ${shortHash(to)})`;
+  if (kind === 'list-added') return `${key}: new list added (${shortHash(to)})`;
+  if (kind === 'list-removed') return `${key}: list removed (was ${shortHash(from)})`;
+  if (kind === 'count-added') return `${key}: ${from} -> ${to}`;
+  if (kind === 'count-removed') return `${key}: ${from} -> ${to}`;
+  if (kind === 'count-changed') return `${key}: ${from} -> ${to}`;
+  return `${kind} ${key}`;
+}
+
+/**
+ * The release notes an automatic release publishes.
+ *
+ * Generated rather than left empty because `pnpm release:github` refuses to publish
+ * without `docs/release-notes/<version>.md`, and a scheduled run has nobody to write one.
+ * The file is only written when it does not exist, so a hand-written note always wins.
+ * The text is third person ("the store package ... is attached"), matching the style the
+ * documentation guard enforces on every Markdown file in the repository.
+ *
+ * @param {{ version: string, fingerprint: object | null, changes?: object[],
+ *   fetchedAt?: string | null, date?: string | null }} input
+ * @returns {string}
+ */
+export function buildAutoReleaseNotes({ version, fingerprint, changes = [], fetchedAt = null, date = null }) {
+  const counts = fingerprint?.counts ?? {};
+  const lines = [];
+  lines.push(`### 本版更新（v${version}）`);
+  lines.push('');
+  lines.push(
+    '- **定时任务自动发布的补丁版本**：过滤列表已刷新，规则集随之重建；除列表数据与版本号外没有代码改动。',
+  );
+  if (fetchedAt) lines.push(`- 过滤列表抓取时间：${fetchedAt}${date ? `（${date}）` : ''}`);
+  if (typeof counts.input === 'number') {
+    lines.push(
+      `- 编译结果：输入 ${counts.input} 条 → 拦截 ${counts.compiled} 条 + 例外 ${counts.exceptions} 条，` +
+        `分 ${counts.rulesetCount} 卷；域名锚点 ${counts.packedDomains} 个、合并规则 ${counts.packedRules} 条。`,
+    );
+  }
+  if (changes.length > 0) {
+    lines.push('');
+    lines.push('与上一版相比：');
+    lines.push('');
+    for (const change of changes) lines.push(`- ${describeFingerprintChange(change)}`);
+  }
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  lines.push('The store package and a filter-list snapshot are attached to this release. If the upstream list');
+  lines.push('hosts are unreachable, extract the snapshot into `filters/` and run `pnpm rulesets && pnpm build`.');
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * The JSON report the CI job reads to decide what to do next (`--decision-file`).
+ *
+ * @param {{ decision: object, currentVersion: string, nextVersion: string | null,
+ *   baselinePath: string, wrote: string[], recordedAt: string }} input
+ * @returns {object}
+ */
+export function decisionReport({
+  decision,
+  currentVersion,
+  nextVersion = null,
+  baselinePath,
+  wrote = [],
+  recordedAt,
+}) {
+  const release = decision.decision === 'release';
+  return {
+    decision: decision.decision,
+    reason: decision.reason,
+    currentVersion,
+    nextVersion,
+    baseline: baselinePath,
+    changes: decision.changes ?? [],
+    problems: decision.problems ?? [],
+    wrote,
+    recordedAt,
+    commitMessage: release
+      ? `chore(release): auto-release v${nextVersion} (filter lists refreshed)`
+      : 'chore(release): record the filter-list fingerprint baseline',
+  };
 }

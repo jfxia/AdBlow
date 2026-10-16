@@ -7,7 +7,7 @@
 **在过滤列表匹配之外，依据页面运行时的元素行为判定并拦截广告。**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![测试](https://img.shields.io/badge/tests-822%20passing-brightgreen)](#测试与验收)
+[![测试](https://img.shields.io/badge/tests-865%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与本地化)
 
 [English](README.md)
@@ -155,7 +155,7 @@ Edge 加载项商店上架。一次发布由三条命令串起来——`pnpm ver
 ## 构建与打包
 
 ```bash
-pnpm test           # 822 项单元与集成测试，单进程内执行
+pnpm test           # 865 项单元与集成测试，单进程内执行
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 与商店图标）
@@ -209,6 +209,12 @@ Release 已存在时复用，只补传缺失的附件，因此上传中断后重
 快照（`filters/*.txt` 加 `meta.json`，文件名取自抓取日期）。`--offline` 与 `--rehearse` 只用于演练，
 不能与 `--publish` 同时使用。
 
+同一套流程也可以无人值守：`.github/workflows/auto-release.yml` 每周执行一次，由 `pnpm release:auto`
+判断是否有东西值得发——它把六份列表**正文**的 sha256 与编译产物计数组成指纹，和受版本控制的基线
+`tools/release/baseline.json` 比较。上游列表一周没变就不升版本、不提交、不发 Release；列表的抓取
+时间戳不参与比较，所以"只是重新抓了一次"不会被当成有变化。也可以在 Actions 页面手动触发，`publish`
+输入默认只报告结论、不写文件。
+
 ## 项目结构
 
 实现上分为四层，逐层收敛权限与作用范围：
@@ -235,7 +241,7 @@ tools/
   e2e/             24 类真实浏览器验收；活站端到端
   release/         审计、zip 打包、商店截图生成
   diagnostics/     可在控制台直接执行的诊断脚本，用于定位站点异常
-tests/             822 项单元与集成测试（jsdom）
+tests/             865 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
 
@@ -255,7 +261,7 @@ public/            manifest、_locales、图标
 ## 测试与验收
 
 ```bash
-node tests/run-all.ts           # 822 项测试，0 失败
+node tests/run-all.ts           # 865 项测试，0 失败
 node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
 ```
 
