@@ -7,7 +7,7 @@
 **在过滤列表匹配之外，依据页面运行时的元素行为判定并拦截广告。**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![测试](https://img.shields.io/badge/tests-694%20passing-brightgreen)](#测试与验收)
+[![测试](https://img.shields.io/badge/tests-760%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与本地化)
 
 [English](README.md)
@@ -142,7 +142,7 @@ pnpm build          # 产出 dist/
 随后在 `edge://extensions`（或 `chrome://extensions`）中启用开发者模式，选择“加载解压缩的
 扩展”，指向 `dist/` 目录。
 
-面向商店的发布包由 `pnpm package` 生成，当前版本为 `release/adblow-1.0.1-edge.zip`；v1.0.0 已在
+面向商店的发布包由 `pnpm package` 生成，当前版本为 `release/adblow-1.0.2-edge.zip`；v1.0.0 已在
 Edge 加载项商店上架。
 
 过滤列表是构建期抓取而非随仓库分发，因此构建需要能访问其上游站点。若上游被屏蔽或过慢，取列表
@@ -154,7 +154,7 @@ Edge 加载项商店上架。
 ## 构建与打包
 
 ```bash
-pnpm test           # 694 项单元与集成测试，单进程内执行
+pnpm test           # 760 项单元与集成测试，单进程内执行
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 与商店图标）
@@ -204,7 +204,7 @@ tools/
   e2e/             24 类真实浏览器验收；活站端到端
   release/         审计、zip 打包、商店截图生成
   diagnostics/     可在控制台直接执行的诊断脚本，用于定位站点异常
-tests/             694 项单元与集成测试（jsdom）
+tests/             760 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
 
@@ -224,7 +224,7 @@ public/            manifest、_locales、图标
 ## 测试与验收
 
 ```bash
-node tests/run-all.ts           # 694 项测试，0 失败
+node tests/run-all.ts           # 760 项测试，0 失败
 node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
 ```
 
@@ -278,5 +278,5 @@ MIT 授权，因此整个交付物按 GPL-3.0 分发；本仓库自行实现的�
 ---
 
 <div align="center">
-<sub>AdBlow 1.0.1 · Manifest V3 · Edge 与 Chrome</sub>
+<sub>AdBlow 1.0.2 · Manifest V3 · Edge 与 Chrome</sub>
 </div>

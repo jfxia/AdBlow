@@ -7,7 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-694%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-760%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 
 [中文说明](README.zh-CN.md)
@@ -157,7 +157,7 @@ pnpm build          # -> dist/
 Then enable Developer mode in `edge://extensions` (or `chrome://extensions`) and choose **Load
 unpacked**, pointing at the `dist/` directory.
 
-The store package is produced by `pnpm package` (`release/adblow-1.0.1-edge.zip`); v1.0.0 is already
+The store package is produced by `pnpm package` (`release/adblow-1.0.2-edge.zip`); v1.0.0 is already
 listed on the Edge Add-ons store.
 
 The filter lists are fetched rather than committed, so a build needs to reach their upstream hosts.
@@ -170,7 +170,7 @@ step is required. If they are unreachable altogether, the same lists are attache
 ## Build and package
 
 ```bash
-pnpm test           # 694 unit and integration tests, run in-process
+pnpm test           # 760 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -225,7 +225,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             694 unit and integration tests (jsdom)
+tests/             760 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -250,7 +250,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 694 tests, 0 failures
+node tests/run-all.ts           # 760 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 
@@ -317,5 +317,5 @@ keep their own licenses.
 ---
 
 <div align="center">
-<sub>AdBlow 1.0.1 · Manifest V3 · Edge &amp; Chrome</sub>
+<sub>AdBlow 1.0.2 · Manifest V3 · Edge &amp; Chrome</sub>
 </div>

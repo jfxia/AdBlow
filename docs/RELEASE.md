@@ -1,13 +1,13 @@
 # AdBlow 发布清单（Microsoft Edge 加载项商店）
 
 **商店页面**：https://microsoftedge.microsoft.com/addons/detail/adblow/omfepilfkagfdjejmdlkkphecllioion
-（已上架 v1.0.0；当前开发版本 v1.0.1）
+（已上架 v1.0.0；当前开发版本 v1.0.2）
 
 ## 一、产物
 
 | 用途 | 文件 |
 |---|---|
-| **上传商店的扩展包** | `release/adblow-1.0.1-edge.zip` |
+| **上传商店的扩展包** | `release/adblow-1.0.2-edge.zip` |
 | 商店列表图标 | `store/icon-300.png`（300×300） |
 | 商店截图 | `store/store-1280x800-options-{zhCN,enUS}.png`、`store/store-1280x800-popup-{zhCN,enUS}.png` |
 
@@ -94,10 +94,10 @@ AdBlow 的行为**全部在本地**，没有任何服务端：
 - [x] ZIP 用独立实现（Python `zipfile`）校验：CRC 全部通过、可正常解包
 - [x] 包内**不含** `_metadata/`（浏览器加载扩展时自动生成的索引缓存，约 6 MB）
 - [x] `name` / `version` / `description` / `icons` / `default_locale` 齐全
-- [x] `version` 为 `x.y.z`（1.0.1），由 `package.json` 单一来源注入
+- [x] `version` 为 `x.y.z`（1.0.2），由 `package.json` 单一来源注入
 - [x] manifest 与界面用到的每个文案 key 在 5 种语言里都存在
 - [x] 5 种语言在真实 Edge 里逐个 `--lang` 实测，文案正确、无空文案、无文字溢出
-- [x] 694 项测试通过 · 24 类干扰视线广告验收 **24/24** · 试点站 E2E 全通过
+- [x] 760 项测试通过 · 24 类干扰视线广告验收 **24/24** · 试点站 E2E 全通过
 
 ## 六、许可证（已确定）
 
@@ -150,3 +150,14 @@ pnpm update-lists          # 抓取 → 编译 → 构建 → 测试 → 打包�
 - The rule manager now shows the fetch date of the bundled filter lists.
 - Fixed a packaging issue that dropped the list-info file; filled in UI strings and translator notes
   for all five locales.
+
+## 九、v1.0.2 更新说明（商店后台"新版说明"字段）
+
+### 本版更新（v1.0.2）
+
+- **规则管理页的排序固定下来**：站点按域名升序、站点内规则按字母序，网络层的域名规则与隐藏规则
+  按站点合并成一张列表（此前分成两块，同一站点会出现两次）；排序时忽略开头的 `www.`。
+- **自学习规则加上限与衰减**：每个站点最多保留 40 条已晋级选择器、200 条观察中的选择器、50 个
+  学习到的广告域名（全局学习域名上限 2,000），30/90 天未命中即清理，命中计数每 30 天减半。
+  目的是防止规则无限增长拖慢页面判定——实测正常站点每站只有个位数条目，这些上限是安全阀。
+- 开发工具：移除指向已下线试点站的默认 URL，改为必须显式传参。
