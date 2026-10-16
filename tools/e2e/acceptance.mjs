@@ -5,16 +5,29 @@
 // Modes: dom (probe hidden), hover (real mouse-over first), click (real click:
 // navigate or new tab?), popup (window.open on load). Events go through CDP
 // Input.dispatchMouseEvent and are trusted, equal to real user input; JS events
-// do not reproduce real behaviour. Run: node tools/e2e/acceptance.mjs [fixture id]
+// do not reproduce real behaviour.
+// Run: node tools/e2e/acceptance.mjs [fixture id] [--min-pass <n>]
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdirSync, openSync, closeSync, rmSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+/** Standard Edge locations. */
 const EDGE_CANDIDATES = [
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
 ];
+
+/**
+ * Where the browser may be, in the order they are tried.
+ *
+ * `ADBLOW_BROWSER` comes first so a machine whose Edge lives elsewhere -- a CI runner image,
+ * a portable install -- needs no code change; the two standard locations keep the behaviour
+ * of every earlier run. A path that does not exist simply falls through to the next one.
+ */
+const BROWSER_CANDIDATES = [process.env.ADBLOW_BROWSER, ...EDGE_CANDIDATES].filter(
+  (p) => typeof p === 'string' && p.length > 0,
+);
 
 const EXT = fileURLToPath(new URL(`../../${process.env.ADBLOW_DIST ?? 'dist'}`, import.meta.url));
 const E2E_DIR = fileURLToPath(new URL('../../_probe/e2e/', import.meta.url));
@@ -24,7 +37,44 @@ const BASE = `http://127.0.0.1:${SITE_PORT}`;
 const AD = `http://localhost:${AD_PORT}`;
 const IMG = `${AD}/banner.png`;
 const VID = `${AD}/v.mp4`;
-const ONLY = process.argv[2] ? Number(process.argv[2]) : null;
+
+/**
+ * Command line: an optional fixture id, plus `--min-pass <n>`.
+ *
+ * Without `--min-pass` the suite exits 0 whatever the hit rate is: it is a ruler for
+ * measuring, not a judge. The flag is opt-in so a local run keeps reporting, while CI can
+ * ask for the documented standard (24 of 24) and fail the job when fewer fixtures are
+ * handled. Returns the fixture to run (null = all) and the minimum pass count.
+ */
+function parseArgv(argv) {
+  let only = null;
+  let minPass = 0;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--min-pass') {
+      const value = argv[++i];
+      if (value === undefined) throw new Error('--min-pass expects a value');
+      minPass = Number(value);
+      if (!Number.isInteger(minPass) || minPass < 0) {
+        throw new Error(`--min-pass expects a whole number, got ${JSON.stringify(value)}`);
+      }
+    } else if (/^\d+$/.test(arg)) {
+      only = Number(arg);
+    } else {
+      throw new Error(`unknown argument: ${arg}`);
+    }
+  }
+  return { only, minPass };
+}
+
+let ONLY = null;
+let MIN_PASS = 0;
+try {
+  ({ only: ONLY, minPass: MIN_PASS } = parseArgv(process.argv.slice(2)));
+} catch (e) {
+  console.log(`bad arguments: ${e.message}`);
+  process.exit(2);
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -679,8 +729,12 @@ async function launch({ port, profileDir, withExtension }) {
   ];
   if (withExtension) args.push(`--load-extension=${EXT}`, `--disable-extensions-except=${EXT}`);
   args.push('about:blank');
-  const browser = EDGE_CANDIDATES.find((p) => existsSync(p));
-  if (!browser) throw new Error('未找到 Edge');
+  const browser = BROWSER_CANDIDATES.find((p) => existsSync(p));
+  if (!browser) {
+    throw new Error(
+      `no browser found; tried ${BROWSER_CANDIDATES.join(', ')} -- set ADBLOW_BROWSER to the executable`,
+    );
+  }
   const child = spawn(browser, args, { stdio: ['ignore', out, err], detached: false });
   closeSync(out);
   closeSync(err);
@@ -972,8 +1026,18 @@ try {
   const failedIds = rows.filter((x) => !x.handled).map((x) => `${x.f.id} ${x.f.name}`);
   if (failedIds.length) console.log(`\n未通过：\n  ${failedIds.join('\n  ')}`);
   console.log('─'.repeat(78));
-  // a failure here is not a run failure -- this is a ruler for measuring hit rate
+  // Without --min-pass a failure here is not a run failure -- this is a ruler for measuring
+  // the hit rate. With it, a hit rate below the requested minimum fails the run, which is
+  // what turns the suite into a gate.
   console.log(`验收命中率：${passed}/${rows.length}`);
+  if (MIN_PASS > 0) {
+    if (passed < MIN_PASS) {
+      failures = 1;
+      console.log(`acceptance gate: ${passed}/${rows.length} handled, minimum ${MIN_PASS} not met`);
+    } else {
+      console.log(`acceptance gate: ${passed}/${rows.length} handled, minimum ${MIN_PASS} met`);
+    }
+  }
 } catch (e) {
   failures = 1;
   console.log(`执行失败：${e.message}`);

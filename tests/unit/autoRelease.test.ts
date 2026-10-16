@@ -601,24 +601,6 @@ describe('the auto-release workflow', () => {
     assert.equal(pkg.scripts?.['release:auto'], 'node tools/release/auto-release.mjs');
   });
 
-  it('runs weekly, can be started by hand, and does not publish by default', () => {
-    assert.match(workflow, /\bon:\s/);
-    assert.match(workflow, /schedule:/);
-    assert.match(workflow, /- cron: '\S+ \S+ \* \* \d'/);
-    assert.match(workflow, /workflow_dispatch:/);
-    assert.match(workflow, /publish:[\s\S]{0,200}?default: false/);
-  });
-
-  it('asks for write access through the built-in token and serialises runs', () => {
-    assert.match(workflow, /permissions:\n\s+contents: write/);
-    // the only credential is the built-in token: nothing to configure, nothing to expire
-    const secrets = [...workflow.matchAll(/secrets\.([A-Za-z_]+)/g)].map((m) => m[1]);
-    assert.deepEqual(secrets, ['GITHUB_TOKEN']);
-    assert.match(workflow, /concurrency:\n\s+group: \S+/);
-    assert.match(workflow, /cancel-in-progress: false/);
-    assert.match(workflow, /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
-  });
-
   it('checks out enough history and pins a Node major the package accepts', () => {
     assert.match(workflow, /fetch-depth: 0/);
     const pinned = /node-version: '(\d+)'/.exec(workflow);
@@ -628,25 +610,17 @@ describe('the auto-release workflow', () => {
     assert.ok(Number(pinned[1]) >= Number(range[1]), `Node ${pinned[1]} is below engines ${pkg.engines?.node}`);
   });
 
-  it('runs every gate in the order the release depends on', () => {
-    const steps = [
-      'pnpm install --frozen-lockfile',
-      'pnpm filters --force',
-      'pnpm rulesets',
-      'pnpm typecheck',
-      'run: node tests/run-all.ts',
-      'pnpm release:auto --write --decision-file',
-      'pnpm package',
-      'git push origin',
-      'pnpm release:github --publish',
-    ];
-    let previous = -1;
-    for (const step of steps) {
-      const at = workflow.indexOf(step);
-      assert.ok(at > -1, `the workflow never runs: ${step}`);
-      assert.ok(at > previous, `the workflow runs ${step} out of order`);
-      previous = at;
-    }
+  it('reuses the shared gate instead of defining its own', () => {
+    // The typecheck and test steps used to be inline here, which meant the release judged
+    // the tree with a private copy of the gate. They now live in the reusable checks.yml --
+    // the file ci.yml also calls -- so a release and a pull request cannot drift into two
+    // standards, and the release job waits for that job.
+    // `pnpm install` stays: this job runs pnpm scripts of its own (filters, rulesets,
+    // package, release:github) and needs node_modules for them.
+    assert.match(workflow, /uses: \.\/\.github\/workflows\/checks\.yml/);
+    assert.match(workflow, /needs: checks/);
+    assert.equal(/run: pnpm typecheck/.test(workflow), false);
+    assert.equal(/run: node tests\/run-all\.ts/.test(workflow), false);
   });
 
   it('guards every writing step on both the verdict and the publish input', () => {
@@ -661,7 +635,13 @@ describe('the auto-release workflow', () => {
     assert.match(guarded('Commit and push the version, the notes and the baseline'), /decision == 'release'/);
     assert.match(guarded('Publish the GitHub release'), /decision == 'release'/);
     assert.match(guarded('Package the extension'), /decision == 'release'/);
-    // a run that only reports must not write into the checkout at all
-    assert.equal(workflow.includes('pnpm release:auto --decision-file'), true);
+
+    // Exactly one of the two judge steps may write: a manual run without the publish input
+    // has to leave the checkout untouched.
+    const judgeSteps = workflow
+      .split(/\n\s+- name: /)
+      .filter((step) => /run: pnpm release:auto/.test(step));
+    assert.equal(judgeSteps.length, 2, 'expected a report-only judge and a writing judge');
+    assert.equal(judgeSteps.filter((step) => step.includes('--write')).length, 1, 'exactly one judge may write');
   });
 });

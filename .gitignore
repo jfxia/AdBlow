@@ -24,3 +24,6 @@ _probe/
 
 # 商店截图的 2 倍原图是中间产物，只有合成后的 1280×800 才入库
 /store/raw-*
+
+# Automatic release decision file (written next to the checkout, kept out of git)
+adblow-auto-release.json

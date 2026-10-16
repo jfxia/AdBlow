@@ -7,8 +7,10 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-865%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-904%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
+[![CI](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
+[![auto-release](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
 
 [中文说明](README.zh-CN.md)
 
@@ -171,7 +173,7 @@ step is required. If they are unreachable altogether, the same lists are attache
 ## Build and package
 
 ```bash
-pnpm test           # 865 unit and integration tests, run in-process
+pnpm test           # 904 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -269,7 +271,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             865 unit and integration tests (jsdom)
+tests/             904 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -294,7 +296,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 865 tests, 0 failures
+node tests/run-all.ts           # 904 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 
@@ -312,6 +314,35 @@ still be visible.
 A live-site end-to-end run (`tools/e2e/run.mjs <url>`) covers the same ground against a real page,
 with image guards, CDN guards and site-owned-domain guards. A regression that removes an ad but
 starts hiding body content therefore fails during testing instead of reaching a release.
+
+## Continuous integration
+
+The gate is defined once and called twice. `.github/workflows/checks.yml` is the only place that states
+what passing means, and it can only be called (`workflow_call`):
+
+| Job | Runner | What it does |
+|---|---|---|
+| `build` | `ubuntu-latest` | install, typecheck, run the test suite, fetch the filter lists, compile the rulesets, build, package, then audit the package by unpacking it (`node tools/release/verify-package.mjs`) |
+| `acceptance` | `windows-latest` | download the built extension and run the 24-category acceptance suite in a real Edge, which the runner image provides |
+
+`.github/workflows/ci.yml` calls it for every push and pull request, with
+`cancel-in-progress` for superseded runs, and the weekly `.github/workflows/auto-release.yml` calls the
+same file before judging the release fingerprint. A release therefore cannot be published from a tree
+that a pull request would reject.
+
+The acceptance job fails when fewer than 24 of the 24 fixtures are handled (`--min-pass 24`), and
+uploads the browser logs as an artifact when it does. The browser is looked up at the two standard Edge
+locations, and `ADBLOW_BROWSER` overrides that when a machine keeps Edge elsewhere.
+
+The whole gate is reproducible locally:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm typecheck && node tests/run-all.ts
+pnpm filters --force && pnpm rulesets
+pnpm build && pnpm package && node tools/release/verify-package.mjs
+node tools/e2e/acceptance.mjs --min-pass 24
+```
 
 ## Known limitations
 

@@ -13,9 +13,18 @@
 # YAML is not executable outside GitHub Actions, which is exactly why the decision is
 # not implemented here.
 #
+# The gate itself (install, typecheck, tests, build, package, unpack audit, and the
+# 24-category acceptance suite) is NOT defined here: this workflow calls the reusable
+# `.github/workflows/checks.yml`, the same file ci.yml calls for every push and pull
+# request. A release therefore cannot be published from a tree that has not passed what a
+# pull request passes, and the two callers cannot drift apart.
+#
 # Why the step order below:
-#   1. fetch + compile before judging -- the fingerprint is computed from those outputs;
-#   2. typecheck and tests before any judgement -- a red tree must never be released;
+#   1. the checks job first -- a red tree must never be released, and `needs: checks` makes
+#      the release job wait for it;
+#   2. fetch + compile before judging -- the fingerprint is computed from those outputs
+#      (this job fetches the lists itself; the checks job runs on another runner, so the
+#      fetch there cannot be shared);
 #   3. judge with --write only when this run may publish -- a manual trigger without the
 #      input checked must leave the checkout untouched;
 #   4. package, commit and push BEFORE release:github -- that tool refuses to publish
@@ -45,7 +54,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The single definition of "this tree passes": the very file ci.yml calls. It runs on
+  # GitHub's runners, so the release job starts only after install, typecheck, tests,
+  # build, package, the unpack audit and the Windows acceptance suite all succeeded.
+  checks:
+    uses: ./.github/workflows/checks.yml
+
   auto-release:
+    needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -55,7 +71,10 @@ jobs:
       # github.workspace, not runner.temp: the runner context only exists inside steps, and
       # GitHub rejects the entire file ("Unrecognized named-value: 'runner'") when it appears in
       # a job-level env block. Caught by a real workflow_dispatch, not by the structural tests.
-      DECISION_FILE: ${{ github.workspace }}/adblow-auto-release.json
+            # Outside the checkout on purpose: the commit step runs `git add --all`, so a decision
+      # file inside the repository would be committed on the first real auto-release.
+      # (github.workspace, not runner.temp -- the runner context is rejected at job level.)
+      DECISION_FILE: ${{ github.workspace }}/../adblow-auto-release.json
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -85,17 +104,13 @@ jobs:
 
       - name: Fetch the filter lists
         # --force: the whole point of the schedule is a fresh fetch; filters/ is not
-        # committed, so a cached copy would be the previous run's data.
+        # committed, so a cached copy would be the previous run's data. This fetch is the
+        # one the fingerprint is computed from, which is why it stays here even though the
+        # checks job fetches the lists as well (different runner, no shared working tree).
         run: pnpm filters --force
 
       - name: Compile the rulesets
         run: pnpm rulesets
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Tests
-        run: node tests/run-all.ts
 
       - name: Judge the fingerprint (report only, writes nothing)
         if: env.AUTO_PUBLISH != 'true'

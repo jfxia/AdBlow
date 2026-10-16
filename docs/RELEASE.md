@@ -133,7 +133,7 @@ AdBlow 的行为**全部在本地**，没有任何服务端：
 - [x] `version` 为 `x.y.z`（1.0.2），由 `package.json` 单一来源注入
 - [x] manifest 与界面用到的每个文案 key 在 5 种语言里都存在
 - [x] 5 种语言在真实 Edge 里逐个 `--lang` 实测，文案正确、无空文案、无文字溢出
-- [x] 865 项测试通过 · 24 类干扰视线广告验收 **24/24** · 试点站 E2E 全通过
+- [x] 904 项测试通过 · 24 类干扰视线广告验收 **24/24** · 试点站 E2E 全通过
 
 ## 七、许可证（已确定）
 
@@ -208,4 +208,69 @@ pnpm release:github --publish
 
 失败是显式失败：任何一步报错，流水线就以非零退出码结束，不会有"看起来成功但什么都没发"的中间状态；
 `concurrency` 保证同一时间只有一个实例在跑，避免两次运行各自推一个提交。
+
+## 十一、CI 结构与本地复现
+
+CI 采用"一处定义、两处调用"：
+
+| 文件 | 触发 | 职责 |
+|---|---|---|
+| `.github/workflows/checks.yml` | 仅 `workflow_call` | **唯一定义"什么算通过"**；不被任何事件直接触发，只接受调用 |
+| `.github/workflows/ci.yml` | `push`、`pull_request` | 只做调用：作业体里没有一条 `run:`，只有 `uses: ./.github/workflows/checks.yml` |
+| `.github/workflows/auto-release.yml` | 每周一 03:17 UTC、手动触发 | 先调用 `checks.yml`（`needs: checks`），通过之后才抓列表、判断指纹、打包与发版 |
+
+`checks.yml` 的两个作业：
+
+1. **build**（`ubuntu-latest`）：`pnpm install --frozen-lockfile` → `pnpm typecheck` →
+   `node tests/run-all.ts` → `pnpm filters --force` → `pnpm rulesets` → `pnpm build` → `pnpm package` →
+   `node tools/release/verify-package.mjs`（独立解包审计）→ 上传 `dist/` 供下一个作业使用。
+   抓取与编译放在两道确定性门禁之后：树本身有问题时不必先等网络。
+2. **acceptance**（`windows-latest`，`needs: build`）：下载上一步的 `dist/`，运行
+   `node tools/e2e/acceptance.mjs --min-pass 24`。24 类夹具需要真实 Edge，选
+   `windows-latest` 的原因是该镜像预装 Edge，而套件本来就是为 Windows 上的 Edge 写的。
+
+四处需要说明的地方：
+
+- **checks 里也要抓列表**。`list-info.json` 只有在规则集注入之后才会生成（见
+  `tools/build/build.mjs`），而解包审计必须断言它在包里；同时受审计的包应当与真正发布的包同形。
+  因此 checks 的 build 作业自己抓一次列表。auto-release 的发布作业再抓一次，因为指纹必须由
+  **那一次**抓取的结果算出，而两个作业跑在不同的 runner 上，工作区无法共享。
+- **`pnpm install` 仍留在 auto-release 的发布作业里**：该作业自己要跑 `pnpm rulesets`、`pnpm package`
+  与 `pnpm release:github`，需要 `node_modules`；被搬进 `checks.yml` 的是 typecheck 与测试这两道判断。
+- **`concurrency` 只写在两个入口上**：`ci.yml` 用 `cancel-in-progress: true`（同一 ref 的旧运行没有
+  继续的意义），auto-release 保持 `cancel-in-progress: false`（正在推送的运行不能被取消）；
+  `checks.yml` 作为被调用方，其并发由调用方的 `concurrency` 覆盖。
+- **独立解包审计**不复用 `tools/release/package.mjs` 的审计代码路径：它用 `tools/release/zip.mjs`
+  的读取器打开 `release/adblow-<版本>-edge.zip`，把包内内容读回来，断言包内 `manifest.json` 的
+  `version` 与 `package.json` 一致、manifest 声明的每个文件都在包里、`_locales/`（含默认语言的
+  `messages.json`）、图标、`list-info.json` 均存在。另有额外两项：包内不得出现浏览器自动生成的
+  `_metadata/`；**文件名里的版本**必须与包内 manifest 一致（防止对旧产物做审计）。
+
+`tools/e2e/acceptance.mjs` 增加了两个开关，默认行为不变：
+
+- `ADBLOW_BROWSER=<可执行文件路径>`：浏览器候选列表变成"该项 + 两个标准 Edge 路径"，该项不存在时
+  自动回退。CI 的 `windows-latest` 用它显式指向镜像里的 Edge。
+- `--min-pass <n>`：命中数低于 n 时以非零退出码结束（默认 0，即只报告命中率，保持原来"尺子"的用法）。
+  CI 用 `--min-pass 24`，因为文档里的验收标准就是 24/24。
+
+验收套件失败时上传的产物：它把两个浏览器的 stdout/stderr 写到 `_probe/e2e/acc-9831.log`、
+`acc-9831.err.log`、`acc-9832.log`、`acc-9832.err.log`，**不写截图**，所以
+`checks.yml` 的 acceptance 作业在 `failure()` 时只上传 `_probe/e2e/*.log`。
+
+本地复现同一套检查（与 `checks.yml` 的 build 作业一一对应）：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm typecheck
+node tests/run-all.ts
+pnpm filters --force && pnpm rulesets   # 规则集不入库：先抓取，再编译
+pnpm build && pnpm package
+node tools/release/verify-package.mjs   # 独立解包审计（等价脚本：pnpm verify:package）
+node tools/e2e/acceptance.mjs --min-pass 24   # 需要 Edge；位置不同时设 ADBLOW_BROWSER
+```
+
+workflow 本身无法在本机执行 —— GitHub Actions 是唯一的解释器，因此
+`tests/unit/ciWorkflows.test.ts` 只做结构断言：触发条件、权限、调用关系、必需步骤存在与顺序，
+以及两条真实踩过的坑（作业级 `env` 里不得出现 `runner.` 上下文；不得给 pnpm 传 `--` 分隔符）。
+命令字符串的拼接细节不作断言。
 

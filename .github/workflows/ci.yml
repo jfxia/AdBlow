@@ -1,0 +1,28 @@
+# Every push and every pull request runs the same gate: the reusable workflow in
+# checks.yml. This file is deliberately only wiring -- no step is defined here, so a pull
+# request can never be judged by a weaker (or stronger) standard than a release.
+#
+# The repository had no CI on push or pull request before this file; the strongest suite
+# (tools/e2e/acceptance.mjs, 24 fixtures) was only ever run by hand. It now runs inside
+# checks.yml on windows-latest, where Edge is part of the runner image.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push to the same ref makes the running gate obsolete: cancel it. The group is
+  # per ref, so pushes to two branches do not cancel each other.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    # A job that calls a workflow can carry nothing but `name`, `uses`, `with`, `secrets`,
+    # `needs`, `if`, `permissions` and `strategy`. `./` marks a workflow in this repository,
+    # which is exactly why the gate lives in version control next to what it checks.
+    uses: ./.github/workflows/checks.yml

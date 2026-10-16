@@ -1,0 +1,153 @@
+# The single definition of "this tree passes".
+#
+# Nothing here is triggered by itself: this file only declares `workflow_call`, and every
+# entry point that needs the gate calls it by path. ci.yml calls it for each push and pull
+# request; auto-release.yml calls it before judging the release fingerprint. That is the
+# point of the file -- a release and a pull request cannot drift into two different
+# definitions of "passing", because there is only one.
+#
+# Two jobs, because the strongest suite needs a different operating system:
+#
+#   build (ubuntu-latest)
+#     install -> fetch the filter lists -> compile the rulesets -> typecheck -> tests ->
+#     build -> package -> INDEPENDENT UNPACK AUDIT (tools/release/verify-package.mjs).
+#     The audit is deliberately separate code from the audit inside package.mjs: it opens
+#     the zip that would be uploaded and reads the files back out of it, which is the only
+#     way the `list-info.json` deletion was ever noticed -- the build log looked perfect
+#     while the packaged extension had lost the file the rule manager reads.
+#     The lists are fetched here because `list-info.json` is written by the build only when
+#     the rulesets are injected; auditing a package that never had the file would assert
+#     nothing. auto-release fetches the lists again in its own job, on its own runner,
+#     because its fingerprint has to be computed from that run's fetch.
+#
+#   acceptance (windows-latest, needs: build)
+#     Download the extension that the build job produced and drive the 24-category
+#     acceptance suite (tools/e2e/acceptance.mjs) in a real Edge. The runner image ships
+#     Edge, which is why this job is on Windows: the suite was written for Edge on Windows.
+#
+# No concurrency block on purpose: a called workflow is covered by the concurrency of the
+# workflow that calls it (ci.yml cancels superseded runs, auto-release.yml never cancels).
+name: checks
+
+on:
+  workflow_call:
+
+# Everything here reads the checkout; nothing writes to it. A reusable workflow can only
+# narrow the caller's permissions, never widen them.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build, test and audit the package
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        # Before setup-node: `cache: pnpm` needs pnpm on PATH to locate the store.
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # package.json engines states >=24. The major is pinned rather than resolved from
+          # the range: the suite is verified on 24, and `node tests/run-all.ts` depends on
+          # unflagged TypeScript type stripping.
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Tests
+        run: node tests/run-all.ts
+
+      - name: Fetch the filter lists
+        # --force: a cached copy would be the previous run's data, and the package audit
+        # below asserts the list revision that this build actually carries. After the two
+        # deterministic gates above, so a broken tree fails without waiting for the network.
+        run: pnpm filters --force
+
+      - name: Compile the rulesets
+        run: pnpm rulesets
+
+      - name: Build
+        run: pnpm build
+
+      - name: Package
+        run: pnpm package
+
+      - name: Audit the package by unpacking it
+        # Independent of package.mjs: this reads release/adblow-<version>-edge.zip back
+        # through tools/release/zip.mjs and asserts the manifest version, every file the
+        # manifest declares, _locales, the icons and list-info.json are really in the zip.
+        run: node tools/release/verify-package.mjs
+
+      - name: Upload the built extension for the acceptance job
+        uses: actions/upload-artifact@v4
+        with:
+          name: adblow-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  acceptance:
+    name: acceptance (24 ad kinds, real Edge)
+    needs: build
+    runs-on: windows-latest
+    # The suite launches two real browsers (baseline without the extension, then with it)
+    # and settles ~7s per fixture per run, so a full pass takes tens of minutes. A hang
+    # must fail the job rather than hold the queue for the six-hour default.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        # No pnpm and no install: tools/e2e/acceptance.mjs is dependency-free and uses
+        # Node's built-in fetch and WebSocket to talk to the browser over CDP.
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Download the built extension
+        uses: actions/download-artifact@v4
+        with:
+          name: adblow-dist
+          path: dist
+
+      - name: Check that the extension arrived
+        run: |
+          if (-not (Test-Path dist/manifest.json)) {
+            throw 'dist/manifest.json is missing after the artifact download'
+          }
+
+      - name: Acceptance suite
+        env:
+          # The suite defaults to the two standard Edge locations; the environment variable
+          # exists so a runner that installs Edge elsewhere needs no code change. A path
+          # that does not exist falls through to the defaults.
+          ADBLOW_BROWSER: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+        # --min-pass turns the suite from a ruler into a gate: the 24-category standard is
+        # 24/24, and the job fails when fewer fixtures are handled. Without the flag the
+        # suite only reports the hit rate.
+        run: node tools/e2e/acceptance.mjs --min-pass 24
+
+      - name: Upload the browser logs when the suite fails
+        # The suite writes each browser's stdout and stderr to _probe/e2e/acc-<port>.log and
+        # acc-<port>.err.log. It takes no screenshots, so there are no images to collect.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-logs
+          path: _probe/e2e/*.log
+          if-no-files-found: ignore
+          retention-days: 7

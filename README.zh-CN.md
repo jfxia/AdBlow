@@ -7,8 +7,10 @@
 **在过滤列表匹配之外，依据页面运行时的元素行为判定并拦截广告。**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![测试](https://img.shields.io/badge/tests-865%20passing-brightgreen)](#测试与验收)
+[![测试](https://img.shields.io/badge/tests-904%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与本地化)
+[![持续集成](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
+[![自动发版](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
 
 [English](README.md)
 
@@ -155,7 +157,7 @@ Edge 加载项商店上架。一次发布由三条命令串起来——`pnpm ver
 ## 构建与打包
 
 ```bash
-pnpm test           # 865 项单元与集成测试，单进程内执行
+pnpm test           # 904 项单元与集成测试，单进程内执行
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 与商店图标）
@@ -241,7 +243,7 @@ tools/
   e2e/             24 类真实浏览器验收；活站端到端
   release/         审计、zip 打包、商店截图生成
   diagnostics/     可在控制台直接执行的诊断脚本，用于定位站点异常
-tests/             865 项单元与集成测试（jsdom）
+tests/             904 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
 
@@ -261,7 +263,7 @@ public/            manifest、_locales、图标
 ## 测试与验收
 
 ```bash
-node tests/run-all.ts           # 865 项测试，0 失败
+node tests/run-all.ts           # 904 项测试，0 失败
 node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
 ```
 
@@ -275,6 +277,33 @@ node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
 
 另有活站端到端脚本 `tools/e2e/run.mjs <url>`，内置图片守卫、CDN 守卫与站点自有域名守卫。由此，
 “修复某类广告却开始隐藏正文”这类回归会在测试阶段暴露，而不会进入发布版本。
+
+## 持续集成
+
+门禁“一处定义、两处调用”。`.github/workflows/checks.yml` 是唯一说明“什么算通过”的地方，且只接受
+调用（`workflow_call`）：
+
+| 作业 | 运行环境 | 内容 |
+|---|---|---|
+| `build` | `ubuntu-latest` | 安装依赖、类型检查、跑测试套件、抓取过滤列表、编译规则集、构建、打包，然后**解包审计**（`node tools/release/verify-package.mjs`） |
+| `acceptance` | `windows-latest` | 下载上一步构建出的扩展，在真实 Edge 中跑 24 类验收套件（Edge 由该镜像预装） |
+
+`.github/workflows/ci.yml` 在每次 push 与 pull request 时调用它，并对同一 ref 的旧运行开启
+`cancel-in-progress`；每周一次的 `.github/workflows/auto-release.yml` 在判断指纹之前调用**同一个文件**。
+因此不存在“能发版却过不了 PR 门禁”的树。
+
+验收作业在 24 类中不足 24 类命中时失败（`--min-pass 24`），失败时把浏览器日志作为产物上传；浏览器按
+两个标准 Edge 路径查找，位置不同时用 `ADBLOW_BROWSER` 覆盖。
+
+整套门禁可在本地复现：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm typecheck && node tests/run-all.ts
+pnpm filters --force && pnpm rulesets
+pnpm build && pnpm package && node tools/release/verify-package.mjs
+node tools/e2e/acceptance.mjs --min-pass 24
+```
 
 ## 已知限制
 
