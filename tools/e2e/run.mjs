@@ -17,7 +17,13 @@ const EDGE_CANDIDATES = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
 ];
 
-const URL_UNDER_TEST = process.argv[2] ?? 'https://afford.gjvrohros.cc/category/jrxw1/';
+// The URL under test is required: this tool used to default to a pilot site that has
+// since gone offline, and failing silently against a dead host wasted runs.
+const URL_UNDER_TEST = process.argv[2];
+if (!URL_UNDER_TEST) {
+  console.error('用法: node tools/e2e/run.mjs <url>   （需要一个可访问的页面地址）');
+  process.exit(2);
+}
 const EXT = fileURLToPath(new URL(`../../${process.env.ADBLOW_DIST ?? 'dist'}`, import.meta.url));
 const E2E_DIR = fileURLToPath(new URL('../../_probe/e2e/', import.meta.url));
 

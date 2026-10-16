@@ -14,7 +14,12 @@ import { JSDOM } from 'jsdom';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0';
 
-const url = process.argv[2] ?? 'https://afford.gjvrohros.cc/category/jrxw1/';
+// Required argument: the previous default pointed at a pilot site that is now offline.
+const url = process.argv[2];
+if (!url) {
+  console.error('用法: node tools/recon/snapshot.mjs <url>');
+  process.exit(2);
+}
 /** Output filename (under tests/fixtures/); multi-site regression relies on it. */
 const OUT_NAME = process.argv[3] ?? 'pilot-category.html';
 

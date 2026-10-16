@@ -1,7 +1,12 @@
 import { writeFileSync } from 'node:fs';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0';
-const BASE = 'https://afford.gjvrohros.cc';
+// Required argument: the previous hard-coded base was a pilot site that is now offline.
+const BASE = process.argv[2];
+if (!BASE) {
+  console.error('用法: node tools/recon/fetch-sdk.mjs <base-url>');
+  process.exit(2);
+}
 
 const candidates = [
   '/category/jrxw1/ad-sdk-v0.0.4.10.js',

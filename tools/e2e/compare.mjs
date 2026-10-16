@@ -44,7 +44,6 @@ const PAGES = (() => {
   const arg = process.argv.find((a) => a.startsWith('--pages='));
   if (arg) return arg.slice('--pages='.length).split(',').filter(Boolean);
   return [
-    'https://afford.gjvrohros.cc/category/jrxw1/',
     'https://javeve-2026085.dgav37.com/ja/list/44247.html',
     'https://1024cg.com/page/3/?ysclid=mv25k2xqsu241136248',
     'https://09s97k.dgav36.xyz/',
