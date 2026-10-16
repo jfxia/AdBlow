@@ -147,7 +147,9 @@ Edge 加载项商店上架。
 
 过滤列表是构建期抓取而非随仓库分发，因此构建需要能访问其上游站点。若上游被屏蔽或过慢，取列表
 脚本会自动回退到镜像（托管在 GitHub 的列表走 jsDelivr，EasyList 走 adblockplus.org），并打印
-实际使用的来源，无需手动干预。
+实际使用的来源，无需手动干预。若上游完全不可达，同一批列表也作为附件放在
+[最新发布](https://github.com/jfxia/AdBlow/releases/latest) 中：把该压缩包解压到 `filters/`
+目录，再执行 `pnpm rulesets && pnpm build` 即可，全程无需联网。
 
 ## 构建与打包
 

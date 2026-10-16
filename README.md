@@ -163,7 +163,9 @@ listed on the Edge Add-ons store.
 The filter lists are fetched rather than committed, so a build needs to reach their upstream hosts.
 If those are blocked or slow, the fetcher falls back to mirrors on its own (jsDelivr for the lists
 hosted on GitHub, adblockplus.org for the EasyList files) and reports which source it used; no manual
-step is required.
+step is required. If they are unreachable altogether, the same lists are attached to the
+[latest release](https://github.com/jfxia/AdBlow/releases/latest): extract that archive into
+`filters/`, then continue with `pnpm rulesets && pnpm build` — no network access needed.
 
 ## Build and package
 
