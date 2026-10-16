@@ -52,7 +52,10 @@ jobs:
       # Scheduled runs release on their own; a manual run releases only when the input is
       # checked, so pressing "Run workflow" is safe by default.
       AUTO_PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish == true }}
-      DECISION_FILE: ${{ runner.temp }}/adblow-auto-release.json
+      # github.workspace, not runner.temp: the runner context only exists inside steps, and
+      # GitHub rejects the entire file ("Unrecognized named-value: 'runner'") when it appears in
+      # a job-level env block. Caught by a real workflow_dispatch, not by the structural tests.
+      DECISION_FILE: ${{ github.workspace }}/adblow-auto-release.json
     steps:
       - name: Checkout
         uses: actions/checkout@v4
