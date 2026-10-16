@@ -29,6 +29,26 @@
   "popupConfirmClear": {
     "message": "Clear all rules AdBlow learned on $1?"
   },
+  "popupWallTitle": {
+    "message": "Anti-adblock wall detected",
+    "description": "Anti-adblock wall card heading; shown only when a wall was detected on this site."
+  },
+  "popupWallDetected": {
+    "message": "This site is covering the page with an anti-adblock prompt. The fix hides only that prompt layer and restores the content it covered — ad blocking stays unchanged.",
+    "description": "Wall card body before the user confirms; states exactly what the fix changes."
+  },
+  "popupWallOn": {
+    "message": "Fix on: hides only that prompt layer and restores the covered content; ad blocking stays unchanged.",
+    "description": "Wall card body once the fix is enabled for this site."
+  },
+  "popupWallEnable": {
+    "message": "Fix this site",
+    "description": "Wall card button that enables the fix for this site."
+  },
+  "popupWallDisable": {
+    "message": "Stop fixing this site",
+    "description": "Wall card button that turns the fix off for this site."
+  },
 
   "optionsTitle": { "message": "Rule manager" },
   "optionsLede": {

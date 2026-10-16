@@ -7,7 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-642%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-689%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 
 [中文说明](README.zh-CN.md)
@@ -77,6 +77,14 @@ Four behaviours are restricted in the page's MAIN world: `window.open` calls, cl
 popup-state writes to `localStorage`, `sessionStorage` and `window.name`, and document-level click
 handlers that only perform navigation.
 
+### Anti-adblock walls
+
+When a site measures a bait element to detect a blocker and then gates the page behind an
+ad-blocker notice, the popup offers a per-site fix. Nothing changes until that is accepted: the fix
+hides the gate, restores the article content the gate hid, and leaves ad blocking in place, so the
+page becomes readable without letting the ads back in. Detection runs regardless, so the popup can
+report a wall even before anything is done about it.
+
 ### Scriptlet support
 
 13 canonical `##+js(...)` scriptlets (`abort-on-property-read`, `set-constant`, `json-prune`,
@@ -129,7 +137,7 @@ The store package `adblow-1.0.0-edge.zip` is ready but has not been published ye
 ## Build and package
 
 ```bash
-pnpm test           # 642 unit and integration tests, run in-process
+pnpm test           # 689 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -184,7 +192,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             642 unit and integration tests (jsdom)
+tests/             689 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -209,7 +217,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 642 tests, 0 failures
+node tests/run-all.ts           # 689 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 
@@ -238,9 +246,10 @@ starts hiding body content therefore fails during testing instead of reaching a 
   (`abort-on-stack-trace`, `remove-node-text`, `nano-setTimeout-booster`, `nowebrtc`, `noeval` and
   others) account for 385 rules. The build reports what it skips instead of widening a rule to
   include more.
-- Anti-adblock walls are not neutralised yet. A validation fixture for them exists (category 24) and
-  currently fails: a site that measures a bait element and finds it hidden can still put up its
-  ad-blocker gate. The design for relaxing hiding on such sites is written down, but not built.
+- Anti-adblock walls (a site measuring a bait element, then gating the page) are handled only after
+  an explicit per-site confirmation. The popup offers to hide the gate and restore the content it
+  hid, while ad blocking stays on; nothing changes on a site until that is accepted, and the choice
+  can be undone.
 - Filter lists are compiled at build time, so updating them requires rebuilding the extension.
   This is an MV3 constraint: remote rulesets are not supported.
 - No public performance benchmarks yet, and no like-for-like comparison against other blockers on

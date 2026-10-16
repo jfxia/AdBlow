@@ -29,6 +29,26 @@
   "popupConfirmClear": {
     "message": "清空 $1 上 AdBlow 学到的全部规则？"
   },
+  "popupWallTitle": {
+    "message": "检测到反过滤提示",
+    "description": "Anti-adblock wall card heading; shown only when a wall was detected on this site."
+  },
+  "popupWallDetected": {
+    "message": "本站用反过滤提示挡住了页面。点击后只隐藏该提示层、恢复被遮挡的正文，广告拦截保持不变。",
+    "description": "Wall card body before the user confirms; states exactly what the fix changes."
+  },
+  "popupWallOn": {
+    "message": "已启用：只隐藏该提示层、恢复被遮挡的正文；广告拦截保持不变。",
+    "description": "Wall card body once the fix is enabled for this site."
+  },
+  "popupWallEnable": {
+    "message": "在本站处理该提示",
+    "description": "Wall card button that enables the fix for this site."
+  },
+  "popupWallDisable": {
+    "message": "不再处理该提示",
+    "description": "Wall card button that turns the fix off for this site."
+  },
 
   "optionsTitle": { "message": "规则管理" },
   "optionsLede": {

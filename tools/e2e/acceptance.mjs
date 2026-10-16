@@ -437,6 +437,11 @@ export const FIXTURES = [
     name: '反过滤墙（诱饵探测 + 硬门禁遮罩）',
     mode: 'dom',
     probe: '#real-ad-slot',
+    // The fix is gated on the user confirming it for this site (manual confirmation, never
+    // silent). Clicking the popup button is not automatable here, so the confirmation the
+    // popup would write is seeded directly -- same key, same store. The unconfirmed path
+    // (hint only, page untouched) is covered by unit and integration tests instead.
+    seedStorage: { 'wallfix:127.0.0.1': true },
     html: page(
       `<style>
          #ad-slot-top,#adsbox,.google_ads{background:#eef;color:#333;font:14px sans-serif;text-align:center}
@@ -716,6 +721,36 @@ async function waitForExtension(port) {
 
 const AD_HOST = new URL(AD).host;
 
+/**
+ * Seed extension storage before a fixture loads.
+ *
+ * Category 24 (the anti-adblock wall) is gated on the user confirming the fix for a site.
+ * The popup button cannot be clicked from here, so the confirmation is written straight
+ * into chrome.storage.local from the extension's service worker -- the very key the popup
+ * would set. Fixtures that do not declare `seedStorage` skip this entirely, so the other
+ * 23 behave exactly as before.
+ */
+async function seedExtensionStorage(port, entries) {
+  const names = Object.keys(entries ?? {});
+  if (names.length === 0) return '未预置';
+  const sw = (await list(port))
+    .filter((t) => t.type === 'service_worker' && String(t.url).startsWith('chrome-extension://'))
+    .find((t) => String(t.url).endsWith('background.js'));
+  if (!sw) return '未找到 service worker';
+  const cdp = await Cdp.connect(sw.webSocketDebuggerUrl);
+  try {
+    const r = await cdp.send('Runtime.evaluate', {
+      expression: `chrome.storage.local.set(${JSON.stringify(entries)})`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (r.exceptionDetails) return `报错 ${JSON.stringify(r.exceptionDetails).slice(0, 70)}`;
+    return names.join(', ');
+  } finally {
+    cdp.close();
+  }
+}
+
 /** Whether the probe is hidden on the page (we tag with data-adblow-hidden). */
 const PROBE_EXPR = (probe) => `(() => {
   const els = [...document.querySelectorAll(${JSON.stringify(probe)})];
@@ -748,6 +783,14 @@ async function runFixture({ port, fixture }) {
   const cdp = await Cdp.connect(target.webSocketDebuggerUrl);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+
+  // Optional: put the extension into the state the user would have reached by hand
+  // (e.g. "I confirmed the anti-adblock fix for this site"). Done before navigating so
+  // the content script reads it on its very first run.
+  if (fixture.seedStorage) {
+    const seeded = await seedExtensionStorage(port, fixture.seedStorage);
+    console.log(`  [夹具 ${fixture.id}] 预置扩展存储: ${seeded}`);
+  }
 
   // mark the event position: any page target appearing after this is a new tab
   const eventMark = BROWSER_CDP ? BROWSER_CDP.events.length : 0;

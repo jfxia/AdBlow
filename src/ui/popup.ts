@@ -1,14 +1,26 @@
 import { allEntries, clearSite } from '../content/learn.ts';
-import { isSiteDisabled, readStats, setSiteDisabled } from '../content/settings.ts';
+import {
+  isSiteDisabled,
+  isWallFixEnabled,
+  readStats,
+  readWallDetected,
+  setSiteDisabled,
+  setWallFixEnabled,
+} from '../content/settings.ts';
 import { chromeLocal } from '../content/storage.ts';
 import { applyI18n, t } from './i18n.ts';
 
 /**
- * Popup: per-site toggle, run stats, and clearing this site's learned results.
+ * Popup: per-site toggle, run stats, wall fix, and clearing this site's learned results.
  *
  * The toggle is a safety valve: a filter that misbehaves on one site must be switchable per
  * site, otherwise the only option left is disabling the whole extension. All text goes
  * through i18n (`t()` / `data-i18n`) — see ui/i18n.ts.
+ *
+ * The anti-adblock wall fix is a **separate, explicit confirmation**: the popup only offers it
+ * after the content script reported a wall on this site, and the copy states exactly what it
+ * does — hide that prompt layer and re-show the content the page covered, with ad blocking
+ * unchanged.
  */
 
 const store = chromeLocal();
@@ -39,7 +51,35 @@ function showNotice(text: string, hostLabel = false): void {
   el('toggle-row').hidden = true;
   el('stats').hidden = true;
   el('stats-hint').hidden = true;
+  el('wall-card').hidden = true;
   if (hostLabel) el('host').textContent = t('popupNotApplicable');
+}
+
+/**
+ * Wall card: hidden unless the site is being filtered and either the fix is on or a wall was
+ * detected here before. The button is the only way the fix can ever start.
+ */
+async function renderWall(host: string, disabled: boolean): Promise<void> {
+  const card = el('wall-card');
+  if (disabled) {
+    card.hidden = true;
+    return;
+  }
+
+  const [detectedAt, fixOn] = await Promise.all([
+    readWallDetected(store, host),
+    isWallFixEnabled(store, host),
+  ]);
+  if (!fixOn && detectedAt === undefined) {
+    card.hidden = true;
+    return;
+  }
+
+  card.hidden = false;
+  el('wall-detail').textContent = fixOn ? t('popupWallOn') : t('popupWallDetected');
+  el<HTMLButtonElement>('wall-toggle').textContent = fixOn
+    ? t('popupWallDisable')
+    : t('popupWallEnable');
 }
 
 async function render(): Promise<void> {
@@ -77,6 +117,8 @@ async function render(): Promise<void> {
   } else {
     hint.textContent = t('popupHintNoStats');
   }
+
+  await renderWall(host, disabled);
 }
 
 el<HTMLInputElement>('enabled').addEventListener('change', async (event) => {
@@ -84,6 +126,15 @@ el<HTMLInputElement>('enabled').addEventListener('change', async (event) => {
   if (!host) return;
   const enabled = (event.target as HTMLInputElement).checked;
   await setSiteDisabled(store, host, !enabled);
+  await render();
+});
+
+el('wall-toggle').addEventListener('click', async () => {
+  const host = await currentHost();
+  if (!host) return;
+  const fixOn = await isWallFixEnabled(store, host);
+  // Same key the content script reads (and watches via chrome.storage.onChanged).
+  await setWallFixEnabled(store, host, !fixOn);
   await render();
 });
 

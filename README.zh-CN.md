@@ -7,7 +7,7 @@
 **在过滤列表匹配之外，依据页面运行时的元素行为判定并拦截广告。**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![测试](https://img.shields.io/badge/tests-642%20passing-brightgreen)](#测试与验收)
+[![测试](https://img.shields.io/badge/tests-689%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与本地化)
 
 [English](README.md)
@@ -66,6 +66,13 @@ AdBlow 在此之外引入运行时观测，用于处理两类常见的规避手�
 在页面的 MAIN world 中限制四类行为：`window.open` 调用、点击劫持、弹窗状态写入
 （`localStorage`、`sessionStorage`、`window.name`），以及文档级“仅执行跳转”的点击处理函数。
 
+### 反过滤墙
+
+站点用诱饵元素探测过滤器、再用“请关闭广告过滤器”一类遮罩挡住页面时，弹窗提供逐站处理入口。
+用户确认之前不改变页面任何行为；确认后隐藏该遮罩、恢复被它遮挡的正文，并保持广告拦截不变，
+因此页面恢复可读，广告不会被放回来。检测始终运行，所以即使尚未处理，弹窗也能报告本页出现过
+反过滤墙。
+
 ### 脚本注入
 
 支持 13 个规范 `##+js(...)` 规则（`abort-on-property-read`、`set-constant`、`json-prune`、
@@ -116,7 +123,7 @@ pnpm build          # 产出 dist/
 ## 构建与打包
 
 ```bash
-pnpm test           # 642 项单元与集成测试，单进程内执行
+pnpm test           # 689 项单元与集成测试，单进程内执行
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 与商店图标）
@@ -166,7 +173,7 @@ tools/
   e2e/             24 类真实浏览器验收；活站端到端
   release/         审计、zip 打包、商店截图生成
   diagnostics/     可在控制台直接执行的诊断脚本，用于定位站点异常
-tests/             642 项单元与集成测试（jsdom）
+tests/             689 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
 
@@ -186,7 +193,7 @@ public/            manifest、_locales、图标
 ## 测试与验收
 
 ```bash
-node tests/run-all.ts           # 642 项测试，0 失败
+node tests/run-all.ts           # 689 项测试，0 失败
 node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
 ```
 
@@ -209,8 +216,9 @@ node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
   脚本读取时原样放行。列表中有 38 条没有搜索串，会被丢弃。仍未实现的脚本注入
   （`abort-on-stack-trace`、`remove-node-text`、`nano-setTimeout-booster`、`nowebrtc`、`noeval`
   等）合计 385 条。构建会如实报告跳过项，不会放宽规则以纳入更多条目。
-- 反过滤墙尚未处理。对应的验收夹具已经存在（第 24 类），目前为失败状态：站点测量到诱饵元素被隐藏
-  之后，仍能弹出“请关闭广告过滤器”的门禁。对这类站点按需放宽隐藏的方案已经设计，但尚未实现。
+- 反过滤墙（站点测量诱饵元素后对页面设门禁）只有在用户**逐站确认**之后才会处理。弹窗会提示并提供
+  操作：隐藏该提示层、恢复被它遮挡的正文，同时广告拦截保持不变；用户确认之前不改变页面任何行为，
+  确认后也可以随时撤销。
 - 过滤列表在构建期编译，更新列表需重新构建扩展。此为 MV3 限制，不支持远程规则集。
 - 尚无公开的性能基准，也尚未在中立站点上与其他过滤器做同条件对比。
 

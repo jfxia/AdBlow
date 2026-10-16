@@ -28,8 +28,15 @@ import {
 import { promotedSelectors, recordHit } from './learn.ts';
 import { applyListCosmetic } from './listCosmetic.ts';
 import { recordDomains } from './domainLearn.ts';
-import { isSiteDisabled, writeStats } from './settings.ts';
+import { isSiteDisabled, isWallFixEnabled, markWallDetected, wallFixKey, writeStats } from './settings.ts';
 import { chromeLocal } from './storage.ts';
+import { detectWall } from '../engine/antiAdblock.ts';
+import {
+  captureContentBaseline,
+  neutralizeWall,
+  refreshContentBaseline,
+  wallContext,
+} from './wallFix.ts';
 
 /**
  * Debounce for the geometry pass.
@@ -67,6 +74,15 @@ const PRISTINE_STRATEGY: 'auto' | 'always' | 'never' = 'auto';
  * hidden, but no ready log and not a single learned domain".
  */
 const BACKFILL_TIMEOUT_MS = 6000;
+
+/**
+ * Debounce for the anti-adblock wall pass.
+ *
+ * A wall is inserted as a node (and a site that re-hides the content usually writes a style,
+ * which raises no mutation record), so this pass is driven by mutations plus the upkeep rounds
+ * rather than by a permanent poll.
+ */
+const WALL_DEBOUNCE_MS = 800;
 
 const store = chromeLocal();
 
@@ -221,6 +237,76 @@ async function boot(): Promise<void> {
     options.contentCdnDomains = frequentMediaDomains(document, host);
   };
 
+  // ── Anti-adblock wall (manual confirmation per site) ────────────────────────
+  //
+  // Detection always runs, so the popup can report "a wall was found here"; the page itself is
+  // not changed until the user confirms the fix for this site (`wallfix:<host>`, see
+  // settings.ts). Neutralising a wall never relaxes ad blocking — content/wallFix.ts keeps our
+  // `data-adblow-hidden` untouched.
+  let wallFixOn = await isWallFixEnabled(store, host);
+  // Baseline of "content that is visible now": only an element recorded here may later be
+  // re-shown, which is what keeps the restore off content the site hid by design.
+  const wallBaseline = captureContentBaseline(document);
+  let wallDetected = false;
+  let wallHidden = 0;
+  let wallRestored = 0;
+
+  const wallPass = (): void => {
+    try {
+      const wall = wallContext(innerWidth * innerHeight);
+      const detection = detectWall(document, wall);
+      if (detection.detected && !wallDetected) {
+        // One write per page load: the popup reads this timestamp for its hint.
+        void markWallDetected(store, host);
+      }
+      if (detection.detected) wallDetected = true;
+      if (!wallFixOn) return;
+
+      refreshContentBaseline(wallBaseline, document);
+      const result = neutralizeWall(document, { baseline: wallBaseline, wall });
+      wallHidden += result.hiddenPrompts.length;
+      wallRestored += result.restored.length;
+      if (result.hiddenPrompts.length || result.restored.length) {
+        const kinds = [...new Set(result.restored.map((r) => r.reason))].join(',');
+        console.debug(
+          `[adblow] 反过滤墙：隐藏提示 ${result.hiddenPrompts.length} 个、` +
+            `恢复正文 ${result.restored.length} 个${kinds ? `（${kinds}）` : ''}`,
+        );
+      }
+    } catch (error) {
+      console.warn('[adblow] 反过滤墙处理失败', error);
+    }
+  };
+
+  /** Debounced pass: a wall is inserted as a node, so mutations are the main trigger. */
+  let wallTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleWallPass = (): void => {
+    // Once a wall is known and the fix is off, another look cannot change anything (the popup
+    // hint is already recorded), so dynamic pages do not pay for repeated scans.
+    if (wallDetected && !wallFixOn) return;
+    if (document.hidden || wallTimer !== null) return;
+    wallTimer = setTimeout(() => {
+      wallTimer = null;
+      wallPass();
+    }, WALL_DEBOUNCE_MS);
+  };
+
+  // Confirmation can arrive while the page is open (the popup writes the same key). There is no
+  // message protocol here, so chrome.storage is the channel; storage is also what the acceptance
+  // harness seeds before navigation, and both paths must work.
+  try {
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== 'local' || !changes) return;
+      const key = wallFixKey(host);
+      if (!(key in changes)) return;
+      wallFixOn = changes[key]?.newValue === true;
+      // Act at once: the wall the user is looking at is already up.
+      if (wallFixOn) wallPass();
+    });
+  } catch (error) {
+    console.warn('[adblow] 监听反过滤墙开关失败', error);
+  }
+
   // Phase one: static rules only. injected always false turns heuristics off.
   let options: JudgeOptions = {
     injected: () => false,
@@ -248,6 +334,8 @@ async function boot(): Promise<void> {
         learn(added.hits);
       }
     }
+    // A late (or re-inserted) wall arrives as a node; the pass is debounced.
+    scheduleWallPass();
   }).observe(document.documentElement, { childList: true, subtree: true });
 
   // sweep skips already-hidden elements, so repeated passes never double-count.
@@ -398,6 +486,10 @@ async function boot(): Promise<void> {
     // More content may have loaded → refresh the budget denominator (it only grows).
     budget.refresh(document);
     refreshContentCdn();
+    // Wall handling before the hiding passes: the baseline must see newly parsed content, and a
+    // restored article must not be re-judged as an ad slot.
+    refreshContentBaseline(wallBaseline, document);
+    wallPass();
     const farms = hideLinkFarms();
     const fakeClose = hideFakeClose();
     const layers = hideClickLayers();
@@ -415,6 +507,7 @@ async function boot(): Promise<void> {
         `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays} 点击层=${layers} ` +
         `假关闭=${fakeClose} 链接农场=${farms} ` +
         `复核=${audit.checked}/重新隐藏=${audit.refought} ` +
+        `反过滤墙=检测${wallDetected ? '有' : '无'}/隐藏提示${wallHidden}/恢复正文${wallRestored} ` +
         `预算=文字${bs.text}/${bs.totalText} 链接${bs.links}/${bs.totalLinks} 兜底拒绝=${bs.suppressed}` +
         (audit.stubborn.length ? ` 顽固=[${audit.stubborn.slice(0, 3).join(' ')}]` : ''),
     );
@@ -451,6 +544,10 @@ async function boot(): Promise<void> {
     // Content is only parsed now → re-measure the budget baseline (it only grows).
     budget.refresh(document);
     sweepNow();
+    // First full look at the parsed DOM: record the wall baseline before the page can hide the
+    // article, and repair a wall that is already up (see content/wallFix.ts).
+    refreshContentBaseline(wallBaseline, document);
+    wallPass();
   }
 
   // Phase-one finalisation: independent of the backfill, so land it right away.

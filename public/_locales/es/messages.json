@@ -33,6 +33,26 @@
   "popupConfirmClear": {
     "message": "¿Borrar todas las reglas que AdBlow aprendió en $1?"
   },
+  "popupWallTitle": {
+    "message": "Muro anti-bloqueador detectado",
+    "description": "Anti-adblock wall card heading; shown only when a wall was detected on this site."
+  },
+  "popupWallDetected": {
+    "message": "Este sitio tapa la página con un aviso anti-bloqueador. La acción oculta solo ese aviso y restaura el contenido tapado; el bloqueo de anuncios no cambia.",
+    "description": "Wall card body before the user confirms; states exactly what the fix changes."
+  },
+  "popupWallOn": {
+    "message": "Activado: oculta solo ese aviso y restaura el contenido tapado; el bloqueo de anuncios no cambia.",
+    "description": "Wall card body once the fix is enabled for this site."
+  },
+  "popupWallEnable": {
+    "message": "Aplicar en este sitio",
+    "description": "Wall card button that enables the fix for this site."
+  },
+  "popupWallDisable": {
+    "message": "Dejar de aplicar aquí",
+    "description": "Wall card button that turns the fix off for this site."
+  },
 
   "optionsTitle": { "message": "Gestión de reglas" },
   "optionsLede": {

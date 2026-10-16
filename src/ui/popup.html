@@ -43,6 +43,23 @@
         border-radius: var(--radius-sm);
         padding: 9px 11px;
       }
+      /* anti-adblock wall card: honest copy plus one explicit action */
+      #wall-card {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 11px 13px;
+        border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+      }
+      #wall-card b {
+        font-size: 12.5px;
+      }
+      #wall-detail {
+        display: block;
+      }
+      #wall-toggle {
+        align-self: flex-start;
+      }
       .switch-row {
         background: var(--bg-soft);
       }
@@ -68,6 +85,12 @@
     <main>
       <div class="host" id="host" data-i18n="popupReading"></div>
       <div id="notice" hidden></div>
+
+      <div class="card" id="wall-card" hidden>
+        <b data-i18n="popupWallTitle"></b>
+        <span class="hint" id="wall-detail"></span>
+        <button id="wall-toggle" class="primary"></button>
+      </div>
 
       <div class="card switch-row" id="toggle-row" hidden>
         <input type="checkbox" id="enabled" />
