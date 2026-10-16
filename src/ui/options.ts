@@ -7,6 +7,7 @@ import {
 } from '../content/domainLearn.ts';
 import { chromeLocal } from '../content/storage.ts';
 import { applyI18n, t } from './i18n.ts';
+import { sortByHost, sortByRule } from './ruleSorting.ts';
 
 /**
  * Options: review and revoke what self-learning produced.
@@ -187,11 +188,17 @@ async function render(): Promise<void> {
     return;
   }
 
-  // Domain (network-layer) entries first: broader impact than a DOM selector.
-  for (const site of domainSites) {
-    container.appendChild(renderDomainSite(site.pageHost, site.entries));
+  // Domain (network-layer) entries first: broader impact than a DOM selector. Within each
+  // group the order is fixed (see ruleSorting.ts): sites by host, entries by rule text.
+  // Storage returns whatever order it likes, which read as random on a busy site.
+  for (const site of sortByHost(domainSites, (s) => s.pageHost)) {
+    const entries = sortByRule(site.entries, (e) => e.host);
+    container.appendChild(renderDomainSite(site.pageHost, entries));
   }
-  for (const site of sites) container.appendChild(renderSite(site.host, site.entries));
+  for (const site of sortByHost(sites, (s) => s.host)) {
+    const entries = sortByRule(site.entries, (e) => e.selector);
+    container.appendChild(renderSite(site.host, entries));
+  }
 }
 
 /**
@@ -233,7 +240,12 @@ el('export').addEventListener('click', async () => {
     product: 'AdBlow',
     productVersion: chrome.runtime.getManifest().version,
     exportedAt: new Date().toISOString(),
-    sites,
+    // Sorted like the page: two exports of the same rules then differ only where the rules
+    // differ, which makes the files diffable instead of noisy.
+    sites: sortByHost(sites, (s) => s.host).map((s) => ({
+      ...s,
+      entries: sortByRule(s.entries, (e) => e.selector),
+    })),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
