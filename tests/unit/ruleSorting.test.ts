@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { compareRuleText, sortByHost, sortByRule } from '../../src/ui/ruleSorting.ts';
+import { compareRuleText, hostSortKey, sortByHost, sortByRule, sortHosts } from '../../src/ui/ruleSorting.ts';
 
 /**
  * 规则管理页的排序：站点按域名、站点内按规则文本。
@@ -63,5 +63,28 @@ describe('sortByHost / sortByRule', () => {
       sortByRule(entries, (e) => e.host).map((e) => e.host),
       ['ads.example', 'cdn.example', 'tracker.example'],
     );
+  });
+});
+
+describe('hostSortKey / sortHosts：排序时忽略 www', () => {
+  it('去掉开头的 www.（大小写不敏感）', () => {
+    assert.equal(hostSortKey('www.example.com'), 'example.com');
+    assert.equal(hostSortKey('WWW.Example.com'), 'Example.com');
+    assert.equal(hostSortKey('example.com'), 'example.com');
+  });
+
+  it('只影响排序键：其它位置的 www 不动', () => {
+    assert.equal(hostSortKey('www.www.example.com'), 'www.example.com');
+    assert.equal(hostSortKey('mywww.example.com'), 'mywww.example.com');
+  });
+
+  it('www.example.com 与 example.com 相邻，而不是相隔整张表', () => {
+    const hosts = ['zzz.example', 'www.example.com', 'aaa.example', 'example.com'];
+    assert.deepEqual(sortHosts(hosts), [
+      'aaa.example',
+      'www.example.com', // 与 example.com 同为 example.com，按原字符串次序排列
+      'example.com',
+      'zzz.example',
+    ]);
   });
 });

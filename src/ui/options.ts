@@ -7,7 +7,7 @@ import {
 } from '../content/domainLearn.ts';
 import { chromeLocal } from '../content/storage.ts';
 import { applyI18n, t } from './i18n.ts';
-import { sortByHost, sortByRule } from './ruleSorting.ts';
+import { sortByRule, sortHosts } from './ruleSorting.ts';
 
 /**
  * Options: review and revoke what self-learning produced.
@@ -188,16 +188,30 @@ async function render(): Promise<void> {
     return;
   }
 
-  // Domain (network-layer) entries first: broader impact than a DOM selector. Within each
-  // group the order is fixed (see ruleSorting.ts): sites by host, entries by rule text.
-  // Storage returns whatever order it likes, which read as random on a busy site.
-  for (const site of sortByHost(domainSites, (s) => s.pageHost)) {
-    const entries = sortByRule(site.entries, (e) => e.host);
-    container.appendChild(renderDomainSite(site.pageHost, entries));
-  }
-  for (const site of sortByHost(sites, (s) => s.host)) {
-    const entries = sortByRule(site.entries, (e) => e.selector);
-    container.appendChild(renderSite(site.host, entries));
+  // One block per site, all sites in a single alphabetical order: a site's learned ad domains
+  // and its hiding rules belong together, and two separate alphabetical blocks made the same
+  // site appear twice. Inside a site the two rule kinds are still rendered by their own
+  // renderer (different columns and actions), each sorted by rule text; `www.` is ignored
+  // when ordering hosts so that `www.example.com` and `example.com` land in one place.
+  const merged = new Map<string, { domains: DomainEntry[]; selectors: LearnedEntry[] }>();
+  const bucket = (host: string) => {
+    const existing = merged.get(host);
+    if (existing) return existing;
+    const created = { domains: [] as DomainEntry[], selectors: [] as LearnedEntry[] };
+    merged.set(host, created);
+    return created;
+  };
+  for (const site of domainSites) bucket(site.pageHost).domains.push(...site.entries);
+  for (const site of sites) bucket(site.host).selectors.push(...site.entries);
+
+  for (const host of sortHosts([...merged.keys()])) {
+    const { domains, selectors } = merged.get(host)!;
+    if (domains.length > 0) {
+      container.appendChild(renderDomainSite(host, sortByRule(domains, (e) => e.host)));
+    }
+    if (selectors.length > 0) {
+      container.appendChild(renderSite(host, sortByRule(selectors, (e) => e.selector)));
+    }
   }
 }
 
@@ -242,10 +256,10 @@ el('export').addEventListener('click', async () => {
     exportedAt: new Date().toISOString(),
     // Sorted like the page: two exports of the same rules then differ only where the rules
     // differ, which makes the files diffable instead of noisy.
-    sites: sortByHost(sites, (s) => s.host).map((s) => ({
-      ...s,
-      entries: sortByRule(s.entries, (e) => e.selector),
-    })),
+    sites: sortHosts(sites.map((s) => s.host)).map((host) => {
+      const site = sites.find((s) => s.host === host)!;
+      return { ...site, entries: sortByRule(site.entries, (e) => e.selector) };
+    }),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);

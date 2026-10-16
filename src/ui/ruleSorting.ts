@@ -29,6 +29,22 @@ export function sortByHost<T>(items: readonly T[], hostOf: (item: T) => string):
   return [...items].sort((x, y) => compareRuleText(hostOf(x), hostOf(y)));
 }
 
+/**
+ * Sort key for a host: the leading `www.` is ignored.
+ *
+ * Why: `www.example.com` and `example.com` are the same site to a reader, and sorting them
+ * apart puts the same site in two places in the list. Only the sort key is stripped -- the
+ * displayed host (and every stored key) keeps its `www.`.
+ */
+export function hostSortKey(host: string): string {
+  return host.replace(/^www\./i, '');
+}
+
+/** New array of hosts in display order (see {@link hostSortKey}). */
+export function sortHosts(hosts: readonly string[]): string[] {
+  return [...hosts].sort((a, b) => compareRuleText(hostSortKey(a), hostSortKey(b)));
+}
+
 /** New array, sorted by the rule text of each item. */
 export function sortByRule<T>(items: readonly T[], ruleOf: (item: T) => string): T[] {
   return [...items].sort((x, y) => compareRuleText(ruleOf(x), ruleOf(y)));
