@@ -4,7 +4,7 @@
 
 # AdBlow
 
-**An ad blocker that judges ads by how a page behaves — not only by matching filter lists.**
+**An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
 [![Tests](https://img.shields.io/badge/tests-634%20passing-brightgreen)](#testing--verification)
@@ -16,61 +16,92 @@
 
 ---
 
-## Why another ad blocker?
+## What it is
 
-AdBlow ships the same EasyList-family filter lists that every blocker uses, and then adds a
-second, independent line of defence: a runtime engine that scores each element on **how it
-behaves** — script-injected into the page, pulling media from a domain that never appears
-elsewhere, growing its own geometry, wrapping its links in the site's own redirect endpoint,
-hiding its creatives behind a base64 CDN proxy. Lists miss that long tail; behaviour catches it.
+AdBlow is an ad blocker for Microsoft Edge and Google Chrome, built on Manifest V3. The filtering
+engine, the user interface and the build toolchain are all implemented from scratch.
 
-The second difference is what happens when the engine is *wrong*. Every self-learned rule is
-scoped to the site that taught it, is revocable one by one, and is structurally incapable of
-touching images, video, stylesheets or scripts. The design bias is explicit:
+Alongside the rule matching provided by the EasyList family of filter lists, the extension runs a
+runtime judgement stage that evaluates each element on its behaviour. It looks for elements
+injected into the page by script rather than present in the document, media served from a domain
+that appears nowhere else on the page, abnormal growth in geometry, links routed through a
+redirect endpoint on the site's own domain, and images proxied through a base64 path on a CDN. Ads
+of this kind rarely appear in filter lists, but they leave observable behaviour behind.
 
-> **Better to miss an ad than to break a page.**
+## Design trade-offs
 
-And unlike AdBlock Plus, there is no paid "Acceptable Ads" whitelist — nothing is let through
-for money. The build even refuses to fetch a list that contains one.
+**Judgement is not limited to filter lists.** The common approach matches requests and selectors
+against rules, and anything the lists have not seen passes through. AdBlow adds runtime
+observation on top of that, covering two widespread evasion techniques: rewriting an ad link into
+a redirect endpoint on the site's own domain, with a payload that declares `{"kind":"ad", ...}`,
+and wrapping the real media address in base64 inside a path served by the site's own CDN. Both are
+unwrapped to the real address first, and the decision is then made on that address.
+
+**A false positive costs more than a miss.** Every rule produced by self-learning is scoped to the
+site that produced it, can be revoked individually, and by construction never applies to images,
+media, scripts or stylesheets. The trade-off is stated explicitly:
+
+> Better to miss an ad than to break a page.
+
+Unlike AdBlock Plus and similar products, AdBlow has no paid "Acceptable Ads" whitelist, and it
+does not unblock advertising in exchange for payment. The build refuses to fetch a list that
+carries one.
 
 ## Features
 
-**Network layer** — 6 filter lists (EasyList, EasyList China, EasyPrivacy, uBlock
-filters/privacy/badware) compiled into declarativeNetRequest rulesets: 127,336 input rules
-deduped and validated down to 21,146 block rules + 2,369 exceptions across 6 rulesets, with
-105,675 domain anchors collapsed into 113 packed rules.
+### Network layer
 
-**Cosmetic layer** — 25,478 domain-specific selectors covering 11,389 domains, split into 256
-hash shards and delivered to the content script on demand (no `web_accessible_resources`, so
-one less fingerprinting surface).
+6 filter lists (EasyList, EasyList China, EasyPrivacy, uBlock filters / privacy / badware)
+compiled into declarativeNetRequest rulesets. 127,336 input rules are deduplicated and validated
+down to 21,146 block rules and 2,369 exceptions across 6 rulesets, with 105,675 domain anchors
+collapsed into 113 rules.
 
-**Behaviour engine** — a pristine-snapshot diff plus an ad-likeness score. Signals include
-script injection, cross-site links/media/iframes, geometry growth, promo query parameters, ad
-naming across 3 confidence tiers, full-screen overlays, click layers, fake close buttons and
-link farms. It also **unwraps** two tricks used to defeat cross-site detection: own-domain
-redirect endpoints whose payload declares `{"kind":"ad", ...}`, and CDN paths that base64-wrap
-the real media URL.
+### Element hiding
 
-**Anti-hijack guards** (MAIN world) — `window.open` guard, click-hijack guard, popup-state
-scrubbing from `localStorage`/`sessionStorage`/`window.name`, and rejection of document-level
-click handlers that only navigate.
+25,478 domain-specific selectors covering 11,389 domains, split into 256 hash shards and requested
+by the content script on demand. The extension does not use `web_accessible_resources`, which
+leaves one less surface available for detection.
 
-**Scriptlet support** — 12 canonical `##+js(...)` scriptlets (`abort-on-property-read`,
-`set-constant`, `json-prune`, `no-fetch-if`, `no-setTimeout-if`, …) covering 2,841 domains,
-delivered as one inlined table so it runs before page scripts.
+### Behaviour engine
 
-**Self-learning** — remembers hiding selectors and ad domains per site, promotes after 3 hits,
-and exposes everything in a rule manager where users can revoke any entry individually or export
-the whole set as JSON.
+A diff against a pristine snapshot taken early in page load, plus an ad-likeness score per
+element. Signals include script injection, cross-site links and media, cross-site iframes, growth
+in geometry, promo query parameters, ad naming across three confidence tiers, full-screen
+overlays, click layers, fake close buttons and link farms. A match records
+`data-adblow-reason` and `data-adblow-why`, so triaging a false positive can be traced directly to
+the mechanism and the evidence behind it.
 
-**Per-site switch** — the popup can disable filtering for the current site, which also suspends
-that site's learned network rules. Always a way out.
+### Anti-hijack guards
 
-**User interface** — Chinese (simplified, default), English, Japanese, French, Spanish,
-selected automatically from the browser UI language.
+Four behaviours are restricted in the page's MAIN world: `window.open` calls, click hijacking,
+popup-state writes to `localStorage`, `sessionStorage` and `window.name`, and document-level click
+handlers that only perform navigation.
 
-**Privacy** — everything runs locally. No telemetry, no accounts, no remote config. The only
-outbound traffic is the browser updating the extension itself.
+### Scriptlet support
+
+12 canonical `##+js(...)` scriptlets (`abort-on-property-read`, `set-constant`, `json-prune`,
+`no-fetch-if`, `no-setTimeout-if` and others) covering 2,841 domains. The data table is inlined in
+the script so that it takes effect before page scripts run.
+
+### Self-learning
+
+Hiding selectors and ad domains are recorded per site, and become active after 3 cumulative hits.
+Every entry is listed in the rule manager, and can be deleted individually or exported as JSON.
+
+### Per-site switch
+
+The popup provides a filtering switch for the current site. Turning it off also suspends the
+learned network rules that are active for that site.
+
+### User interface
+
+Chinese (simplified, default), English, Japanese, French and Spanish, selected automatically from
+the browser UI language.
+
+### Privacy
+
+All processing is local. There is no telemetry, no account and no remote configuration; apart from
+the browser updating the extension itself, no outbound requests are made.
 
 ## Screenshots
 
@@ -80,153 +111,159 @@ outbound traffic is the browser updating the extension itself.
 
 ## Install
 
-**From source** (works today):
+The extension can currently be built and installed from source:
 
 ```bash
 git clone <this repo> && cd adblow
 pnpm install
-pnpm filters        # fetch the 6 filter lists (not in the repo — see Licensing)
-pnpm rulesets       # compile them into DNR rulesets + cosmetic shards + scriptlet table
+pnpm filters        # fetch the 6 filter lists (not in the repo, see Licensing)
+pnpm rulesets       # compile them into DNR rulesets, hiding shards and the scriptlet table
 pnpm build          # -> dist/
 ```
 
-Then open `edge://extensions` (or `chrome://extensions`), enable **Developer mode**, choose
-**Load unpacked**, and select the `dist/` directory.
+Then enable Developer mode in `edge://extensions` (or `chrome://extensions`) and choose **Load
+unpacked**, pointing at the `dist/` directory.
 
-A store release (`adblow-1.0.0-edge.zip`) is prepared but not published yet.
+The store package `adblow-1.0.0-edge.zip` is ready but has not been published yet.
 
 ## Build and package
 
 ```bash
-pnpm test           # 634 unit + integration tests, in-process
+pnpm test           # 634 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
-pnpm icons          # regenerate icons (16/32/48/128 + store icon)
+pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
 pnpm package        # build + audit + zip -> release/adblow-<version>-edge.zip
 pnpm update-lists   # refresh the filter lists and rebuild everything
 ```
 
+Node.js 24 or later and pnpm are required; generating icons and store screenshots additionally
+needs Python 3 with Pillow.
+
 Filter lists are compiled into static rulesets at build time, and MV3 offers no way to replace a
-static ruleset remotely — so **list freshness equals release frequency**: refreshing the lists
-means shipping a new version. The rule manager shows the fetch date of the bundled lists; the
-trade-offs, including the measured DNR quota numbers, are written up in
+static ruleset remotely, so the freshness of the lists is bound to the release frequency:
+refreshing the lists means shipping a new version. The rule manager displays the fetch date of the
+bundled lists. The trade-offs between periodic releases and runtime incremental updates, together
+with the measured quota figures, are documented in
 [filter list updates](docs/LIST-UPDATES.md) (Chinese).
 
-Requirements: Node.js 24+, pnpm, and Python 3 with Pillow (icons and store screenshots only).
-
-The packaging step audits `dist/` against what the manifest actually declares, drops anything
-that is not a product file (for example the browser-generated `_metadata/` ruleset cache), and
-writes a zip with `manifest.json` at the root. If a browser currently has `dist/` loaded,
-Windows locks the directory — build to an alternate one instead of fighting it:
+The packaging step checks the file list in `dist/` against the resources the manifest actually
+declares and removes anything that is not a product file, such as the browser-generated
+`_metadata/` ruleset index cache. It writes a zip with `manifest.json` at its root. If a browser
+currently has `dist/` loaded, Windows locks the directory; build into a different directory rather
+than terminating the browser:
 
 ```bash
 ADBLOW_DIST=dist-release pnpm package
 ```
 
-## Architecture
+## Project layout
 
-Four layers, each one narrower and more conservative than the last:
+The implementation is divided into four layers, each narrowing the scope and privileges of the
+one above it:
 
-| Layer | Runs in | Mechanism | Why it exists |
+| Layer | Runs in | Responsibility | Why it exists |
 |---|---|---|---|
-| **L1 Network** | `declarativeNetRequest` | Static rulesets from filter lists + dynamic rules for learned domains | Stops requests before they leave the browser |
-| **L2 Cosmetic** | Isolated world | Domain-scoped CSS, inline `!important` hiding for judged elements | Removes what should never render |
-| **L3 Behaviour** | Isolated world | Pristine snapshot diff, ad-likeness scoring, self-learning | Catches what lists have never seen |
-| **L4 Guards** | MAIN world | `window.open`, click hijack, storage scrub, listener rejection | Stops the page from fighting back |
+| **Network** | `declarativeNetRequest` | Static rulesets compiled from filter lists, plus dynamic rules for learned domains | Blocks requests before they are sent |
+| **Element hiding** | Isolated world | Domain-scoped CSS, and inline `!important` hiding for matched elements | Keeps content that should not render out of the rendering path |
+| **Behaviour** | Isolated world | Pristine snapshot diff, ad-likeness scoring, self-learning | Covers ads that filter lists have not recorded yet |
+| **Anti-hijack** | MAIN world | `window.open`, click hijacking, storage writes, event listeners | Prevents the page from interfering with filtering |
 
 ```
 src/
-  background/      service worker: DNR sync, cosmetic shard delivery, stats
-  content/         L2+L3: engine, judge, learning store, per-site settings
-  engine/          pure logic, browser-free: scoring, lexicon, geometry, DNR, filter-list
-                   compiler, scriptlet parser, selector generalisation
-  inject/          L4: MAIN-world guards, scriptlet runtime
+  background/      service worker: DNR sync, hiding-shard delivery, statistics
+  content/         element hiding and behaviour: engine, judgement, learned-rule store, site settings
+  inject/          anti-hijack: MAIN-world restrictions and the scriptlet runtime
+  engine/          browser-free logic: scoring, lexicon, geometry, DNR, filter-list compiler,
+                   scriptlet parser, selector generalisation
   rules/sites/     hand-written site packs (per-site, verified selectors)
-  ui/              popup + rule manager + i18n (5 locales)
+  ui/              popup, rule manager, i18n
 tools/
-  filters/         list fetching (refuses lists with paid whitelists)
-  build/           ruleset + cosmetic + scriptlet codegen, bundling, icon generation
-  e2e/             23-category in-browser acceptance suite, live-site pilot
-  release/         audit, zip, store screenshots
-  diagnostics/     copy-paste console snippets for triaging a broken page
-tests/             634 unit + integration tests (jsdom)
+  filters/         filter-list fetching (lists with paid whitelists are rejected)
+  build/           ruleset, hiding-shard and scriptlet codegen; packaging; icon generation
+  e2e/             23-category acceptance suite in a real browser; live-site end-to-end
+  release/         audit, zip packaging, store screenshot generation
+  diagnostics/     console snippets for locating the cause of a broken page
+tests/             634 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
-### Safety invariants
+## Safety invariants
 
-These are enforced in code and covered by tests, because each one exists because we got it
-wrong at least once:
+Every constraint below is enforced in code and covered by tests. Each one corresponds to a false
+positive that actually shipped:
 
-- Learned network rules **never** touch `image`, `media`, `script`, `stylesheet` or `font` —
-  content thumbnails and ad creatives routinely share one CDN.
-- Learned rules are scoped to the **sites that taught them** (`initiatorDomains`), so a domain
-  learned on site A can never break site B.
-- Nothing implicit ever blocks a `main_frame`; only an explicit `$document` rule may.
-- The engine never hides `html`, `body` or `head`: hiding those blanks the whole page.
-- A hiding budget limits how much of a page's text and links may be hidden, and elements that
-  hold real content or navigation are exempt.
-- Hiding sets `display`, `visibility` *and* `pointer-events`, then re-checks later: sites do
-  re-assert `display` with their own `!important`.
+- Learned network rules never apply to `image`, `media`, `script`, `stylesheet` or `font`. Content
+  thumbnails and ad creatives frequently share one CDN, and blocking it takes down every image on
+  the site.
+- Learned rules apply only to the site that produced them (`initiatorDomains`); a domain learned
+  on site A cannot affect site B.
+- Implicit rules never block a `main_frame`; only an explicit `$document` rule may do so.
+- `html`, `body` and `head` are never hidden. Hiding them blanks the page.
+- A page-level hiding budget limits the proportion of text and links that may be hidden, and
+  elements carrying body content or navigation are exempt.
+- Hiding sets `display`, `visibility` and `pointer-events` together, and re-checks afterwards.
+  Sites do re-assert `display` with their own `!important`; the 1024cg case was found by that
+  re-check.
 
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts     # 634 tests, 0 failures
+node tests/run-all.ts           # 634 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 23 ad categories, measured in a real browser
 ```
 
-`tools/e2e/acceptance.mjs` is the interesting one. It builds a fixture page for each of 23
-ad-interference categories (pop-ups, pop-unders, interstitials, floating bars, corner widgets,
-sticky banners, outstream video, preroll, mid-roll, video overlays, full-page clickable ads,
-fake close buttons, click hijacking, tab-under, region expanders, flashing GIFs, rich media,
-own-domain redirect wrapping, base64 CDN wrapping, …). For **every** fixture it first measures a
-baseline with the extension disabled — if the ad is not actually interfering in the baseline,
-the fixture is considered worthless — then measures again with the extension loaded. Ads must
-be gone **and** the fixture's real content must still be visible.
+`tools/e2e/acceptance.mjs` is the main acceptance suite. It builds a realistic page for each of 23
+categories of ad interference, covering pop-ups, pop-unders, interstitials, floating bars, corner
+widgets, sticky banners, outstream video, preroll, mid-roll, video overlays, full-page clickable
+ads, fake close buttons, click hijacking, tab-under, region expanders, flashing GIFs, rich media,
+own-domain redirect wrapping and base64 CDN wrapping, among others.
 
-There is also a live-site end-to-end run (`tools/e2e/run.mjs <url>`) with image guards, CDN
-guards and site-owned-domain guards, so a fix that starts hiding content fails loudly.
+Every fixture is measured twice. First with the extension disabled, to establish a baseline: if
+the ad does not actually interfere in the baseline, the fixture is rejected and has to be rebuilt.
+Then with the extension enabled: the ad must be gone, and the real content of the fixture must
+still be visible.
+
+A live-site end-to-end run (`tools/e2e/run.mjs <url>`) covers the same ground against a real page,
+with image guards, CDN guards and site-owned-domain guards. A regression that removes an ad but
+starts hiding body content therefore fails during testing instead of reaching a release.
 
 ## Known limitations
 
-Stated plainly, because a README that only lists wins is not useful:
-
-- Generic (non-domain-specific) cosmetic rules are not injected; domain-scoped rules are.
+- Generic (non-domain-specific) hiding rules are not injected; only domain-scoped rules are.
 - Procedural cosmetic filters (`#?#`) and HTML filtering (`##^`) are not implemented.
 - `##+js(abort-current-script)` and a few other scriptlets (359 rules in the lists) are
-  unsupported; the build reports what it skips rather than silently widening a rule.
-- Filter lists are compiled at build time, so updating them requires rebuilding the extension
-  (an MV3 constraint — no remote rulesets).
-- No published performance benchmarks yet, and no head-to-head comparison against other
-  blockers on neutral sites.
+  unsupported. The build reports what it skips instead of widening a rule to include more.
+- Filter lists are compiled at build time, so updating them requires rebuilding the extension.
+  This is an MV3 constraint: remote rulesets are not supported.
+- No public performance benchmarks yet, and no like-for-like comparison against other blockers on
+  neutral sites.
 
-## Credits
+## Third-party components and licenses
 
-Filter lists are the work of their maintainers and are **not** part of this repository; they
-are fetched at build time:
+Filter lists are maintained by their respective authors, are not part of this repository, and are
+fetched during the build:
 
 | List | License |
 |---|---|
 | [EasyList](https://easylist.to/), [EasyList China](https://easylist.to/), [EasyPrivacy](https://easylist.to/) | GPL-3.0 / CC BY-SA 3.0 |
 | [uBlock Origin assets](https://github.com/uBlockOrigin/uAssets) (filters, privacy, badware) | GPL-3.0 |
 
-Please respect those licenses when redistributing anything built from this repository.
+Redistributing any artifact built from this repository requires compliance with those licenses.
 
 ## License
 
-The project as a whole is distributed under **GPL-3.0** — see [LICENSE](LICENSE). The original
-source code in this repository is additionally offered under **MIT** — see
-[LICENSE-MIT](LICENSE-MIT) — so others may reuse that code under MIT terms.
+The project as a whole is distributed under **GPL-3.0**; the full text is in [LICENSE](LICENSE).
+The original source code in this repository is additionally offered under **MIT**, in
+[LICENSE-MIT](LICENSE-MIT), so that code may be reused under MIT terms.
 
-Why two layers: a built extension embeds the GPL-3.0 / CC BY-SA filter data listed above, and
-that part cannot be relicensed under MIT, which is what makes the whole distribution GPL-3.0.
-The code written here (engine, UI, build and release tooling, tests) is unaffected, so it carries
-a permissive MIT grant as well.
+The reason for two layers: a built extension embeds the GPL-3.0 / CC BY-SA filter data listed
+above, and that part cannot be relicensed under MIT, which is what makes the whole distribution
+GPL-3.0. The code implemented here (engine, UI, build and release tooling, tests) is unaffected,
+so it carries a permissive MIT grant as well.
 
-The third-party filter lists are not part of this repository; they are fetched at build time and
+The third-party filter lists are not part of this repository; they are fetched during the build and
 keep their own licenses.
-
 
 ---
 
