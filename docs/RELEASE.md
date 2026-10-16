@@ -11,9 +11,10 @@
 | 商店列表图标 | `store/icon-300.png`（300×300） |
 | 商店截图 | `store/store-1280x800-options-{zhCN,enUS}.png`、`store/store-1280x800-popup-{zhCN,enUS}.png` |
 
-> ⚠️ **截图是手工资产，不是构建产物**：见 [`store/README.md`](../store/README.md)。
-> 它们可能是"访问真实站点后点开弹窗"的整屏截图，尺寸未必是 1280×800 那种精确值，
-> **看起来不规整是正常的**。不要自动覆盖，也不要 `git checkout` 还原；改完立刻提交。
+> ⚠️ **截图是手工资产，不是构建产物**。它们可能是"访问真实站点后点开弹窗"的整屏截图，
+> 尺寸未必是 1280×800 那种精确值，**看起来不规整是正常的**。
+> 不要自动覆盖，也不要 `git checkout` 还原；改完立刻提交（曾经因此丢失过手工成果）。
+> 需要转成商店要求的精确尺寸时用 `tools/release/fit-store-shot.py`。
 
 重新生成：
 
@@ -56,9 +57,10 @@ python tools/release/compose-store-shots.py   # 商店截图合成（需先跑 _
 
 - **名称**：AdBlow（`_locales/*/messages.json` 的 `extName`，各语言一致）
 - **简介**：取 `extDesc`（各语言都有，≤132 字符）
-- **详细说明**：见 [`store/listing.md`](../store/listing.md)——中文 300 字 + 英文版。
-  改动功能后请同步更新，并跑 `node _probe/verify-listing.mjs` 核对字数与
-  "每条功能主张是否有代码依据"
+- **详细说明**：中文 300 字 + 对照英文版，填进商店后台的"详细说明"字段。
+  文案不随仓库分发（`store/listing.md` 已从仓库移除），需要时从 git 历史取回：
+  `git show 4855432^:store/listing.md`。
+  改动产品功能后记得同步文案，别让商店描述落后于实际能力。
 - **类别**：隐私与安全 / Productivity
 - **语言**：中文（简体）、English、日本語、Français、Español
   —— 界面语言由浏览器 UI 语言决定，扩展内已内置这 5 套 `_locales`
