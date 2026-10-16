@@ -41,6 +41,24 @@ AdBlow 在此之外引入运行时观测，用于处理两类常见的规避手�
 与 AdBlock Plus 等产品不同，AdBlow 不设“可接受广告”付费白名单，不接受以付费方式放行广告；
 构建脚本会拒绝拉取带付费白名单的列表。
 
+## 与其他过滤器的对比
+
+下表只列出与本项目定位相关的维度，**不是完整评测**。AdBlock Plus、AdGuard、uBlock Origin 各有
+本项目不及之处（AdGuard 的产品线广度、uBlock Origin 的过滤语法覆盖、AdBlock Plus 的平台与语言
+覆盖）。依据各产品公开文档整理（2026-10）；若有出入，欢迎指正。
+
+| | **AdBlow** | AdBlock Plus | AdGuard | uBlock Origin |
+|---|---|---|---|---|
+| EasyList 系过滤列表 | 支持 | 支持 | 支持（另有自有列表） | 支持 |
+| 付费白名单（“可接受广告”） | **无** | **有，默认开启** | 无 | 无 |
+| 按运行时行为判定，而不止比对列表 | **有**：跨站素材、几何突增、自家域名跳转解包、CDN base64 解包 | 无 | 无 | 无 |
+| 按站点自学习，可逐条撤销，且只作用于教会它的站点 | **有** | 无 | 无 | 无 |
+| 反过滤墙 | 检测到后**经用户确认**才中和，广告拦截保持不变 | 依赖过滤列表 | 依赖烦扰过滤器，自动处理 | 依赖烦扰过滤器与脚本注入，自动处理 |
+| 过滤列表更新 | 随扩展版本（MV3 静态规则集） | 运行时更新 | 运行时更新 | 完整版运行时更新；MV3 版（uBO Lite）随版本 |
+| Manifest V3 | 原生 | 有 MV3 版本 | 有 MV3 版本 | MV3 为功能精简的 uBO Lite |
+| 界面语言 | 5 种 | 数十种 | 数十种 | 数十种 |
+| 价格与许可 | 免费；项目 GPL-3.0，代码另提供 MIT | 免费（GPLv3） | 扩展免费，桌面版付费 | 免费（GPLv3） |
+
 ## 功能
 
 ### 网络层
@@ -176,6 +194,74 @@ tools/
   diagnostics/     可在控制台直接执行的诊断脚本，用于定位站点异常
 tests/             689 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
+```
+
+### 架构
+
+```mermaid
+flowchart TB
+  lists["过滤列表<br/>EasyList 系列，构建期抓取"]
+  subgraph build["构建流水线"]
+    compile["编译器<br/>去重、校验、域名打包"]
+  end
+  subgraph sw["后台 service worker"]
+    rulesets["静态 DNR 规则集（6 卷）"]
+    dynamic["动态规则<br/>自学习域名、站点规则包"]
+    shards["元素隐藏分片（256 个）<br/>按需下发"]
+    stats["站点设置与统计<br/>chrome.storage.local"]
+  end
+  subgraph isolated["内容脚本 - 隔离世界"]
+    pristine["原始快照与差分"]
+    judge["广告相似度打分"]
+    hide["隐藏：display + visibility + pointer-events"]
+    verify["复核：站点复原后再隐藏"]
+    learn["自学习记录"]
+    wall["反过滤墙检测"]
+  end
+  subgraph main["内容脚本 - MAIN world"]
+    guards["window.open、点击劫持、存储写入防护"]
+    runtime["脚本注入运行时（13 个规范规则）"]
+  end
+  page["页面"]
+
+  lists --> compile --> rulesets
+  compile --> shards
+  compile --> runtime
+  rulesets -->|"拦截请求"| page
+  dynamic -->|"拦截请求"| page
+  shards --> hide
+  pristine --> judge --> hide --> verify
+  hide --> learn
+  learn -->|"晋级的规则"| dynamic
+  stats --- learn
+  wall -->|"仅在用户确认后中和"| hide
+  guards --> page
+  runtime --> page
+```
+
+### 处理流程
+
+```mermaid
+flowchart TD
+  start["document_start"] --> a["MAIN world：安装防护、应用脚本注入"]
+  a --> b["隔离世界：对文档拍摄原始快照"]
+  b --> c["请求与静态 DNR 规则集匹配"]
+  c --> d["扫描：站点规则包、列表隐藏规则、行为打分"]
+  d --> e{"判定为广告？"}
+  e -->|"是"| f["以 display、visibility、pointer-events 隐藏，并记录依据"]
+  e -->|"否"| g["不做处理"]
+  f --> h["复核：站点把 display 改回来时再次隐藏"]
+  h --> i["累计命中次数"]
+  i --> j{"累计命中 3 次？"}
+  j -->|"是"| k["晋级：学习选择器或学习域名规则，仅作用于本站点"]
+  j -->|"否"| l["继续观察"]
+  k --> m["规则管理：查看、逐条撤销、导出"]
+  d --> n["反过滤墙检测 —— 只读，绝不改动页面"]
+  n --> o{"检测到墙？"}
+  o -->|"是"| p["弹窗告知；页面保持原样"]
+  p --> q{"用户已确认处理本站点？"}
+  q -->|"是"| r["隐藏遮罩、恢复被它遮挡的正文；广告拦截保持不变"]
+  q -->|"否"| p
 ```
 
 ## 安全约束

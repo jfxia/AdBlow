@@ -47,6 +47,25 @@ Unlike AdBlock Plus and similar products, AdBlow has no paid "Acceptable Ads" wh
 does not unblock advertising in exchange for payment. The build refuses to fetch a list that
 carries one.
 
+## How it compares
+
+Only the dimensions this project's positioning depends on are listed; this is not a full
+evaluation. AdBlock Plus, AdGuard and uBlock Origin each lead on something AdBlow does not
+(AdGuard's product breadth, uBlock Origin's filter-syntax coverage, AdBlock Plus's platform and
+language reach). Compiled from public documentation in October 2026; corrections are welcome.
+
+| | **AdBlow** | AdBlock Plus | AdGuard | uBlock Origin |
+|---|---|---|---|---|
+| EasyList-family filter lists | yes | yes | yes (plus its own) | yes |
+| Paid "Acceptable Ads" whitelist | **none** | yes, on by default | none | none |
+| Judgement by runtime behaviour (not just list matching) | **yes**: cross-site media, geometry growth, own-domain redirect unwrapping, base64 CDN unwrapping | no | no | no |
+| Self-learning per site, revocable entry by entry, scoped to the site that taught it | **yes** | no | no | no |
+| Anti-adblock walls | detected; neutralised per site **after the user confirms it**, ad blocking kept | filter lists | annoyance filters, automatic | annoyance filters and scriptlets, automatic |
+| Filter-list updates | with the extension version (MV3 static rulesets) | runtime updates | runtime updates | full version: runtime updates; MV3 (uBO Lite): with the version |
+| Manifest V3 | native | MV3 build available | MV3 build available | MV3 is the reduced uBO Lite |
+| UI languages | 5 | dozens | dozens | dozens |
+| Price and licence | free; project GPL-3.0, code also MIT | free (GPLv3) | extension free, desktop apps paid | free (GPLv3) |
+
 ## Features
 
 ### Network layer
@@ -195,6 +214,74 @@ tools/
   diagnostics/     console snippets for locating the cause of a broken page
 tests/             689 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
+```
+
+### Architecture
+
+```mermaid
+flowchart TB
+  lists["Filter lists<br/>EasyList family, fetched at build time"]
+  subgraph build["Build pipeline"]
+    compile["Compiler<br/>dedupe, validate, pack domains"]
+  end
+  subgraph sw["Background service worker"]
+    rulesets["Static DNR rulesets (6)"]
+    dynamic["Dynamic rules<br/>learned domains, site packs"]
+    shards["Element-hiding shards (256)<br/>served on demand"]
+    stats["Per-site settings and statistics<br/>chrome.storage.local"]
+  end
+  subgraph isolated["Content script - isolated world"]
+    pristine["Pristine snapshot and diff"]
+    judge["Ad-likeness scoring"]
+    hide["Hiding: display + visibility + pointer-events"]
+    verify["Verification pass: re-hide what the site restores"]
+    learn["Self-learning store"]
+    wall["Anti-adblock wall detection"]
+  end
+  subgraph main["Content script - MAIN world"]
+    guards["window.open, click-hijack and storage guards"]
+    runtime["Scriptlet runtime (13 canonical rules)"]
+  end
+  page["Page under test"]
+
+  lists --> compile --> rulesets
+  compile --> shards
+  compile --> runtime
+  rulesets -->|"blocks requests"| page
+  dynamic -->|"blocks requests"| page
+  shards --> hide
+  pristine --> judge --> hide --> verify
+  hide --> learn
+  learn -->|"promoted rules"| dynamic
+  stats --- learn
+  wall -->|"neutralised only after confirmation"| hide
+  guards --> page
+  runtime --> page
+```
+
+### Request and judgement flow
+
+```mermaid
+flowchart TD
+  start["document_start"] --> a["MAIN world: guards installed, scriptlets applied"]
+  a --> b["Isolated world: pristine snapshot of the document"]
+  b --> c["Requests matched against static DNR rulesets"]
+  c --> d["Scan: site packs, list hiding rules, behaviour scoring"]
+  d --> e{"Judged ad-like?"}
+  e -->|"yes"| f["Hide with display, visibility and pointer-events; record the reason"]
+  e -->|"no"| g["Leave untouched"]
+  f --> h["Verification pass: a site that restores display is re-hidden"]
+  h --> i["Record hits"]
+  i --> j{"3 cumulative hits?"}
+  j -->|"yes"| k["Promote: learned selector or learned domain rule, scoped to this site"]
+  j -->|"no"| l["Keep observing"]
+  k --> m["Rule manager: review, revoke, export"]
+  d --> n["Wall detection - read only, never modifies the page"]
+  n --> o{"Wall found?"}
+  o -->|"yes"| p["Popup reports it; the page is left exactly as it is"]
+  p --> q{"Confirmed for this site?"}
+  q -->|"yes"| r["Hide the gate, restore the content it hid; ad blocking stays on"]
+  q -->|"no"| p
 ```
 
 ## Safety invariants
