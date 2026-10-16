@@ -1,13 +1,13 @@
 # AdBlow 发布清单（Microsoft Edge 加载项商店）
 
 **商店页面**：https://microsoftedge.microsoft.com/addons/detail/adblow/omfepilfkagfdjejmdlkkphecllioion
-（已上架，v1.0.0）
+（已上架 v1.0.0；当前开发版本 v1.0.1）
 
 ## 一、产物
 
 | 用途 | 文件 |
 |---|---|
-| **上传商店的扩展包** | `release/adblow-1.0.0-edge.zip` |
+| **上传商店的扩展包** | `release/adblow-1.0.1-edge.zip` |
 | 商店列表图标 | `store/icon-300.png`（300×300） |
 | 商店截图 | `store/store-1280x800-options-{zhCN,enUS}.png`、`store/store-1280x800-popup-{zhCN,enUS}.png` |
 
@@ -94,10 +94,10 @@ AdBlow 的行为**全部在本地**，没有任何服务端：
 - [x] ZIP 用独立实现（Python `zipfile`）校验：CRC 全部通过、可正常解包
 - [x] 包内**不含** `_metadata/`（浏览器加载扩展时自动生成的索引缓存，约 6 MB）
 - [x] `name` / `version` / `description` / `icons` / `default_locale` 齐全
-- [x] `version` 为 `x.y.z`（1.0.0），由 `package.json` 单一来源注入
+- [x] `version` 为 `x.y.z`（1.0.1），由 `package.json` 单一来源注入
 - [x] manifest 与界面用到的每个文案 key 在 5 种语言里都存在
 - [x] 5 种语言在真实 Edge 里逐个 `--lang` 实测，文案正确、无空文案、无文字溢出
-- [x] 634 项测试通过 · 21 类干扰视线广告验收 **23/23** · 试点站 E2E 全通过
+- [x] 689 项测试通过 · 24 类干扰视线广告验收 **24/24** · 试点站 E2E 全通过
 
 ## 六、许可证（已确定）
 
@@ -128,3 +128,25 @@ pnpm update-lists          # 抓取 → 编译 → 构建 → 测试 → 打包�
   的唯一依据，报障时先看这一行。
 - 想把更新做到"不发版"也行，但要守住六条边界（尤其"只下数据不下代码"，脚本注入必须随包），
   详见 [`docs/LIST-UPDATES.md`](LIST-UPDATES.md)。
+
+## 八、v1.0.1 更新说明（商店后台"新版说明"字段，按语言分别填写）
+
+### 中文（简体）
+
+- 新增脚本注入规则 `abort-current-script`（仅在规则自带搜索串时生效），可覆盖的脚本注入规则由
+  1,964 条增至 2,285 条，覆盖域名由 2,841 个增至 3,246 个。
+- 新增反过滤墙处理：站点用诱饵元素探测过滤器并遮挡页面时，弹窗会给出提示，经确认后隐藏该遮罩、
+  恢复被它遮挡的正文；广告拦截保持不变，且不会在未经确认时改动页面。
+- 规则管理页新增内置过滤列表的抓取日期，便于判断规则是否过期。
+- 修正打包环节误删列表信息文件的问题；补齐界面文案与五种语言的译者注释。
+
+### English
+
+- Added the `abort-current-script` scriptlet (applied only when the rule carries a search needle):
+  supported scriptlet rules grew from 1,964 to 2,285, covering 2,841 to 3,246 domains.
+- Added anti-adblock wall handling: when a site probes for a blocker and covers the page, the popup
+  offers a per-site fix that hides the gate and restores the content it hid. Ad blocking stays on,
+  and nothing changes on a site until the fix is accepted.
+- The rule manager now shows the fetch date of the bundled filter lists.
+- Fixed a packaging issue that dropped the list-info file; filled in UI strings and translator notes
+  for all five locales.

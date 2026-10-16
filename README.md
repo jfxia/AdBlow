@@ -132,7 +132,8 @@ pnpm build          # -> dist/
 Then enable Developer mode in `edge://extensions` (or `chrome://extensions`) and choose **Load
 unpacked**, pointing at the `dist/` directory.
 
-The store package `adblow-1.0.0-edge.zip` is ready but has not been published yet.
+The store package is produced by `pnpm package` (`release/adblow-1.0.1-edge.zip`); v1.0.0 is already
+listed on the Edge Add-ons store.
 
 ## Build and package
 
@@ -284,5 +285,5 @@ keep their own licenses.
 ---
 
 <div align="center">
-<sub>AdBlow 1.0.0 · Manifest V3 · Edge &amp; Chrome</sub>
+<sub>AdBlow 1.0.1 · Manifest V3 · Edge &amp; Chrome</sub>
 </div>
