@@ -1,4 +1,4 @@
-// Acceptance run for the 21 kinds of view-disturbing ads: an executable standard
+// Acceptance run for the 24 view-disturbing ad kinds: an executable standard
 // rather than a written conclusion. Each kind has a realistic fixture page, the
 // baseline run (no extension) must confirm it really interferes -- otherwise the
 // fixture is meaningless -- and the extension run checks whether it is handled.
@@ -425,6 +425,130 @@ export const FIXTURES = [
        })();</script>`,
     ),
   },
+
+  // Anti-adblock wall, as measured on a real site (techcrunch.com, 2026-10-14). Real shape:
+  // decoy slots named like ads are polled for collapsed geometry, and the first one that
+  // measures 0 is read as "a blocker is installed" -- whereupon the site covers the viewport
+  // with its own copy and hard-hides the article. The generic probe is the *genuine* ad slot,
+  // so "handled" can never be earned by leaving the page alone.
+  {
+    id: 24,
+    cat: '七、反过滤墙',
+    name: '反过滤墙（诱饵探测 + 硬门禁遮罩）',
+    mode: 'dom',
+    probe: '#real-ad-slot',
+    html: page(
+      `<style>
+         #ad-slot-top,#adsbox,.google_ads{background:#eef;color:#333;font:14px sans-serif;text-align:center}
+         #ad-slot-top{width:728px;height:90px;line-height:90px;margin:10px auto}
+         #adsbox{width:300px;height:250px;margin:10px auto}
+         .google_ads{width:160px;height:600px;margin:10px auto}
+         #real-ad-slot{width:728px;height:200px;margin:20px auto}
+       </style>`,
+      `<div id="ad-slot-top" class="ad-slot">广告位 728x90</div>
+       <div id="adsbox" class="adsbox">&nbsp;</div>
+       <div id="google_ads_iframe_1" class="google_ads"></div>
+       <!-- The genuine ad, creative on the ad host: the engine itself must block it -->
+       <div id="real-ad-slot" class="ad-banner-wrap">
+         <a href="${AD}/landed?from=wall-real"><img id="real-ad-creative" src="${IMG}" width="728" height="200"></a>
+       </div>
+       <script>
+       (function(){
+         var SLOTS=['#ad-slot-top','#adsbox','.google_ads','#real-ad-slot'];
+         function collapsed(sel){
+           var el=document.querySelector(sel);
+           if(!el) return false;
+           var cs=getComputedStyle(el);
+           return el.offsetHeight===0||el.offsetWidth===0||cs.display==='none'||cs.visibility==='hidden';
+         }
+         function wall(){
+           if(document.getElementById('ab-wall')) return;
+           var w=document.createElement('div');
+           w.id='ab-wall';
+           w.setAttribute('data-ab-wall','1');
+           w.setAttribute('style','position:fixed;top:0;left:0;width:100%;height:100%;z-index:2147483647;background:#fff;padding-top:120px;text-align:center');
+           w.innerHTML='<h2 style="font:24px/1.4 sans-serif">Something went wrong. Disable your adblocker on TechCrunch</h2>'+
+             '<p style="font:16px/1.6 sans-serif;max-width:640px;margin:0 auto">It looks like your adblocker is attempting to interfere with the intended operation of this site. Please add your adblocker&#39;s allowlist.</p>'+
+             '<a href="#" style="display:inline-block;margin-top:20px;padding:10px 24px;background:#000;color:#fff;font:16px sans-serif;text-decoration:none">Disable my adblocker</a>';
+           document.body.appendChild(w);
+           // Hard-gate shape: the article is hidden outright while the wall is up.
+           var c=document.getElementById('content');
+           if(c) c.style.setProperty('display','none','important');
+         }
+         function poll(){
+           for(var i=0;i<SLOTS.length;i++) if(collapsed(SLOTS[i])) return wall();
+         }
+         poll();
+         setInterval(poll,500);
+       })();
+       </script>`,
+    ),
+    // In-page checks the generic probe cannot express. Criteria, read off the live page:
+    //   1. article readable: `#content` exists, carries text, is visible through its whole
+    //      ancestor chain, and has no [data-adblow-hidden] ancestor of ours;
+    //   2. wall not shown: neither the marked wall ([data-ab-wall]) nor any visible element
+    //      holding the site's wall copy is visible. Being present in the DOM is fine -- a
+    //      neutralised wall may be left inert -- *showing* is what fails;
+    //   3. genuine ad gone: `#real-ad-slot` is tagged by us and neither it nor its creative
+    //      image renders, i.e. the ad itself was removed, not merely tolerated.
+    extra: `(() => {
+      const visible = (el) => {
+        if (!el || el.closest('[data-adblow-hidden]') !== null) return false;
+        for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+          const s = getComputedStyle(n);
+          if (s.display === 'none' || s.visibility === 'hidden') return false;
+        }
+        return el.offsetWidth > 0 && el.offsetHeight > 0;
+      };
+      const byUs = (el) => el !== null && el.closest('[data-adblow-hidden]') !== null;
+      const text = (el) => (el.innerText || el.textContent || '').trim();
+      const WALL_COPY = /disable (your|my) adblocker|interfere with the intended operation/i;
+      const content = document.querySelector('#content');
+      const slot = document.querySelector('#real-ad-slot');
+      const creative = document.querySelector('#real-ad-creative');
+      const wallMarked = [...document.querySelectorAll('[data-ab-wall]')];
+      const wallCopy = [...document.querySelectorAll('body *:not(script):not(style)')]
+        .filter((el) => WALL_COPY.test(text(el)));
+      return {
+        contentExists: content !== null,
+        contentHasText: text(content).length > 0,
+        contentVisible: visible(content),
+        contentHiddenByUs: byUs(content),
+        adExists: slot !== null,
+        adVisible: visible(slot),
+        adHiddenByUs: byUs(slot),
+        creativeVisible: visible(creative),
+        wallTotal: wallMarked.length,
+        wallVisible: wallMarked.some(visible),
+        wallCopyVisible: wallCopy.some(visible),
+      };
+    })()`,
+    // All three assertions must hold at once, so a pass cannot come from dropping one of
+    // them: whitelisting the fixture page would kill assertion 3, and hiding the wall without
+    // restoring the article would kill assertion 1.
+    judge: (r) => {
+      const x = r.extra ?? {};
+      const yn = (v) => (v ? '是' : '否');
+      const adGone =
+        x.adExists === true && x.adHiddenByUs === true && !x.adVisible && !x.creativeVisible;
+      const textOk =
+        x.contentExists === true && x.contentHasText === true && x.contentVisible === true &&
+        !x.contentHiddenByUs;
+      const wallShown = x.wallVisible === true || x.wallCopyVisible === true;
+      return {
+        // Baseline (no extension): the genuine ad is on screen and no wall is up. The wall is
+        // only ever a reaction to blocked ads, so this is what makes the fixture meaningful.
+        interfere: x.adVisible === true && !wallShown,
+        handled: adGone && textOk && !wallShown,
+        baseDetail:
+          `真实广告可见=${yn(x.adVisible)} 反过滤墙=${wallShown ? '出现' : '无'} ` +
+          `正文可见=${yn(x.contentVisible)}`,
+        detail:
+          `广告清除=${yn(adGone)} 反过滤提示=${wallShown ? '出现' : '无'} ` +
+          `正文可见=${yn(textOk)}`,
+      };
+    },
+  },
 ];
 
 const LANDED = `<!doctype html><html><head><title>LANDED</title></head><body><h1 id="landed">广告落地页</h1></body></html>`;
@@ -688,6 +812,16 @@ async function runFixture({ port, fixture }) {
     if (dom && adEls) dom.adElements = adEls;
   }
 
+  // Optional per-fixture in-page check for goals the probe cannot express (fixture 24:
+  // anti-adblock wall). Fixtures 1..23 declare no `extra`, so nothing changes for them.
+  let extra = null;
+  if (fixture.extra) {
+    extra =
+      (
+        await cdp.send('Runtime.evaluate', { expression: fixture.extra, returnByValue: true })
+      ).result?.value ?? null;
+  }
+
   cdp.close();
   await fetch(`http://127.0.0.1:${port}/json/close/${target.id}`);
 
@@ -698,6 +832,34 @@ async function runFixture({ port, fixture }) {
     newTargets: openedPages.length,
     openedUrls: openedPages.map((e) => String(e.params?.targetInfo?.url ?? '').slice(0, 60)),
     dom,
+    extra,
+  };
+}
+
+/**
+ * Verdict for one fixture, computed for both runs. The default is the generic probe rule that
+ * kinds 1..23 rely on; a fixture may override it with `judge(r)` when its goal cannot be
+ * expressed by the probe alone (fixture 24: anti-adblock wall). An override returns the same
+ * shape, so no existing report line changes.
+ */
+function verdict(f, r) {
+  if (f.judge) return f.judge(r);
+  if (f.mode === 'popup' || f.mode === 'click') {
+    const navigating = `跳转=${r.navigated ? '是' : '否'} 新标签=${r.newTargets}`;
+    return {
+      interfere: r.navigated || r.newTargets > 0,
+      handled: !r.navigated && r.newTargets <= 0,
+      baseDetail: navigating,
+      detail: navigating,
+    };
+  }
+  const total = r.dom?.total ?? 0;
+  const hidden = r.dom?.hidden ?? 0;
+  return {
+    interfere: total > 0 && hidden === 0,
+    handled: total > 0 && hidden === total,
+    baseDetail: `探针 ${total} 个、被隐藏 ${hidden}`,
+    detail: `探针 ${hidden}/${total} 被隐藏`,
   };
 }
 
@@ -706,7 +868,7 @@ let failures = 0;
 const servers = startServers();
 await new Promise((r) => servers[0].listen(SITE_PORT, '127.0.0.1', r));
 await new Promise((r) => servers[1].listen(AD_PORT, '127.0.0.1', r));
-console.log(`夹具站点 ${BASE} /t1..t21，广告域 ${AD}\n`);
+console.log(`夹具站点 ${BASE} /t1..t24，广告域 ${AD}\n`);
 
 let baseBrowser = null;
 let extBrowser = null;
@@ -718,16 +880,12 @@ try {
   for (const f of targets) {
     const r = await runFixture({ port: 9831, fixture: f });
     f._base = r;
-    const interfering =
-      f.mode === 'popup' || f.mode === 'click'
-        ? r.navigated || r.newTargets > 0
-        : (r.dom?.total ?? 0) > 0 && (r.dom?.hidden ?? 0) === 0;
+    const v = verdict(f, r);
+    const interfering = v.interfere;
     f._baseOk = interfering;
     console.log(
       `  ${String(f.id).padStart(2)}. ${f.name.padEnd(30)} ` +
-        (f.mode === 'popup' || f.mode === 'click'
-          ? `跳转=${r.navigated ? '是' : '否'} 新标签=${r.newTargets}`
-          : `探针 ${r.dom?.total ?? 0} 个、被隐藏 ${r.dom?.hidden ?? 0}`) +
+        v.baseDetail +
         `  ${interfering ? '' : '⚠️ 夹具未生效'}`,
     );
   }
@@ -745,17 +903,9 @@ try {
   const rows = [];
   for (const f of targets) {
     const r = await runFixture({ port: 9832, fixture: f });
-    let handled;
-    let detail;
-    if (f.mode === 'popup' || f.mode === 'click') {
-      handled = !r.navigated && r.newTargets <= 0;
-      detail = `跳转=${r.navigated ? '是' : '否'} 新标签=${r.newTargets}`;
-    } else {
-      const total = r.dom?.total ?? 0;
-      const hidden = r.dom?.hidden ?? 0;
-      handled = total > 0 && hidden === total;
-      detail = `探针 ${hidden}/${total} 被隐藏`;
-    }
+    const v = verdict(f, r);
+    const handled = v.handled;
+    const detail = v.detail;
     rows.push({ f, r, handled, detail });
     console.log(
       `  ${String(f.id).padStart(2)}. ${f.name.padEnd(30)} ${handled ? 'PASS' : 'FAIL'}  ${detail}` +
