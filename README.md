@@ -70,8 +70,6 @@ language reach). Compiled from public documentation in October 2026; corrections
 | Self-learning per site, revocable entry by entry, scoped to the site that taught it | **yes** | no | no | no |
 | Anti-adblock walls | detected; neutralised per site **after the user confirms it**, ad blocking kept | filter lists | annoyance filters, automatic | annoyance filters and scriptlets, automatic |
 | Filter-list updates | with the extension version (MV3 static rulesets) | runtime updates | runtime updates | full version: runtime updates; MV3 (uBO Lite): with the version |
-| Manifest V3 | native | MV3 build available | MV3 build available | MV3 is the reduced uBO Lite |
-| UI languages | 5 | dozens | dozens | dozens |
 | Price and licence | free; project GPL-3.0, code also MIT | free (GPLv3) | extension free, desktop apps paid | free (GPLv3) |
 
 ## Features
