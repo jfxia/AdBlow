@@ -70,8 +70,8 @@ AdBlow 在此之外引入运行时观测，用于处理两类常见的规避手�
 ### 网络层
 
 6 份过滤列表（EasyList、EasyList China、EasyPrivacy、uBlock filters / privacy / badware）
-编译为 declarativeNetRequest 规则集。12.7 万条输入规则经去重与校验后保留 21,146 条拦截规则
-与 2,369 条例外规则，分为 6 卷；十万余个域名锚点归并为 114 条规则。
+编译为 declarativeNetRequest 规则集。12.7 万条输入规则经去重与校验后保留 20,913 条拦截规则
+与 2,365 条例外规则，分为 6 卷；十万余个域名锚点归并为 114 条规则。
 
 ### 元素隐藏
 

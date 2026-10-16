@@ -77,8 +77,8 @@ documentation in October 2026; corrections are welcome.
 ### Network layer
 
 6 filter lists (EasyList, EasyList China, EasyPrivacy, uBlock filters / privacy / badware)
-compiled into declarativeNetRequest rulesets. 127,336 input rules are deduplicated and validated
-down to 21,146 block rules and 2,369 exceptions across 6 rulesets, with 106,595 domain anchors
+compiled into declarativeNetRequest rulesets. 128,023 input rules are deduplicated and validated
+down to 20,913 block rules and 2,365 exceptions across 6 rulesets, with 106,595 domain anchors
 collapsed into 114 rules.
 
 ### Element hiding
