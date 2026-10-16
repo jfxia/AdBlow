@@ -71,4 +71,24 @@ describe('仓库卫生', () => {
     assert.ok(mit.includes('MIT License'), 'LICENSE-MIT 缺失 MIT 标题');
     assert.ok(mit.includes('Permission is hereby granted'), 'LICENSE-MIT 正文不完整');
   });
+
+  it('文档里不用第二人称（统一"用户 / users"式的第三人称叙述）', () => {
+    /**
+     * 这是刻意的文风要求，不是自动检查的洁癖：公开文档用第三人称叙述，
+     * 读起来更像产品说明，而不是对着某一个人讲话。
+     * 只查 Markdown 文档 —— 界面文案（_locales）里出现第二人称是正常的，
+     * 那里面对的就是正在使用扩展的人。
+     */
+    const docs = files.filter((f) => f.endsWith('.md'));
+    const second = /\b(you|your|yours|yourself|you're|you'll)\b|[你您]/i;
+    const offenders: string[] = [];
+    for (const rel of docs) {
+      const body = readFileSync(join(root, rel), 'utf8');
+      body.split(/\r?\n/).forEach((line, i) => {
+        const m = second.exec(line);
+        if (m) offenders.push(`${rel}:${i + 1}  “${m[0]}”  ${line.trim().slice(0, 60)}`);
+      });
+    }
+    assert.deepEqual(offenders, [], `文档里出现第二人称：\n  ${offenders.join('\n  ')}`);
+  });
 });

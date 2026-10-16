@@ -7,7 +7,7 @@
 **An ad blocker that judges ads by how a page behaves — not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-633%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-634%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 
 [中文说明](README.zh-CN.md)
@@ -60,7 +60,8 @@ click handlers that only navigate.
 delivered as one inlined table so it runs before page scripts.
 
 **Self-learning** — remembers hiding selectors and ad domains per site, promotes after 3 hits,
-and exposes everything in a rule manager where you can revoke any entry or export it as JSON.
+and exposes everything in a rule manager where users can revoke any entry individually or export
+the whole set as JSON.
 
 **Per-site switch** — the popup can disable filtering for the current site, which also suspends
 that site's learned network rules. Always a way out.
@@ -97,7 +98,7 @@ A store release (`adblow-1.0.0-edge.zip`) is prepared but not published yet.
 ## Build and package
 
 ```bash
-pnpm test           # 633 unit + integration tests, in-process
+pnpm test           # 634 unit + integration tests, in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 + store icon)
@@ -148,7 +149,7 @@ tools/
   e2e/             23-category in-browser acceptance suite, live-site pilot
   release/         audit, zip, store screenshots
   diagnostics/     copy-paste console snippets for triaging a broken page
-tests/             633 unit + integration tests (jsdom)
+tests/             634 unit + integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -171,7 +172,7 @@ wrong at least once:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts     # 633 tests, 0 failures
+node tests/run-all.ts     # 634 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 23 ad categories, measured in a real browser
 ```
 
@@ -216,7 +217,7 @@ Please respect those licenses when redistributing anything built from this repos
 
 The project as a whole is distributed under **GPL-3.0** — see [LICENSE](LICENSE). The original
 source code in this repository is additionally offered under **MIT** — see
-[LICENSE-MIT](LICENSE-MIT) — so you may reuse that code under MIT terms.
+[LICENSE-MIT](LICENSE-MIT) — so others may reuse that code under MIT terms.
 
 Why two layers: a built extension embeds the GPL-3.0 / CC BY-SA filter data listed above, and
 that part cannot be relicensed under MIT, which is what makes the whole distribution GPL-3.0.
