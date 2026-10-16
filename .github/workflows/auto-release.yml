@@ -99,11 +99,11 @@ jobs:
 
       - name: Judge the fingerprint (report only, writes nothing)
         if: env.AUTO_PUBLISH != 'true'
-        run: pnpm release:auto -- --decision-file "$DECISION_FILE"
+        run: pnpm release:auto --decision-file "$DECISION_FILE"
 
       - name: Judge the fingerprint and apply it (baseline / patch bump / notes)
         if: env.AUTO_PUBLISH == 'true'
-        run: pnpm release:auto -- --write --decision-file "$DECISION_FILE"
+        run: pnpm release:auto --write --decision-file "$DECISION_FILE"
 
       - name: Read the verdict
         id: verdict
@@ -156,7 +156,7 @@ jobs:
         env:
           # The built-in token; a personal access token would expire and is not required.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm release:github -- --publish
+        run: pnpm release:github --publish
 
       - name: Summarise the release
         if: env.AUTO_PUBLISH == 'true' && steps.verdict.outputs.decision == 'release'
