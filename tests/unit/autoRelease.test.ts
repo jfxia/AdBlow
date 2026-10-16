@@ -635,10 +635,10 @@ describe('the auto-release workflow', () => {
       'pnpm rulesets',
       'pnpm typecheck',
       'run: node tests/run-all.ts',
-      'pnpm release:auto -- --write --decision-file',
+      'pnpm release:auto --write --decision-file',
       'pnpm package',
       'git push origin',
-      'pnpm release:github -- --publish',
+      'pnpm release:github --publish',
     ];
     let previous = -1;
     for (const step of steps) {
@@ -662,6 +662,6 @@ describe('the auto-release workflow', () => {
     assert.match(guarded('Publish the GitHub release'), /decision == 'release'/);
     assert.match(guarded('Package the extension'), /decision == 'release'/);
     // a run that only reports must not write into the checkout at all
-    assert.equal(workflow.includes('pnpm release:auto -- --decision-file'), true);
+    assert.equal(workflow.includes('pnpm release:auto --decision-file'), true);
   });
 });
