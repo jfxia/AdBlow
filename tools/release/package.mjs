@@ -1,17 +1,19 @@
 // Release packaging: build -> audit -> zip.
 // Why a hand-written ZIP: external `zip` / `Compress-Archive` may be absent and
 // cannot control which files go in; deflate + CRC32 + three sections is simple enough to write.
+// The writer now lives in tools/release/zip.mjs, shared with the filter-list snapshot
+// that tools/release/github-release.mjs attaches to each GitHub release.
 // Why `_metadata/` must go: loading the unpacked extension creates
 // `_metadata/generated_indexed_rulesets/*` (~6 MB ruleset index cache), not our artifact.
 // Audit: a dist file is reachable when the manifest declares it, it is an
 // icon/locale/UI resource, or it is rule data; anything else is build leftover.
 // Run: node tools/release/package.mjs [--no-build]
-import { deflateRawSync } from 'node:zlib';
 import {
   existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createZip } from './zip.mjs';
 
 const root = new URL('../../', import.meta.url);
 const p = (rel) => fileURLToPath(new URL(rel, root));
@@ -124,100 +126,8 @@ if (excluded.length) {
 
 const files = allFiles.filter((f) => reachable.has(f)).sort();
 
-// 4) write the ZIP (deflate + CRC32; format per the PKWARE APPNOTE)
-
-const CRC_TABLE = (() => {
-  const table = new Int32Array(256);
-  for (let i = 0; i < 256; i += 1) {
-    let c = i;
-    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[i] = c;
-  }
-  return table;
-})();
-
-function crc32(buf) {
-  let c = 0 ^ -1;
-  for (let i = 0; i < buf.length; i += 1) c = (c >>> 8) ^ CRC_TABLE[(c ^ buf[i]) & 0xff];
-  return (c ^ -1) >>> 0;
-}
-
-/** MS-DOS time/date, as ZIP stores them. */
-function dosDateTime(date) {
-  const time =
-    (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
-  const day =
-    ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
-  return { time, day };
-}
-
-const now = new Date();
-const { time: dosTime, day: dosDate } = dosDateTime(now);
-
-const localParts = [];
-const centralParts = [];
-let offset = 0;
-
-for (const rel of files) {
-  const data = readFileSync(`${DIST}/${rel}`);
-  const compressed = deflateRawSync(data, { level: 9 });
-  // fall back to store (method 0) when deflate grows the data, per spec
-  const useDeflate = compressed.length < data.length;
-  const body = useDeflate ? compressed : data;
-  const method = useDeflate ? 8 : 0;
-  const crc = crc32(data);
-  const nameBuf = Buffer.from(rel, 'utf8');
-
-  const local = Buffer.alloc(30);
-  local.writeUInt32LE(0x04034b50, 0);
-  local.writeUInt16LE(20, 4);            // version needed
-  local.writeUInt16LE(0x0800, 6);        // flags: UTF-8 filename
-  local.writeUInt16LE(method, 8);
-  local.writeUInt16LE(dosTime, 10);
-  local.writeUInt16LE(dosDate, 12);
-  local.writeUInt32LE(crc, 14);
-  local.writeUInt32LE(body.length, 18);
-  local.writeUInt32LE(data.length, 22);
-  local.writeUInt16LE(nameBuf.length, 26);
-  local.writeUInt16LE(0, 28);            // extra len
-  localParts.push(local, nameBuf, body);
-
-  const central = Buffer.alloc(46);
-  central.writeUInt32LE(0x02014b50, 0);
-  central.writeUInt16LE(0x031e, 4);      // version made by (UNIX-ish)
-  central.writeUInt16LE(20, 6);          // version needed
-  central.writeUInt16LE(0x0800, 8);
-  central.writeUInt16LE(method, 10);
-  central.writeUInt16LE(dosTime, 12);
-  central.writeUInt16LE(dosDate, 14);
-  central.writeUInt32LE(crc, 16);
-  central.writeUInt32LE(body.length, 20);
-  central.writeUInt32LE(data.length, 24);
-  central.writeUInt16LE(nameBuf.length, 28);
-  central.writeUInt16LE(0, 30);          // extra
-  central.writeUInt16LE(0, 32);          // comment
-  central.writeUInt16LE(0, 34);          // disk
-  central.writeUInt16LE(0, 36);          // internal attrs
-  // external attrs: -rw-r--r--  (`<<` is signed 32-bit in JS, so `>>> 0` is needed)
-  central.writeUInt32LE((0o100644 << 16) >>> 0, 38);
-  central.writeUInt32LE(offset, 42);
-  centralParts.push(central, nameBuf);
-
-  offset += local.length + nameBuf.length + body.length;
-}
-
-const centralBuf = Buffer.concat(centralParts);
-const eocd = Buffer.alloc(22);
-eocd.writeUInt32LE(0x06054b50, 0);
-eocd.writeUInt16LE(0, 4);
-eocd.writeUInt16LE(0, 6);
-eocd.writeUInt16LE(files.length, 8);
-eocd.writeUInt16LE(files.length, 10);
-eocd.writeUInt32LE(centralBuf.length, 12);
-eocd.writeUInt32LE(offset, 16);
-eocd.writeUInt16LE(0, 20);
-
-const zip = Buffer.concat([...localParts, centralBuf, eocd]);
+// 4) write the ZIP (deflate + CRC32, implemented in ./zip.mjs)
+const zip = createZip(files.map((rel) => ({ name: rel, data: readFileSync(`${DIST}/${rel}`) })));
 
 mkdirSync(RELEASE_DIR, { recursive: true });
 const zipName = `adblow-${version}-edge.zip`;

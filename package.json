@@ -15,6 +15,8 @@
     "verify": "node tools/build/build.mjs && node tests/run-all.ts",
     "package": "node tools/release/package.mjs",
     "update-lists": "node tools/release/update-lists.mjs",
+    "version:bump": "node tools/release/version-bump.mjs",
+    "release:github": "node tools/release/github-release.mjs",
     "recon": "node tools/recon/snapshot.mjs"
   },
   "devDependencies": {

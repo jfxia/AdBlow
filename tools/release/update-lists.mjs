@@ -78,9 +78,11 @@ step('5/5 打包', ['tools/release/package.mjs']);
 
 console.log(`
 下一步（需要人工决定）：
-  1. 版本号：商店按版本区分，改 package.json 的 version 后再跑一次 pnpm package；
-  2. 上传：把 release/adblow-<版本>-edge.zip 传到 Edge 加载项后台；
-  3. 审核通过后，已安装的用户会在数小时内自动更新。
+  1. 版本号：商店按版本区分，pnpm version:bump <新版本> --write 后提交并推送；
+  2. 重打包并发布：pnpm package 之后 pnpm release:github --publish
+     （dry-run 用 pnpm release:github）；发布说明写在 docs/release-notes/<版本>.md；
+  3. 上传商店：把 release/adblow-<版本>-edge.zip 传到 Edge 加载项后台；
+  4. 审核通过后，已安装的用户会在数小时内自动更新。
 
 提醒：静态规则集无法远程替换（MV3 限制），所以列表新鲜度 = 发版频率。
 `);

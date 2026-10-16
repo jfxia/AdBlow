@@ -7,7 +7,7 @@
 **在过滤列表匹配之外，依据页面运行时的元素行为判定并拦截广告。**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![测试](https://img.shields.io/badge/tests-760%20passing-brightgreen)](#测试与验收)
+[![测试](https://img.shields.io/badge/tests-822%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与本地化)
 
 [English](README.md)
@@ -143,7 +143,8 @@ pnpm build          # 产出 dist/
 扩展”，指向 `dist/` 目录。
 
 面向商店的发布包由 `pnpm package` 生成，当前版本为 `release/adblow-1.0.2-edge.zip`；v1.0.0 已在
-Edge 加载项商店上架。
+Edge 加载项商店上架。一次发布由三条命令串起来——`pnpm version:bump`、`pnpm package` 与
+`pnpm release:github`（见「构建与打包」与「发布」两节）。
 
 过滤列表是构建期抓取而非随仓库分发，因此构建需要能访问其上游站点。若上游被屏蔽或过慢，取列表
 脚本会自动回退到镜像（托管在 GitHub 的列表走 jsDelivr，EasyList 走 adblockplus.org），并打印
@@ -154,12 +155,14 @@ Edge 加载项商店上架。
 ## 构建与打包
 
 ```bash
-pnpm test           # 760 项单元与集成测试，单进程内执行
+pnpm test           # 822 项单元与集成测试，单进程内执行
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 与商店图标）
 pnpm package        # 构建 + 审计 + 打包，产出 release/adblow-<版本>-edge.zip
 pnpm update-lists   # 刷新过滤列表并整体重建：拉取 → 编译 → 构建 → 测试 → 打包
+pnpm version:bump   # 改写版本引用（默认 dry-run，加 --write 才写文件）
+pnpm release:github # 跑完全部发布校验（默认 dry-run，加 --publish 才真正发布）
 ```
 
 依赖 Node.js 24 及以上与 pnpm；生成图标与商店截图另需 Python 3 与 Pillow。
@@ -177,6 +180,34 @@ pnpm update-lists   # 刷新过滤列表并整体重建：拉取 → 编译 → 
 ```bash
 ADBLOW_DIST=dist-release pnpm package
 ```
+
+## 发布
+
+一次发布是"升版本 → 打包 → 发 Release"，在没有显式开关时什么都不会被写入：
+
+```bash
+pnpm version:bump <版本>            # 只打印将要改写的每一处版本引用
+pnpm version:bump <版本> --write    # package.json、两份 README、docs/RELEASE.md
+git add -A && git commit && git push
+pnpm package                        # release/adblow-<版本>-edge.zip
+pnpm release:github                 # 跑完全部校验，不发写请求
+pnpm release:github --publish       # 建 Release 并上传附件
+```
+
+`pnpm version:bump <版本> --test-count <n>` 会一并同步测试计数徽章与写明计数的正文行；某一轮只新增
+测试、不升版本时，用 `--counts-only` 单独同步。
+
+`pnpm release:github` 在下列任何一条不成立时都拒绝发布，并给出对应的修法：
+
+- `package.json`、请求的 tag 与**包内** `manifest.json` 三者的版本必须一致——包内版本是解压读出来的，不看构建日志；
+- 工作区干净，且 `HEAD` 就是远端的提交：发布必须对应一个已推送的提交；
+- `docs/release-notes/<版本>.md` 存在且写明该版本（它既是 Release 正文，也是商店后台"新版说明"字段的内容）；
+- 过滤列表快照不超过 7 天（按 `filters/meta.json` 的 `fetchedAt`）；
+- 凭据可用：优先取 `GH_TOKEN`，否则用 `git credential fill`；token 只打印长度，不打印内容。
+
+Release 已存在时复用，只补传缺失的附件，因此上传中断后重跑是安全的。两个附件是商店包与过滤列表
+快照（`filters/*.txt` 加 `meta.json`，文件名取自抓取日期）。`--offline` 与 `--rehearse` 只用于演练，
+不能与 `--publish` 同时使用。
 
 ## 项目结构
 
@@ -204,7 +235,7 @@ tools/
   e2e/             24 类真实浏览器验收；活站端到端
   release/         审计、zip 打包、商店截图生成
   diagnostics/     可在控制台直接执行的诊断脚本，用于定位站点异常
-tests/             760 项单元与集成测试（jsdom）
+tests/             822 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
 
@@ -224,7 +255,7 @@ public/            manifest、_locales、图标
 ## 测试与验收
 
 ```bash
-node tests/run-all.ts           # 760 项测试，0 失败
+node tests/run-all.ts           # 822 项测试，0 失败
 node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
 ```
 

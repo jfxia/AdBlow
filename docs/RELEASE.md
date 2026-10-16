@@ -8,6 +8,7 @@
 | 用途 | 文件 |
 |---|---|
 | **上传商店的扩展包** | `release/adblow-1.0.2-edge.zip` |
+| **GitHub Release 附件：列表快照** | `release/adblow-filter-lists-<抓取日期>.zip`（名字取自 `filters/meta.json` 的 `fetchedAt`） |
 | 商店列表图标 | `store/icon-300.png`（300×300） |
 | 商店截图 | `store/store-1280x800-options-{zhCN,enUS}.png`、`store/store-1280x800-popup-{zhCN,enUS}.png` |
 
@@ -16,11 +17,45 @@
 > 不要自动覆盖，也不要 `git checkout` 还原；改完立刻提交（曾经因此丢失过手工成果）。
 > 需要转成商店要求的精确尺寸时用 `tools/release/fit-store-shot.py`。
 
-重新生成：
+## 二、发布流程（四个命令）
+
+GitHub Release 与两个附件由仓库工具完成，不再手工改文档、手工拼 zip、手工调 REST API；
+Edge 加载项商店的上传仍是手工步骤（商店后台没有可用的免鉴权接口），上传 `release/adblow-<版本>-edge.zip` 即可：
+
+```bash
+pnpm filters --force                 # 仅在需要刷新过滤列表时；列表不入库
+pnpm version:bump <新版本>            # 升版本：只打印将要改的版本引用（dry-run，不写文件）
+pnpm version:bump <新版本> --write    # 真改：package.json + 两份 README + 本文件
+git add -A && git commit && git push  # 发布必须对应一个已推送的提交
+pnpm package                         # 构建 + 审计 + 打包 -> release/adblow-<版本>-edge.zip
+pnpm release:github                  # dry-run：跑完全部校验并打印将要发出的请求
+pnpm release:github --publish        # 建 Release，上传商店包 + 过滤列表快照
+```
+
+`pnpm version:bump` 的规则表在 `tools/release/release-core.mjs`：它逐条核对文档里的字面量，
+任何一条对不上都会打印出来并拒绝写入，所以"漏改一处版本引用"不会再静默通过。
+带 `--test-count <n>` 时，两份 README 的测试计数徽章与正文行也一并同步；若某一轮只是新增测试、
+不升版本，用 `pnpm version:bump --counts-only --test-count <n> --write` 单独同步计数。
+
+`pnpm release:github` 默认 **dry-run**，只做检查、不发任何写请求；`--publish` 才真正建 Release。
+它会拒绝以下情况，并逐条说明修法：
+
+- `package.json` 版本、请求的 tag、**包内** `manifest.json` 的版本三者不一致（包内版本是解压读出来的，不看构建日志）；
+- 工作区有未提交改动，或 HEAD 与远端不一致（发布应对应已推送的提交）；
+- `docs/release-notes/<版本>.md` 缺失或为空；
+- 过滤列表快照超过 7 天（按 `filters/meta.json` 的 `fetchedAt`），提示先跑 `pnpm filters --force`；
+- 缺少凭据。凭据优先取环境变量 `GH_TOKEN`，否则用 `git credential fill`；**token 内容不会被打印**（只打印长度）。
+
+Release 已存在时复用，只补传缺失的附件；同名附件不重复上传。列表快照由工具在发布时按
+`filters/*.txt` + `meta.json` 现场打包，文件名与内容都由抓取时间决定。
+
+`--offline`（不发任何网络请求）与 `--rehearse`（仅跳过"工作区干净且已推送"这一项）只用于演练，
+两者都不能与 `--publish` 同时使用。
+
+图标与商店截图是另外的手工素材：
 
 ```bash
 pnpm icons                              # 图标（16/32/48/128 + store/icon-300.png）
-node tools/release/package.mjs          # 构建 + 审计 + 打包 zip
 python tools/release/compose-store-shots.py   # 商店截图合成（需先跑 _probe/gen-store-shots.mjs）
 ```
 
@@ -53,7 +88,7 @@ python tools/release/compose-store-shots.py   # 商店截图合成（需先跑 _
 **manifest 的 `name` 仍是 `AdBlow`**（即扩展管理页与商店列表显示的正式名称）——
 若要一并改成带后缀的名称，改 `_locales/*/messages.json` 的 `extName` 即可。
 
-## 二、商店后台要填的内容
+## 三、商店后台要填的内容
 
 - **名称**：AdBlow（`_locales/*/messages.json` 的 `extName`，各语言一致）
 - **简介**：取 `extDesc`（各语言都有，≤132 字符）
@@ -67,7 +102,7 @@ python tools/release/compose-store-shots.py   # 商店截图合成（需先跑 _
 - **截图**：上传 `store/store-1280x800-*.png`（商店要求 1280×800 或 640×400）
 - **隐私政策**：必须说明"不收集、不上传任何用户数据"（见下）
 
-## 三、需要如实声明的隐私事实
+## 四、需要如实声明的隐私事实
 
 AdBlow 的行为**全部在本地**，没有任何服务端：
 
@@ -79,7 +114,7 @@ AdBlow 的行为**全部在本地**，没有任何服务端：
 
 因此"是否收集用户数据"应选 **否**；若要填写数据用途，可写"不收集"。
 
-## 四、权限说明（商店会逐条问用途）
+## 五、权限说明（商店会逐条问用途）
 
 | 权限 | 用途 |
 |---|---|
@@ -88,18 +123,19 @@ AdBlow 的行为**全部在本地**，没有任何服务端：
 | `activeTab` | 弹窗里显示当前站点并支持单站开关 |
 | `<all_urls>`（host） | 广告过滤必须覆盖用户访问的任意站点；不注入则无法工作 |
 
-## 五、提交前的自检（都已通过）
+## 六、提交前的自检（都已通过）
 
 - [x] `manifest.json` 位于 zip **根目录**，无多余目录层
-- [x] ZIP 用独立实现（Python `zipfile`）校验：CRC 全部通过、可正常解包
+- [x] ZIP 由自写实现写出，并由 `tools/release/zip.mjs` 的读取器复读：解包正常，包内
+      `manifest.json` 的 `version` 与 `package.json` 一致（`pnpm release:github` 每次发布前都会再验一遍）
 - [x] 包内**不含** `_metadata/`（浏览器加载扩展时自动生成的索引缓存，约 6 MB）
 - [x] `name` / `version` / `description` / `icons` / `default_locale` 齐全
 - [x] `version` 为 `x.y.z`（1.0.2），由 `package.json` 单一来源注入
 - [x] manifest 与界面用到的每个文案 key 在 5 种语言里都存在
 - [x] 5 种语言在真实 Edge 里逐个 `--lang` 实测，文案正确、无空文案、无文字溢出
-- [x] 760 项测试通过 · 24 类干扰视线广告验收 **24/24** · 试点站 E2E 全通过
+- [x] 822 项测试通过 · 24 类干扰视线广告验收 **24/24** · 试点站 E2E 全通过
 
-## 六、许可证（已确定）
+## 七、许可证（已确定）
 
 本项目整体按 **GPL-3.0** 分发（[`LICENSE`](../LICENSE)），本仓库原创代码同时提供
 **MIT**（[`LICENSE-MIT`](../LICENSE-MIT)）。
@@ -112,15 +148,19 @@ AdBlow 的行为**全部在本地**，没有任何服务端：
 本仓库公开即可满足这一条；请保持仓库公开可访问（`docs/plans/2026-10-11-filter-list-integration.md`
 的许可一节有更详细的分析）。第三方列表不属于本仓库，构建时抓取，各自许可见 README 的致谢一节。
 
-## 七、上架之后：过滤列表怎么更新
+## 八、上架之后：过滤列表怎么更新
 
 静态规则集是打包文件，**MV3 没有远程替换它的接口**，所以列表的新鲜度等于发版频率：
 
 ```bash
 pnpm update-lists          # 抓取 → 编译 → 构建 → 测试 → 打包，并打印刷新前后的列表日期
-# 改 package.json 的 version，再跑一次 pnpm package
-# 上传 release/adblow-<版本>-edge.zip
+pnpm version:bump <新版本> --write
+git add -A && git commit && git push
+pnpm release:github --publish
 ```
+
+`pnpm release:github` 会在快照超过 7 天时拒绝发布（按 `filters/meta.json` 的 `fetchedAt`），
+所以"列表刷新"和"发版"这两件事不会悄悄脱节。
 
 - **节奏**：每月一次；遇到明显误杀或漏拦，随版本一起发。
 - 审核通过后，已安装用户会在数小时内自动更新。
@@ -129,35 +169,11 @@ pnpm update-lists          # 抓取 → 编译 → 构建 → 测试 → 打包�
 - 想把更新做到"不发版"也行，但要守住六条边界（尤其"只下数据不下代码"，脚本注入必须随包），
   详见 [`docs/LIST-UPDATES.md`](LIST-UPDATES.md)。
 
-## 八、v1.0.1 更新说明（商店后台"新版说明"字段，按语言分别填写）
+## 九、发布说明（受版本控制）
 
-### 中文（简体）
+每个版本的发布说明是一个受版本控制的文件：`docs/release-notes/<版本>.md`。
 
-- 新增脚本注入规则 `abort-current-script`（仅在规则自带搜索串时生效），可覆盖的脚本注入规则由
-  1,964 条增至 2,286 条，覆盖域名由 2,841 个增至 3,247 个。
-- 新增反过滤墙处理：站点用诱饵元素探测过滤器并遮挡页面时，弹窗会给出提示，经确认后隐藏该遮罩、
-  恢复被它遮挡的正文；广告拦截保持不变，且不会在未经确认时改动页面。
-- 规则管理页新增内置过滤列表的抓取日期，便于判断规则是否过期。
-- 修正打包环节误删列表信息文件的问题；补齐界面文案与五种语言的译者注释。
+- GitHub Release 正文由 `pnpm release:github` 从该文件读取，找不到就拒绝发布；
+- 同一份文本就是商店后台"新版说明"字段的内容，不再从临时文件手工复制；
+- v1.0.1 与 v1.0.2 的说明已迁入 [`docs/release-notes/`](release-notes/)，v1.0.0 及更早没有留下同格式的文件。
 
-### English
-
-- Added the `abort-current-script` scriptlet (applied only when the rule carries a search needle):
-  supported scriptlet rules grew from 1,964 to 2,286, covering 2,841 to 3,247 domains.
-- Added anti-adblock wall handling: when a site probes for a blocker and covers the page, the popup
-  offers a per-site fix that hides the gate and restores the content it hid. Ad blocking stays on,
-  and nothing changes on a site until the fix is accepted.
-- The rule manager now shows the fetch date of the bundled filter lists.
-- Fixed a packaging issue that dropped the list-info file; filled in UI strings and translator notes
-  for all five locales.
-
-## 九、v1.0.2 更新说明（商店后台"新版说明"字段）
-
-### 本版更新（v1.0.2）
-
-- **规则管理页的排序固定下来**：站点按域名升序、站点内规则按字母序，网络层的域名规则与隐藏规则
-  按站点合并成一张列表（此前分成两块，同一站点会出现两次）；排序时忽略开头的 `www.`。
-- **自学习规则加上限与衰减**：每个站点最多保留 40 条已晋级选择器、200 条观察中的选择器、50 个
-  学习到的广告域名（全局学习域名上限 2,000），30/90 天未命中即清理，命中计数每 30 天减半。
-  目的是防止规则无限增长拖慢页面判定——实测正常站点每站只有个位数条目，这些上限是安全阀。
-- 开发工具：移除指向已下线试点站的默认 URL，改为必须显式传参。

@@ -7,7 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-760%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-822%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 
 [中文说明](README.zh-CN.md)
@@ -158,7 +158,8 @@ Then enable Developer mode in `edge://extensions` (or `chrome://extensions`) and
 unpacked**, pointing at the `dist/` directory.
 
 The store package is produced by `pnpm package` (`release/adblow-1.0.2-edge.zip`); v1.0.0 is already
-listed on the Edge Add-ons store.
+listed on the Edge Add-ons store. A release is assembled by three commands — `pnpm version:bump`,
+`pnpm package` and `pnpm release:github` (see [Build and package](#build-and-package)).
 
 The filter lists are fetched rather than committed, so a build needs to reach their upstream hosts.
 If those are blocked or slow, the fetcher falls back to mirrors on its own (jsDelivr for the lists
@@ -170,12 +171,14 @@ step is required. If they are unreachable altogether, the same lists are attache
 ## Build and package
 
 ```bash
-pnpm test           # 760 unit and integration tests, run in-process
+pnpm test           # 822 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
 pnpm package        # build + audit + zip -> release/adblow-<version>-edge.zip
 pnpm update-lists   # refresh the filter lists and rebuild everything
+pnpm version:bump   # bump the version references (dry run; --write applies them)
+pnpm release:github # run every release check; dry run unless --publish is passed
 ```
 
 Node.js 24 or later and pnpm are required; generating icons and store screenshots additionally
@@ -197,6 +200,40 @@ than terminating the browser:
 ```bash
 ADBLOW_DIST=dist-release pnpm package
 ```
+
+## Releasing
+
+A release is version bump, package, publish, and nothing is written without an explicit switch:
+
+```bash
+pnpm version:bump <version>          # print every version reference it would rewrite
+pnpm version:bump <version> --write  # package.json, both READMEs, docs/RELEASE.md
+git add -A && git commit && git push
+pnpm package                         # release/adblow-<version>-edge.zip
+pnpm release:github                  # all checks, no write request
+pnpm release:github --publish        # create the release and upload the attachments
+```
+
+`pnpm version:bump <version> --test-count <n>` also syncs the test-count badges and the lines that
+state the count; `--counts-only` does that alone, for a commit that only adds tests.
+
+`pnpm release:github` refuses to publish unless all of the following hold, and states the fix for
+each failure:
+
+- the version is identical in `package.json`, in the requested tag and in the `manifest.json`
+  **inside the package** — read by unpacking the zip, not from the build log;
+- the working tree is clean and `HEAD` is the commit on the remote: a release has to point at a
+  pushed commit;
+- `docs/release-notes/<version>.md` exists and names that version (it is the release body, and the
+  same text goes into the store listing);
+- the filter-list snapshot is younger than seven days, by `fetchedAt` in `filters/meta.json`;
+- a credential is available: `GH_TOKEN`, else `git credential fill`. Tokens are never printed, only
+  their length.
+
+An existing release is reused and only missing attachments are uploaded, so a retry after a partial
+upload is safe. The store package and a snapshot of the filter lists (`filters/*.txt` plus
+`meta.json`, named after the fetch date) are the two attachments. `--offline` and `--rehearse` exist
+for rehearsals only and cannot be combined with `--publish`.
 
 ## Project layout
 
@@ -225,7 +262,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             760 unit and integration tests (jsdom)
+tests/             822 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -250,7 +287,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 760 tests, 0 failures
+node tests/run-all.ts           # 822 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 
