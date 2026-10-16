@@ -78,12 +78,12 @@ documentation in October 2026; corrections are welcome.
 
 6 filter lists (EasyList, EasyList China, EasyPrivacy, uBlock filters / privacy / badware)
 compiled into declarativeNetRequest rulesets. 127,336 input rules are deduplicated and validated
-down to 21,146 block rules and 2,369 exceptions across 6 rulesets, with 105,675 domain anchors
-collapsed into 113 rules.
+down to 21,146 block rules and 2,369 exceptions across 6 rulesets, with 106,595 domain anchors
+collapsed into 114 rules.
 
 ### Element hiding
 
-25,478 domain-specific selectors covering 11,389 domains, split into 256 hash shards and requested
+25,467 domain-specific selectors covering 11,357 domains, split into 256 hash shards and requested
 by the content script on demand. The extension does not use `web_accessible_resources`, which
 leaves one less surface available for detection.
 
