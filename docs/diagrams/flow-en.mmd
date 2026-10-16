@@ -1,20 +1,17 @@
 flowchart TD
   start["document_start"] --> a["MAIN world: guards installed, scriptlets applied"]
   a --> b["Isolated world: pristine snapshot of the document"]
-  b --> c["Requests matched against static DNR rulesets"]
+  b --> c["Requests matched against the static DNR rulesets"]
   c --> d["Scan: site packs, list hiding rules, behaviour scoring"]
   d --> e{"Judged ad-like?"}
   e -->|"yes"| f["Hide with display, visibility and pointer-events; record the reason"]
   e -->|"no"| g["Leave untouched"]
-  f --> h["Verification pass: a site that restores display is re-hidden"]
-  h --> i["Record hits"]
-  i --> j{"3 cumulative hits?"}
-  j -->|"yes"| k["Promote: learned selector or learned domain rule, scoped to this site"]
-  j -->|"no"| l["Keep observing"]
-  k --> m["Rule manager: review, revoke, export"]
-  d --> n["Wall detection - read only, never modifies the page"]
-  n --> o{"Wall found?"}
-  o -->|"yes"| p["Popup reports it; the page is left exactly as it is"]
-  p --> q{"Confirmed for this site?"}
-  q -->|"yes"| r["Hide the gate, restore the content it hid; ad blocking stays on"]
-  q -->|"no"| p
+  f --> h["Verification pass re-hides what the site restores"]
+  h --> i["Hits recorded; 3 accumulated hits promote a rule scoped to this site"]
+  i --> j["Rule manager: review, revoke, export"]
+  d --> k["Wall detection (read-only, never modifies the page)"]
+  k --> l{"Wall found?"}
+  l -->|"yes"| m["Popup reports it; the page stays exactly as it is"]
+  m --> n{"Confirmed for this site?"}
+  n -->|"yes"| o["Hide the gate, restore the content it hid; ad blocking stays on"]
+  n -->|"no"| m

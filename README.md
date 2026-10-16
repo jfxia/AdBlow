@@ -218,15 +218,11 @@ public/            manifest, _locales, icons
 
 ### Architecture
 
-<img src="docs/diagrams/architecture-en.png" width="880" alt="AdBlow architecture: filter lists compiled into rulesets and hiding shards, four layers from the service worker down to the MAIN world">
-
-*Source: [`architecture-en.mmd`](docs/diagrams/architecture-en.mmd). Rendered with Mermaid into a committed PNG, so it also displays where GitHub's client-side Mermaid does not run.*
+<img src="docs/diagrams/architecture-en.png" width="830" alt="AdBlow architecture: filter lists compiled into rulesets and hiding shards, four layers from the service worker down to the MAIN world">
 
 ### Request and judgement flow
 
-<img src="docs/diagrams/flow-en.png" width="560" alt="AdBlow request and judgement flow, including the point where an anti-adblock wall waits for the user to confirm">
-
-*Source: [`flow-en.mmd`](docs/diagrams/flow-en.mmd). Rendered with Mermaid into a committed PNG.*
+<img src="docs/diagrams/flow-en.png" width="780" alt="AdBlow request and judgement flow, including the point where an anti-adblock wall waits for the user to confirm">
 
 ## Safety invariants
 

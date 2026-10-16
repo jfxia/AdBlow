@@ -198,15 +198,11 @@ public/            manifest、_locales、图标
 
 ### 架构
 
-<img src="docs/diagrams/architecture-zh.png" width="880" alt="AdBlow 系统架构：过滤列表编译为规则集与隐藏分片，四层从后台 service worker 一直到 MAIN world">
-
-*图源：[`architecture-zh.mmd`](docs/diagrams/architecture-zh.mmd)。用 Mermaid 渲染为 PNG 一并提交，因此在 GitHub 客户端 Mermaid 不生效的环境下也能正常显示。*
+<img src="docs/diagrams/architecture-zh.png" width="830" alt="AdBlow 系统架构：过滤列表编译为规则集与隐藏分片，四层从后台 service worker 一直到 MAIN world">
 
 ### 处理流程
 
-<img src="docs/diagrams/flow-zh.png" width="560" alt="AdBlow 处理流程，含反过滤墙等待用户确认的环节">
-
-*图源：[`flow-zh.mmd`](docs/diagrams/flow-zh.mmd)。用 Mermaid 渲染为提交的 PNG。*
+<img src="docs/diagrams/flow-zh.png" width="780" alt="AdBlow 处理流程，含反过滤墙等待用户确认的环节">
 
 ## 安全约束
 
