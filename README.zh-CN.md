@@ -41,6 +41,14 @@ AdBlow 在此之外引入运行时观测，用于处理两类常见的规避手�
 与 AdBlock Plus 等产品不同，AdBlow 不设“可接受广告”付费白名单，不接受以付费方式放行广告；
 构建脚本会拒绝拉取带付费白名单的列表。
 
+## 架构
+
+<img src="docs/diagrams/architecture-zh.png" width="830" alt="AdBlow 系统架构：过滤列表编译为规则集与隐藏分片，四层从后台 service worker 一直到 MAIN world">
+
+## 处理流程
+
+<img src="docs/diagrams/flow-zh.png" width="780" alt="AdBlow 处理流程，含反过滤墙等待用户确认的环节">
+
 ## 与其他过滤器的对比
 
 下表只列出与本项目定位相关的维度，**不是完整评测**。AdBlock Plus、AdGuard、uBlock Origin 各有
@@ -195,14 +203,6 @@ tools/
 tests/             689 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
-
-### 架构
-
-<img src="docs/diagrams/architecture-zh.png" width="830" alt="AdBlow 系统架构：过滤列表编译为规则集与隐藏分片，四层从后台 service worker 一直到 MAIN world">
-
-### 处理流程
-
-<img src="docs/diagrams/flow-zh.png" width="780" alt="AdBlow 处理流程，含反过滤墙等待用户确认的环节">
 
 ## 安全约束
 

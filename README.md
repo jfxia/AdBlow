@@ -47,6 +47,14 @@ Unlike AdBlock Plus and similar products, AdBlow has no paid "Acceptable Ads" wh
 does not unblock advertising in exchange for payment. The build refuses to fetch a list that
 carries one.
 
+## Architecture
+
+<img src="docs/diagrams/architecture-en.png" width="830" alt="AdBlow architecture: filter lists compiled into rulesets and hiding shards, four layers from the service worker down to the MAIN world">
+
+## Request and judgement flow
+
+<img src="docs/diagrams/flow-en.png" width="780" alt="AdBlow request and judgement flow, including the point where an anti-adblock wall waits for the user to confirm">
+
 ## How it compares
 
 Only the dimensions this project's positioning depends on are listed; this is not a full
@@ -215,14 +223,6 @@ tools/
 tests/             689 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
-
-### Architecture
-
-<img src="docs/diagrams/architecture-en.png" width="830" alt="AdBlow architecture: filter lists compiled into rulesets and hiding shards, four layers from the service worker down to the MAIN world">
-
-### Request and judgement flow
-
-<img src="docs/diagrams/flow-en.png" width="780" alt="AdBlow request and judgement flow, including the point where an anti-adblock wall waits for the user to confirm">
 
 ## Safety invariants
 
