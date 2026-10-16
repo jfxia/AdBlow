@@ -7,7 +7,7 @@
 **在过滤列表匹配之外，依据页面运行时的元素行为判定并拦截广告。**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![测试](https://img.shields.io/badge/tests-634%20passing-brightgreen)](#测试与验收)
+[![测试](https://img.shields.io/badge/tests-642%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与本地化)
 
 [English](README.md)
@@ -68,9 +68,9 @@ AdBlow 在此之外引入运行时观测，用于处理两类常见的规避手�
 
 ### 脚本注入
 
-支持 12 个规范 `##+js(...)` 规则（`abort-on-property-read`、`set-constant`、`json-prune`、
-`no-fetch-if`、`no-setTimeout-if` 等），覆盖 2,841 个域名。数据表内联于脚本，确保在页面脚本
-执行之前生效。
+支持 13 个规范 `##+js(...)` 规则（`abort-on-property-read`、`set-constant`、`json-prune`、
+`abort-current-script`、`no-fetch-if`、`no-setTimeout-if` 等），覆盖 3,246 个域名。数据表内联于
+脚本，确保在页面脚本执行之前生效。
 
 ### 自学习
 
@@ -116,7 +116,7 @@ pnpm build          # 产出 dist/
 ## 构建与打包
 
 ```bash
-pnpm test           # 634 项单元与集成测试，单进程内执行
+pnpm test           # 642 项单元与集成测试，单进程内执行
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 与商店图标）
@@ -163,10 +163,10 @@ src/
 tools/
   filters/         过滤列表拉取（带付费白名单的列表会被拒绝）
   build/           规则集、元素隐藏分片、脚本注入数据表生成；打包；图标生成
-  e2e/             23 类真实浏览器验收；活站端到端
+  e2e/             24 类真实浏览器验收；活站端到端
   release/         审计、zip 打包、商店截图生成
   diagnostics/     可在控制台直接执行的诊断脚本，用于定位站点异常
-tests/             634 项单元与集成测试（jsdom）
+tests/             642 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
 
@@ -186,11 +186,11 @@ public/            manifest、_locales、图标
 ## 测试与验收
 
 ```bash
-node tests/run-all.ts           # 634 项测试，0 失败
-node tools/e2e/acceptance.mjs   # 23 类广告，在真实浏览器中实测
+node tests/run-all.ts           # 642 项测试，0 失败
+node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
 ```
 
-`tools/e2e/acceptance.mjs` 是验收的主体。它为 23 类遮挡视线的广告各构造一个真实形态的页面，
+`tools/e2e/acceptance.mjs` 是验收的主体。它为 24 类遮挡视线的广告各构造一个真实形态的页面，
 覆盖前置弹窗、底层弹窗、插屏、随滚动漂浮、边角浮标、底部粘性横幅、页外流视频、前置贴片、
 中插、视频叠加、整页可点击、伪造关闭按钮、点击劫持、标签页劫持、区域展开、闪烁 GIF、富媒体、
 站点自有域名跳转包装、CDN base64 包装等。
@@ -205,8 +205,12 @@ node tools/e2e/acceptance.mjs   # 23 类广告，在真实浏览器中实测
 
 - 通用（非域名限定）元素隐藏规则未注入，仅注入域名限定的部分。
 - 未实现过程式隐藏规则 `#?#` 与 HTML 过滤 `##^`。
-- 不支持 `##+js(abort-current-script)` 等少数脚本注入规则（列表中 359 条）。构建会如实报告
-  跳过项，不会放宽规则以纳入更多条目。
+- `abort-current-script` 仅在规则自带搜索串时生效：陷阱只中止源码命中搜索串的那个脚本，其余
+  脚本读取时原样放行。列表中有 38 条没有搜索串，会被丢弃。仍未实现的脚本注入
+  （`abort-on-stack-trace`、`remove-node-text`、`nano-setTimeout-booster`、`nowebrtc`、`noeval`
+  等）合计 385 条。构建会如实报告跳过项，不会放宽规则以纳入更多条目。
+- 反过滤墙尚未处理。对应的验收夹具已经存在（第 24 类），目前为失败状态：站点测量到诱饵元素被隐藏
+  之后，仍能弹出“请关闭广告过滤器”的门禁。对这类站点按需放宽隐藏的方案已经设计，但尚未实现。
 - 过滤列表在构建期编译，更新列表需重新构建扩展。此为 MV3 限制，不支持远程规则集。
 - 尚无公开的性能基准，也尚未在中立站点上与其他过滤器做同条件对比。
 

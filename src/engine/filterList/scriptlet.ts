@@ -78,6 +78,8 @@ export const SUPPORTED_SCRIPTLETS = new Set<string>([
   'set-constant',
   'abort-on-property-read',
   'abort-on-property-write',
+  // Only when it carries a search needle -- see SCRIPTLETS_REQUIRING_NEEDLE.
+  'abort-current-script',
   'no-setTimeout-if',
   'no-setInterval-if',
   'no-window-open-if',
@@ -90,12 +92,21 @@ export const SUPPORTED_SCRIPTLETS = new Set<string>([
 ]);
 
 /**
+ * Canonical names that are only safe with a search needle.
+ *
+ * `abort-current-script` traps a property and aborts whichever script reads it. Without a
+ * needle the trap cannot tell the offending script from an innocent one, so the rule would
+ * take down unrelated code on the same page -- the exact reason this name was left
+ * unimplemented for two rounds. Rules without a needle are dropped at index time and
+ * counted in `skippedNoNeedle`, never run with "everything matches".
+ */
+export const SCRIPTLETS_REQUIRING_NEEDLE = new Set<string>(['abort-current-script']);
+
+/**
  * Unsupported canonical names and the reason (written down so nobody "just adds"
  * one). Semantics verified against uBO master source (2026-10-11), not memory.
  */
 export const SUPPORT_NOTES: Record<string, string> = {
-  'abort-current-script':
-    '需要靠 getter 陷阱 + document.currentScript 反查"当前正在执行哪个内联脚本"，实现复杂且容易误伤同页其它脚本',
   'abort-on-stack-trace':
     '依赖错误栈字符串匹配，Chromium/Firefox 归一化方式不同、脆弱',
   'remove-attr':
@@ -200,6 +211,8 @@ export type ScriptletIndex = {
     unknownName: number;
     /** Rules with `~` exclusions (a forward index cannot express them) */
     skippedExcluded: number;
+    /** Supported names dropped for missing a mandatory search needle */
+    skippedNoNeedle: number;
     /** Unsupported counts by canonical name, to guide what to do next */
     unsupportedByCanonical: Record<string, number>;
     domains: number;
@@ -215,6 +228,7 @@ export function buildScriptletIndex(rules: ScriptletRule[]): ScriptletIndex {
     unsupportedName: 0,
     unknownName: 0,
     skippedExcluded: 0,
+    skippedNoNeedle: 0,
     unsupportedByCanonical: {},
     domains: 0,
   };
@@ -230,6 +244,12 @@ export function buildScriptletIndex(rules: ScriptletRule[]): ScriptletIndex {
       stats.unsupportedName += 1;
       stats.unsupportedByCanonical[rule.canonical] =
         (stats.unsupportedByCanonical[rule.canonical] ?? 0) + 1;
+      continue;
+    }
+    if (SCRIPTLETS_REQUIRING_NEEDLE.has(rule.canonical) && (!rule.args[0] || !rule.args[1])) {
+      // See SCRIPTLETS_REQUIRING_NEEDLE: running it without a needle would abort innocent
+      // scripts. Drop it and report, rather than widen the rule to "match anything".
+      stats.skippedNoNeedle += 1;
       continue;
     }
     if (rule.excludedDomains.length > 0) {

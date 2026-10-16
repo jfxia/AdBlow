@@ -172,6 +172,39 @@ function makeAbortError(what: string): Error {
 }
 
 /**
+ * The script responsible for the current property read, as far as it can be determined.
+ *
+ * Returns the element when the browser names it (`document.currentScript`), otherwise a URL
+ * taken from the error stack, otherwise nothing -- the caller must then pass the read
+ * through rather than guess. A frame pointing back into the document itself means an inline
+ * script: its text cannot be located from a line number alone, so no URL is reported for it
+ * either (matching the document URL against a script-source needle would be meaningless).
+ */
+function currentScriptSource(win: Record<string, unknown>): [Element | null, string | null] {
+  const doc = win['document'] as Document | undefined;
+  const current = doc?.currentScript as Element | null | undefined;
+  if (current && current.tagName === 'SCRIPT') return [current, null];
+
+  const stack = new Error().stack ?? '';
+  const own = /(?:chrome|moz|safari-web)-extension:\/\//;
+  let docUrl = '';
+  try {
+    docUrl = (doc?.location?.href ?? '').split('#')[0]!;
+  } catch {
+    docUrl = '';
+  }
+  for (const rawLine of stack.split('\n')) {
+    const m = /(https?:\/\/[^\s)]+?):(\d+):(\d+)\)?$/.exec(rawLine.trim());
+    if (!m) continue;
+    const url = m[1]!;
+    if (own.test(url)) continue;
+    if (docUrl && url.split('#')[0] === docUrl) return [null, null];
+    return [null, url];
+  }
+  return [null, null];
+}
+
+/**
  * Run a batch of scriptlet invocations. `win` is the target window (tests pass a jsdom
  * window).
  */
@@ -252,6 +285,73 @@ function applyOne(inv: Invocation, win: Record<string, unknown>): boolean {
       defineTrap(target.owner, target.prop, {
         set: (v: unknown) => {
           if (matches(String(v))) throw makeAbortError(path);
+        },
+      });
+      return true;
+    }
+
+    /**
+     * `abort-current-script, property, needle`
+     *
+     * Trap `property` and abort **only** the script whose source matches `needle`; every
+     * other reader receives the original value, unchanged. The needle is mandatory:
+     * without it the trap cannot tell an ad script from innocent code, which is exactly
+     * how this scriptlet breaks pages. filterList/scriptlet.ts drops needle-less rules
+     * (SCRIPTLETS_REQUIRING_NEEDLE); this check is the second line of defence, since a
+     * hand-written pack could still reach the runtime directly.
+     *
+     * Identifying the caller: `document.currentScript` covers inline and external scripts
+     * running synchronously. In an async callback it is null and the stack yields only a
+     * URL, so an external script can still be matched by URL, whereas an inline script
+     * cannot be resolved back to its text without guessing; those reads pass through.
+     * Verdicts are memoized per script: properties like `document.createElement` are read
+     * constantly, and matching the source on every read would be far too costly.
+     */
+    case 'abort-current-script': {
+      const [path, needle] = args;
+      if (!path || !needle) return false;
+      const target = resolvePath(win, path);
+      if (!target) return false;
+      const matches = makeMatcher(needle);
+      let stored: unknown;
+      try {
+        stored = target.owner[target.prop];
+      } catch {
+        stored = undefined;
+      }
+      const byElement = new WeakMap<object, boolean>();
+      const byUrl = new Map<string, boolean>();
+      const shouldAbort = (): boolean => {
+        const [el, url] = currentScriptSource(win);
+        if (el) {
+          const cached = byElement.get(el);
+          if (cached !== undefined) return cached;
+          const source = `${(el as HTMLScriptElement).src || ''}\n${el.textContent || ''}`;
+          const ok = matches(source);
+          byElement.set(el, ok);
+          return ok;
+        }
+        if (!url) return false;
+        const cached = byUrl.get(url);
+        if (cached !== undefined) return cached;
+        const ok = matches(url);
+        byUrl.set(url, ok);
+        return ok;
+      };
+      defineTrap(target.owner, target.prop, {
+        get: () => {
+          let abort = false;
+          try {
+            abort = shouldAbort();
+          } catch {
+            // Never let bookkeeping failures reach the page: fall through to the value.
+            abort = false;
+          }
+          if (abort) throw makeAbortError(path);
+          return stored;
+        },
+        set: (v: unknown) => {
+          stored = v;
         },
       });
       return true;

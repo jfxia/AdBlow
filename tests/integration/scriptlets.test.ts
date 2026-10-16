@@ -371,3 +371,76 @@ describe('runScriptlets：行为断言', () => {
     assert.doesNotThrow(() => runScriptlets(inv, win));
   });
 });
+
+describe('abort-current-script：只中止命中搜索串的那个脚本', () => {
+  /**
+   * 这一组测试守的是本轮实现的核心安全属性：陷阱只在"当前脚本的源码命中 needle"时抛错。
+   * 若哪天有人把 needle 变成可选，测试 1（不匹配的脚本必须拿到原值）会立刻失败。
+   */
+
+  /** 让 jsdom 认为"当前正在执行的是这个 script 元素"。 */
+  function pretendRunning(win: Record<string, unknown>, script: Element): void {
+    Object.defineProperty(win.document, 'currentScript', {
+      get: () => script,
+      configurable: true,
+    });
+  }
+
+  function inlineScript(win: Record<string, unknown>, text: string): Element {
+    const el = (win.document as Document).createElement('script');
+    el.textContent = text;
+    return el;
+  }
+
+  function externalScript(win: Record<string, unknown>, src: string): Element {
+    const el = (win.document as Document).createElement('script');
+    el.setAttribute('src', src);
+    return el;
+  }
+
+  it('❗不匹配的脚本读到原值，绝不被中止', () => {
+    const win = freshWindow();
+    const original = { tag: 'page-owned' };
+    win.adsProbe = original;
+    pretendRunning(win, inlineScript(win, 'var harmless = 1;'));
+    const result = runScriptlets(
+      [{ canonical: 'abort-current-script', args: ['adsProbe', 'admiral'] }],
+      win,
+    );
+    assert.deepEqual(result.applied, ['abort-current-script']);
+    assert.equal(win.adsProbe, original, '无辜脚本必须拿到原值');
+  });
+
+  it('❗命中搜索串的脚本读属性时抛错（即中止该脚本）', () => {
+    const win = freshWindow();
+    win.adsProbe = 1;
+    pretendRunning(win, inlineScript(win, 'window.adsProbe; /* admiral-detect */'));
+    runScriptlets([{ canonical: 'abort-current-script', args: ['adsProbe', 'admiral'] }], win);
+    assert.throws(() => (win as { adsProbe: unknown }).adsProbe);
+  });
+
+  it('外部脚本按 URL 判定', () => {
+    const win = freshWindow();
+    win.adsProbe = 1;
+    pretendRunning(win, externalScript(win, 'https://cdn.example.com/admiral-detect.js'));
+    runScriptlets([{ canonical: 'abort-current-script', args: ['adsProbe', 'admiral'] }], win);
+    assert.throws(() => (win as { adsProbe: unknown }).adsProbe);
+  });
+
+  it('缺 needle 时根本不安装，读取照常返回原值', () => {
+    const win = freshWindow();
+    win.adsProbe = 7;
+    const result = runScriptlets([{ canonical: 'abort-current-script', args: ['adsProbe'] }], win);
+    assert.deepEqual(result.applied, []);
+    assert.equal(win.adsProbe, 7);
+  });
+
+  it('赋值仍然生效（陷阱不劫持写入）', () => {
+    const win = freshWindow();
+    win.adsProbe = 1;
+    pretendRunning(win, inlineScript(win, 'var harmless = 1;'));
+    runScriptlets([{ canonical: 'abort-current-script', args: ['adsProbe', 'admiral'] }], win);
+    (win as { adsProbe: number }).adsProbe = 5;
+    assert.equal(win.adsProbe, 5);
+  });
+});

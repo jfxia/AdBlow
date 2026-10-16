@@ -110,7 +110,7 @@ describe('buildScriptletIndex：域名索引与统计', () => {
     parse('a.com##+js(aopr, x)'),
     parse('a.com##+js(set, y, false)'),
     parse('b.com##+js(nostif, /ad/)'),
-    parse('c.com##+js(acs, document.createElement, admiral)'), // unsupported
+    parse('c.com##+js(acs, document.createElement, admiral)'), // 带 needle → 支持
     parse('d.com##+js(totally-unknown, x)'), // unknown
     parse('~e.com##+js(aopr, x)'), // excluded form
     parse('##+js(aopr, x)'), // no domain qualifier → skipped
@@ -126,9 +126,17 @@ describe('buildScriptletIndex：域名索引与统计', () => {
     assert.equal(index.byDomain.get('b.com')!.length, 1);
   });
 
+  it('abort-current-script 带 needle 时进入索引', () => {
+    assert.deepEqual(index.byDomain.get('c.com'), [
+      { canonical: 'abort-current-script', args: ['document.createElement', 'admiral'] },
+    ]);
+    assert.equal(index.stats.skippedNoNeedle, 0);
+  });
+
   it('❗未支持的名字被统计出来（决定下一步做什么）', () => {
-    assert.equal(index.stats.unsupportedName, 1);
-    assert.deepEqual(index.stats.unsupportedByCanonical, { 'abort-current-script': 1 });
+    // acs 已实现，所以这里不再有未支持的具名脚本
+    assert.equal(index.stats.unsupportedName, 0);
+    assert.deepEqual(index.stats.unsupportedByCanonical, {});
   });
 
   it('未知名字单独计数', () => {
@@ -141,6 +149,30 @@ describe('buildScriptletIndex：域名索引与统计', () => {
   });
 
   it('覆盖域名数正确', () => {
-    assert.equal(index.stats.domains, 2, 'a.com 与 b.com');
+    assert.equal(index.stats.domains, 3, 'a.com、b.com 与 c.com');
+  });
+});
+
+describe('缺少 needle 的 abort-current-script 必须丢弃', () => {
+  /**
+   * 这是本轮实现的核心安全规则：没有 needle，陷阱无法区分广告脚本与无辜脚本，
+   * 会中止同页无关代码（正是此前两轮不实现它的原因）。丢弃并计数，而不是放宽成"全部匹配"。
+   */
+  const index = buildScriptletIndex([
+    parse('x.com##+js(acs, document.createElement)'),
+    parse('y.com##+js(acs, document.createElement, admiral)'),
+    parse('z.com##+js(acs, , admiral)'),
+  ]);
+
+  it('没有搜索串的规则被丢弃并单独计数', () => {
+    assert.equal(index.stats.skippedNoNeedle, 2, 'x.com 缺 needle、z.com 缺属性名');
+    assert.equal(index.byDomain.get('x.com'), undefined);
+    assert.equal(index.byDomain.get('z.com'), undefined);
+  });
+
+  it('带齐属性名与搜索串的规则保留', () => {
+    assert.deepEqual(index.byDomain.get('y.com'), [
+      { canonical: 'abort-current-script', args: ['document.createElement', 'admiral'] },
+    ]);
   });
 });

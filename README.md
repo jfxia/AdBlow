@@ -7,7 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-634%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-642%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 
 [中文说明](README.zh-CN.md)
@@ -79,9 +79,9 @@ handlers that only perform navigation.
 
 ### Scriptlet support
 
-12 canonical `##+js(...)` scriptlets (`abort-on-property-read`, `set-constant`, `json-prune`,
-`no-fetch-if`, `no-setTimeout-if` and others) covering 2,841 domains. The data table is inlined in
-the script so that it takes effect before page scripts run.
+13 canonical `##+js(...)` scriptlets (`abort-on-property-read`, `set-constant`, `json-prune`,
+`abort-current-script`, `no-fetch-if`, `no-setTimeout-if` and others) covering 3,246 domains. The
+data table is inlined in the script so that it takes effect before page scripts run.
 
 ### Self-learning
 
@@ -129,7 +129,7 @@ The store package `adblow-1.0.0-edge.zip` is ready but has not been published ye
 ## Build and package
 
 ```bash
-pnpm test           # 634 unit and integration tests, run in-process
+pnpm test           # 642 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -181,10 +181,10 @@ src/
 tools/
   filters/         filter-list fetching (lists with paid whitelists are rejected)
   build/           ruleset, hiding-shard and scriptlet codegen; packaging; icon generation
-  e2e/             23-category acceptance suite in a real browser; live-site end-to-end
+  e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             634 unit and integration tests (jsdom)
+tests/             642 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -209,11 +209,11 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 634 tests, 0 failures
-node tools/e2e/acceptance.mjs   # 23 ad categories, measured in a real browser
+node tests/run-all.ts           # 642 tests, 0 failures
+node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 
-`tools/e2e/acceptance.mjs` is the main acceptance suite. It builds a realistic page for each of 23
+`tools/e2e/acceptance.mjs` is the main acceptance suite. It builds a realistic page for each of 24
 categories of ad interference, covering pop-ups, pop-unders, interstitials, floating bars, corner
 widgets, sticky banners, outstream video, preroll, mid-roll, video overlays, full-page clickable
 ads, fake close buttons, click hijacking, tab-under, region expanders, flashing GIFs, rich media,
@@ -232,8 +232,15 @@ starts hiding body content therefore fails during testing instead of reaching a 
 
 - Generic (non-domain-specific) hiding rules are not injected; only domain-scoped rules are.
 - Procedural cosmetic filters (`#?#`) and HTML filtering (`##^`) are not implemented.
-- `##+js(abort-current-script)` and a few other scriptlets (359 rules in the lists) are
-  unsupported. The build reports what it skips instead of widening a rule to include more.
+- `abort-current-script` is supported only when the rule carries a search needle, so that the trap
+  aborts the offending script and passes every other reader through untouched. 38 rules in the
+  lists have no needle and are dropped. The remaining unimplemented scriptlets
+  (`abort-on-stack-trace`, `remove-node-text`, `nano-setTimeout-booster`, `nowebrtc`, `noeval` and
+  others) account for 385 rules. The build reports what it skips instead of widening a rule to
+  include more.
+- Anti-adblock walls are not neutralised yet. A validation fixture for them exists (category 24) and
+  currently fails: a site that measures a bait element and finds it hidden can still put up its
+  ad-blocker gate. The design for relaxing hiding on such sites is written down, but not built.
 - Filter lists are compiled at build time, so updating them requires rebuilding the extension.
   This is an MV3 constraint: remote rulesets are not supported.
 - No public performance benchmarks yet, and no like-for-like comparison against other blockers on
