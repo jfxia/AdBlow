@@ -51,19 +51,68 @@ const IFRAME_SELECTOR = 'iframe[src],iframe[srcdoc]';
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 const IPV6 = /^\[?[0-9a-f:]+\]?$/i;
 
+/**
+ * Public suffixes that take two labels (`com.cn`, `co.uk`). Small hand-written list, not the
+ * full PSL: it covers the suffixes the supported locales actually use, and anything missing
+ * degrades to the old two-label rule instead of misbehaving.
+ *
+ * Why it matters (2026-10-19, finance.sina.com.cn): `registrableDomain('finance.sina.com.cn')`
+ * used to return `com.cn`, so `sina.cn` and `sinaimg.cn` were compared against `com.cn`, counted
+ * as cross-site, and every "大V观点" item (cross-site link + avatar = 7 points) was hidden.
+ */
+const MULTI_LABEL_SUFFIXES = new Set([
+  'com.cn',
+  'net.cn',
+  'org.cn',
+  'gov.cn',
+  'edu.cn',
+  'ac.cn',
+  'com.hk',
+  'com.tw',
+  'com.mo',
+  'com.sg',
+  'co.uk',
+  'org.uk',
+  'ac.uk',
+  'co.jp',
+  'ne.jp',
+  'or.jp',
+  'co.kr',
+  'or.kr',
+  'com.au',
+  'net.au',
+  'org.au',
+  'co.nz',
+  'com.br',
+  'com.mx',
+  'com.ar',
+  'com.tr',
+  'co.in',
+  'co.za',
+  'com.my',
+  'com.vn',
+  'com.sa',
+  'co.il',
+]);
+
 export function isIpLiteral(host: string): boolean {
   return IPV4.test(host) || (host.includes(':') && IPV6.test(host));
 }
 
 /**
- * Crude registrable domain: the last two labels. IP literals are returned as-is —
- * the last two labels of `54.169.219.76` would give `219.76`, i.e. a `||219.76^` rule
- * matching unrelated hosts. Multi-label suffixes (.com.cn) stay inaccurate; accepted.
+ * Crude registrable domain: the last two labels, or three when the last two are a known
+ * two-label public suffix (`.com.cn`). IP literals are returned as-is — the last two labels of
+ * `54.169.219.76` would give `219.76`, i.e. a `||219.76^` rule matching unrelated hosts.
  */
 export function registrableDomain(host: string): string {
   if (isIpLiteral(host)) return host;
   const parts = host.split('.');
-  return parts.length <= 2 ? host : parts.slice(-2).join('.');
+  if (parts.length <= 2) return host;
+  const lastTwo = parts.slice(-2).join('.');
+  if (parts.length >= 3 && MULTI_LABEL_SUFFIXES.has(lastTwo)) {
+    return parts.slice(-3).join('.');
+  }
+  return lastTwo;
 }
 
 function isAbsoluteUrl(u: string): boolean {
@@ -167,23 +216,92 @@ export function brandLabels(host: string): string[] {
 }
 
 /**
- * Same-brand mirrors are not cross-site evidence (mirror-index pages scored 8 per card
- * and were hidden whole). Matches need >=4 letters and a numbered side, so
- * example.com ≠ ads.example.net. It only reduces evidence; a wrong verdict hides content.
+ * Suffixes publishers append to their brand for static/media hosts: `sinaimg.cn`, `qqstatic.com`,
+ * `sohuimg.cn`. Such a host is the site's own asset CDN, not an ad network.
+ */
+const BRAND_ASSET_SUFFIXES = /^(?:imgs?|cdn|static|res|pic|pics|assets?|video|media|s\d*|\d+)$/;
+
+/**
+ * Social platforms: an outbound link to one of these is editorial furniture (the author's page,
+ * "follow us", a share link), not ad evidence.
+ *
+ * Measured 2026-10-19 on finance.sina.com.cn/realstock: each "大V观点" item carries two links to
+ * `weibo.com` (author + detail). At 4 points per cross-site link that is 8 ≥ threshold, so every
+ * item was hidden even though its avatar had already been recognised as a sibling asset.
+ */
+const SOCIAL_DOMAINS = new Set([
+  'weibo.com',
+  'weibo.cn',
+  'x.com',
+  'twitter.com',
+  'facebook.com',
+  'instagram.com',
+  'youtube.com',
+  'youtu.be',
+  'tiktok.com',
+  'douyin.com',
+  'bilibili.com',
+  'zhihu.com',
+  'douban.com',
+  'linkedin.com',
+  'reddit.com',
+  'telegram.org',
+  't.me',
+]);
+
+/** Image hosts owned by the same social platforms (avatars and thumbnails). */
+const SOCIAL_MEDIA_DOMAINS = new Set([
+  'twimg.com',
+  'ytimg.com',
+  'fbcdn.net',
+  'cdninstagram.com',
+  'hdslb.com',
+  'douyinpic.com',
+  'weibocdn.com',
+]);
+
+/**
+ * Same publisher, so **not** cross-site evidence.
+ *
+ * Same-brand relations are not cross-site evidence (mirror-index pages scored 8 per card and
+ * were hidden whole). Matches need >=4 letters, so `example.com` ≠ `ads.example.net`.
+ *
+ * Two shapes count (2026-10-19, finance.sina.com.cn — "大V观点" and "投资研报" items were hidden
+ * because their avatars live on `sinaimg.cn` and their links on `daxue.sina.cn`):
+ *   1. identical brand with a different public suffix (`sina.com.cn` / `sina.cn`), provided one
+ *      side is a three-label domain — the number-only rule below stays for same-TLD mirrors;
+ *   2. an asset suffix appended to the brand (`sinaimg`, `tvax2.sinaimg` → `sinaimg`).
+ * An ad domain that merely borrows the brand (`sinaads`) does not match: `ads` is not an
+ * asset suffix. Wrongly treating a real ad as a sibling only costs a missed ad; wrongly
+ * treating a sibling as cross-site hides a reader's content, so the balance is deliberate.
  */
 export function isSameBrand(hostA: string, hostB: string): boolean {
   const a = registrableDomain(hostA);
   const b = registrableDomain(hostB);
   if (a === b) return true;
 
-  const sldA = a.split('.')[0] ?? '';
-  const sldB = b.split('.')[0] ?? '';
-  const brandA = sldA.replace(/[0-9-]/g, '');
-  const brandB = sldB.replace(/[0-9-]/g, '');
-  if (brandA.length < 4 || brandA !== brandB) return false;
+  const labelA = a.split('.')[0] ?? '';
+  const labelB = b.split('.')[0] ?? '';
+  const brandA = labelA.replace(/[0-9-]/g, '');
+  const brandB = labelB.replace(/[0-9-]/g, '');
 
-  // only numbered domains count as mirrors (see above)
-  return /\d/.test(sldA) || /\d/.test(sldB);
+  // 1) same brand, different public suffix (sina.cn vs sina.com.cn)
+  if (brandA.length >= 4 && brandA === brandB) {
+    const labelsA = a.split('.').length;
+    const labelsB = b.split('.').length;
+    // A two-label brand on both sides is more likely a different owner than one publisher
+    // spread across regional suffixes, so require a three-label side.
+    return labelsA >= 3 || labelsB >= 3 || /\d/.test(labelA) || /\d/.test(labelB);
+  }
+
+  // 2) asset CDN of the same brand (sinaimg, qqstatic, sohuimg)
+  const longer = brandA.length >= brandB.length ? brandA : brandB;
+  const shorter = brandA.length >= brandB.length ? brandB : brandA;
+  if (shorter.length >= 4 && longer.startsWith(shorter)) {
+    return BRAND_ASSET_SUFFIXES.test(longer.slice(shorter.length));
+  }
+
+  return false;
 }
 
 export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
@@ -221,6 +339,9 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
         // same-brand mirror/backup domains are not cross-site ad evidence (see isSameBrand)
         if (isSameBrand(parsed.hostname, ctx.pageHost)) {
           reasons.add('sibling-domain-link');
+        } else if (SOCIAL_DOMAINS.has(registrableDomain(parsed.hostname))) {
+          // Author pages and share links: common in editorial content, never an ad by itself.
+          reasons.add('social-link');
         } else {
           behavior += 4;
           reasons.add('cross-site-link');
@@ -271,6 +392,8 @@ export function scoreNode(el: Element, ctx: ScoreContext): ScoreResult {
         const reg = registrableDomain(parsed.hostname);
         if (isSameBrand(parsed.hostname, ctx.pageHost)) {
           reasons.add('sibling-domain-media');
+        } else if (SOCIAL_MEDIA_DOMAINS.has(reg)) {
+          reasons.add('social-media');
         } else if (ctx.contentCdnDomains?.has(reg)) {
           // the site's own content CDN is not ad evidence
           reasons.add('content-cdn-media');
