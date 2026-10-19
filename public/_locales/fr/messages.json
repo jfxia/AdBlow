@@ -1,5 +1,7 @@
 {
-  "extName": { "message": "AdBlow" },
+  "extName": {
+    "message": "AdBlow"
+  },
   "extDesc": {
     "message": "Bloque les pop-ups, superpositions, publicités vidéo et détournements de clic par détection comportementale et auto-apprentissage.",
     "description": "Store listing and extension-management summary. Must stay within 132 characters."
@@ -8,17 +10,30 @@
     "message": "AdBlow-Nettoyeur de pubs",
     "description": "Product title shown in the popup/options UI (page title and brand row). Keep the product name as-is; translate only the part after the hyphen."
   },
-
-  "popupReading": { "message": "Chargement…" },
-  "popupNotApplicable": { "message": "Non applicable à cette page" },
+  "popupReading": {
+    "message": "Chargement…"
+  },
+  "popupNotApplicable": {
+    "message": "Non applicable à cette page"
+  },
   "popupInternalNotice": {
     "message": "Les pages internes du navigateur et des extensions ne peuvent pas être filtrées. Utilisez AdBlow sur un site web classique."
   },
-  "popupToggleLabel": { "message": "Activer le filtrage sur ce site" },
-  "popupToggleAria": { "message": "Activer ou désactiver le filtrage sur ce site" },
-  "popupStatRule": { "message": "Règles" },
-  "popupStatHeuristic": { "message": "Détections" },
-  "popupStatLearned": { "message": "Règles apprises" },
+  "popupToggleLabel": {
+    "message": "Activer le filtrage sur ce site"
+  },
+  "popupToggleAria": {
+    "message": "Activer ou désactiver le filtrage sur ce site"
+  },
+  "popupStatRule": {
+    "message": "Règles"
+  },
+  "popupStatHeuristic": {
+    "message": "Détections"
+  },
+  "popupStatLearned": {
+    "message": "Règles apprises"
+  },
   "popupHintDisabled": {
     "message": "Site désactivé : le filtrage et l'apprentissage sont arrêtés."
   },
@@ -28,8 +43,12 @@
   "popupHintNoStats": {
     "message": "Aucune statistique pour cette page. Rechargez-la pour les voir."
   },
-  "popupOpenOptions": { "message": "Gérer les règles" },
-  "popupClearSite": { "message": "Effacer l'apprentissage" },
+  "popupOpenOptions": {
+    "message": "Gérer les règles"
+  },
+  "popupClearSite": {
+    "message": "Effacer l'apprentissage"
+  },
   "popupConfirmClear": {
     "message": "Effacer toutes les règles apprises par AdBlow sur $1 ?"
   },
@@ -53,16 +72,21 @@
     "message": "Ne plus traiter ce site",
     "description": "Wall card button that turns the fix off for this site."
   },
-
-  "optionsTitle": { "message": "Gestion des règles" },
+  "optionsTitle": {
+    "message": "Gestion des règles"
+  },
   "optionsLede": {
     "message": "Voici les règles de masquage qu'AdBlow a apprises seul, site par site. Vous pouvez les révoquer une par une."
   },
   "optionsWarn": {
     "message": "Une règle apprise s'applique sans condition lors des visites suivantes ; c'est pourquoi il faut 3 occurrences pour l'activer. Si un site est cassé, désactivez d'abord le filtrage pour ce site via le popup, puis revenez supprimer la règle suspecte."
   },
-  "optionsExport": { "message": "Exporter toutes les règles (JSON)" },
-  "optionsRefresh": { "message": "Actualiser" },
+  "optionsExport": {
+    "message": "Exporter toutes les règles (JSON)"
+  },
+  "optionsRefresh": {
+    "message": "Actualiser"
+  },
   "optionsEmpty": {
     "message": "Aucune règle apprise pour l'instant. AdBlow en accumulera automatiquement au fil de votre navigation."
   },
@@ -72,24 +96,72 @@
   "optionsListData": {
     "message": "Listes de filtres intégrées : récupérées le $1 · $2 listes · $3 règles réseau"
   },
-  "optionsPillActive": { "message": "Active" },
-  "optionsPillObserving": { "message": "En observation" },
-  "optionsPillBlocked": { "message": "Bloqué" },
-  "optionsHits": { "message": "$1 occurrence(s)" },
-  "optionsSeen": { "message": "vu $1 fois" },
-  "optionsDelete": { "message": "Supprimer" },
-  "optionsUnblock": { "message": "Ne plus bloquer" },
-  "optionsClearSite": { "message": "Vider ce site" },
-  "optionsClearGroup": { "message": "Vider ce groupe" },
+  "optionsPillActive": {
+    "message": "Active"
+  },
+  "optionsPillObserving": {
+    "message": "En observation"
+  },
+  "optionsPillBlocked": {
+    "message": "Bloqué"
+  },
+  "optionsHits": {
+    "message": "$1 occurrence(s)"
+  },
+  "optionsSeen": {
+    "message": "vu $1 fois"
+  },
+  "optionsDelete": {
+    "message": "Supprimer"
+  },
+  "optionsUnblock": {
+    "message": "Ne plus bloquer"
+  },
+  "optionsClearSite": {
+    "message": "Vider ce site"
+  },
+  "optionsClearGroup": {
+    "message": "Vider ce groupe"
+  },
   "optionsConfirmClearSite": {
     "message": "Effacer toutes les règles apprises sur $1 ?"
   },
   "optionsConfirmClearGroup": {
     "message": "Effacer tous les domaines appris sur $1 ?"
   },
-  "optionsCountSelectors": { "message": "$1 actif(s) / $2 au total" },
-  "optionsCountDomains": { "message": "$1 bloqué(s) / $2 au total" },
-  "optionsDomainHeader": { "message": "Réseau · appris sur $1" },
+  "optionsPickRow": {
+    "message": "Sélectionner cette règle",
+    "description": ""
+  },
+  "optionsPickSite": {
+    "message": "Sélectionner toutes les règles de ce site",
+    "description": ""
+  },
+  "optionsSelected": {
+    "message": "$1 sélectionnée(s) ($2 site(s))",
+    "description": ""
+  },
+  "optionsDeleteSelected": {
+    "message": "Supprimer la sélection",
+    "description": ""
+  },
+  "optionsClearPicked": {
+    "message": "Effacer la sélection",
+    "description": ""
+  },
+  "optionsConfirmDeleteSelected": {
+    "message": "Supprimer les $1 règle(s) sélectionnée(s) ? Action irréversible.",
+    "description": ""
+  },
+  "optionsCountSelectors": {
+    "message": "$1 actif(s) / $2 au total"
+  },
+  "optionsCountDomains": {
+    "message": "$1 bloqué(s) / $2 au total"
+  },
+  "optionsDomainHeader": {
+    "message": "Réseau · appris sur $1"
+  },
   "optionsDomainHint": {
     "message": "Un domaine est bloqué automatiquement après 3 apparitions dans des publicités. Les domaines aussi utilisés par du contenu normal ne sont jamais appris."
   }

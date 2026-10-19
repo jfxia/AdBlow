@@ -8,6 +8,15 @@ import {
 import { chromeLocal } from '../content/storage.ts';
 import { applyI18n, t } from './i18n.ts';
 import { sortByRule, sortHosts } from './ruleSorting.ts';
+import {
+  countSites,
+  groupBySite,
+  isWholeSite,
+  pickKey,
+  togglePick,
+  type PickMap,
+  type PickRef,
+} from './bulkSelection.ts';
 
 /**
  * Options: review and revoke what self-learning produced.
@@ -16,9 +25,17 @@ import { sortByRule, sortHosts } from './ruleSorting.ts';
  * (selectors at the DOM layer, domains at the network layer), so users need a visible place
  * to delete them. An optional review surface, not required configuration; all text goes
  * through i18n and site domains come from pages, so textContent only (see ui/i18n.ts).
+ *
+ * Deletion is **in place**: the row is removed from the list and the counts are recomputed from
+ * the DOM. Re-rendering the whole page after a delete used to scroll the list back to the top
+ * (the container was emptied and rebuilt), which made revoking a rule deep in a long site list
+ * lose the user's place.
  */
 
 const store = chromeLocal();
+
+/** Current selection for bulk actions. */
+const picked: PickMap = new Map();
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -33,8 +50,176 @@ function button(labelKey: string, className = ''): HTMLButtonElement {
   return b;
 }
 
+function checkbox(className: string, labelKey: string): HTMLInputElement {
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.className = className;
+  box.setAttribute('aria-label', t(labelKey));
+  return box;
+}
+
+/** The rule a row stands for, read back from its checkbox's data attributes. */
+function refOfRow(row: Element): PickRef | null {
+  const box = row.querySelector<HTMLInputElement>('input.pick');
+  if (!box) return null;
+  const { kind, host, rule } = box.dataset;
+  if (!kind || host === undefined || rule === undefined) return null;
+  return { kind: kind as PickRef['kind'], host, rule };
+}
+
+function rowsOf(section: Element): HTMLLIElement[] {
+  return Array.from(section.querySelectorAll<HTMLLIElement>('ul.rows > li'));
+}
+
+function sections(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('#sites section'));
+}
+
+/** Update the summary line and every checkbox from the current selection. */
+function syncSelectionUi(): void {
+  const bulkBar = el('bulkbar');
+  const count = picked.size;
+  if (count === 0) {
+    bulkBar.hidden = true;
+  } else {
+    bulkBar.hidden = false;
+    el('bulkcount').textContent = t('optionsSelected', [count, countSites(picked)]);
+  }
+
+  for (const section of sections()) {
+    const rows = rowsOf(section);
+    const sitePick = section.querySelector<HTMLInputElement>('input.site-pick');
+    if (sitePick) {
+      const keys = rows.map((row) => {
+        const ref = refOfRow(row);
+        return ref ? pickKey(ref) : '';
+      });
+      const on = keys.filter((key) => key && picked.has(key)).length;
+      sitePick.checked = rows.length > 0 && on === rows.length;
+      sitePick.indeterminate = on > 0 && on < rows.length;
+    }
+    for (const row of rows) {
+      const box = row.querySelector<HTMLInputElement>('input.pick');
+      const ref = refOfRow(row);
+      if (box && ref) box.checked = picked.has(pickKey(ref));
+    }
+  }
+}
+
+/** Totals recomputed from the rows still in the DOM (they are the page's own record). */
+function refreshSummary(): void {
+  const rows = Array.from(document.querySelectorAll<HTMLLIElement>('#sites li'));
+  const promoted = (list: HTMLLIElement[]): number =>
+    list.filter((row) => row.querySelector('.pill.on') !== null).length;
+  const isSelector = (row: HTMLLIElement): boolean =>
+    (row.querySelector<HTMLInputElement>('input.pick')?.dataset.kind ?? '') === 'selector';
+  const selectors = rows.filter(isSelector);
+  const domains = rows.filter((row) => !isSelector(row));
+  el('summary').textContent = rows.length
+    ? t('optionsSummary', [
+        promoted(selectors),
+        selectors.length,
+        promoted(domains),
+        domains.length,
+      ])
+    : '';
+}
+
+/** Recount one section's header from its remaining rows. */
+function updateSectionCount(section: HTMLElement): void {
+  const labelKey = section.dataset.countKey;
+  const target = section.querySelector('header .count');
+  if (!labelKey || !target) return;
+  const rows = rowsOf(section);
+  const promoted = rows.filter((row) => row.querySelector('.pill.on') !== null).length;
+  target.textContent = t(labelKey, [promoted, rows.length]);
+}
+
+/** Empty state when the last section is gone. */
+function ensureEmptyState(): void {
+  const container = el('sites');
+  if (container.querySelector('section') !== null) return;
+  container.textContent = '';
+  const empty = document.createElement('p');
+  empty.className = 'empty';
+  empty.textContent = t('optionsEmpty');
+  container.appendChild(empty);
+}
+
+/**
+ * Remove one row from the page and keep the counters honest.
+ *
+ * Never re-renders: a full rebuild scrolls the page back to the top, which is exactly what
+ * deleting a rule deep in a long list must not do.
+ */
+function removeRow(row: HTMLLIElement): void {
+  const list = row.parentElement;
+  const section = row.closest('section');
+  row.remove();
+  if (section) {
+    if (rowsOf(section).length === 0) section.remove();
+    else updateSectionCount(section);
+  }
+  void list;
+  refreshSummary();
+  syncSelectionUi();
+  ensureEmptyState();
+}
+
+async function deleteOne(ref: PickRef): Promise<void> {
+  if (ref.kind === 'selector') await forgetSelector(store, ref.host, ref.rule);
+  else await forgetDomain(store, ref.host, ref.rule);
+}
+
+/** Bulk delete: one write per section when a whole section is selected, else per rule. */
+async function deletePicked(): Promise<void> {
+  if (picked.size === 0) return;
+  if (!confirm(t('optionsConfirmDeleteSelected', [picked.size]))) return;
+
+  const rowByKey = new Map<string, HTMLLIElement>();
+  for (const row of Array.from(document.querySelectorAll<HTMLLIElement>('#sites li'))) {
+    const ref = refOfRow(row);
+    if (ref) rowByKey.set(pickKey(ref), row);
+  }
+
+  for (const [key, refs] of groupBySite(picked)) {
+    const host = refs[0]!.host;
+    const section = document.querySelector<HTMLElement>(
+      `#sites section[data-site-key="${key}"]`,
+    );
+    const sectionKeys = section ? rowsOf(section).map((row) => {
+      const ref = refOfRow(row);
+      return ref ? pickKey(ref) : '';
+    }) : [];
+    if (section && isWholeSite(picked, sectionKeys)) {
+      // Same operation as the section's own "clear" button.
+      if (refs[0]!.kind === 'selector') await clearSite(store, host);
+      else await clearDomains(store, host);
+    } else {
+      for (const ref of refs) await deleteOne(ref);
+    }
+  }
+
+  const doomed = [...picked.values()]
+    .map((ref) => rowByKey.get(pickKey(ref)))
+    .filter((row): row is HTMLLIElement => row !== undefined);
+  picked.clear();
+  for (const row of doomed) removeRow(row);
+  syncSelectionUi();
+}
+
 function renderEntry(host: string, entry: LearnedEntry): HTMLLIElement {
   const li = document.createElement('li');
+
+  const pick = checkbox('pick', 'optionsPickRow');
+  pick.dataset.kind = 'selector';
+  pick.dataset.host = host;
+  pick.dataset.rule = entry.selector;
+  pick.addEventListener('change', () => {
+    togglePick(picked, { kind: 'selector', host, rule: entry.selector }, pick.checked);
+    syncSelectionUi();
+  });
+  li.appendChild(pick);
 
   const code = document.createElement('code');
   code.textContent = entry.selector;
@@ -52,8 +237,8 @@ function renderEntry(host: string, entry: LearnedEntry): HTMLLIElement {
 
   const del = button('optionsDelete', 'danger');
   del.addEventListener('click', async () => {
-    await forgetSelector(store, host, entry.selector);
-    await render();
+    await deleteOne({ kind: 'selector', host, rule: entry.selector });
+    removeRow(li);
   });
   li.appendChild(del);
 
@@ -62,8 +247,14 @@ function renderEntry(host: string, entry: LearnedEntry): HTMLLIElement {
 
 function renderSite(host: string, entries: LearnedEntry[]): HTMLElement {
   const section = document.createElement('section');
+  section.dataset.siteKey = `selector|${host}`;
+  section.dataset.countKey = 'optionsCountSelectors';
 
   const header = document.createElement('header');
+
+  const sitePick = checkbox('site-pick', 'optionsPickSite');
+  header.appendChild(sitePick);
+
   const name = document.createElement('strong');
   name.textContent = host;
   header.appendChild(name);
@@ -80,9 +271,22 @@ function renderSite(host: string, entries: LearnedEntry[]): HTMLElement {
   clear.addEventListener('click', async () => {
     if (!confirm(t('optionsConfirmClearSite', [host]))) return;
     await clearSite(store, host);
-    await render();
+    picked.clear();
+    section.remove();
+    refreshSummary();
+    syncSelectionUi();
+    ensureEmptyState();
   });
   header.appendChild(clear);
+
+  sitePick.addEventListener('change', () => {
+    for (const row of rowsOf(section)) {
+      const ref = refOfRow(row);
+      if (!ref) continue;
+      togglePick(picked, ref, sitePick.checked);
+    }
+    syncSelectionUi();
+  });
 
   section.appendChild(header);
 
@@ -96,6 +300,16 @@ function renderSite(host: string, entries: LearnedEntry[]): HTMLElement {
 
 function renderDomainEntry(pageHost: string, entry: DomainEntry): HTMLLIElement {
   const li = document.createElement('li');
+
+  const pick = checkbox('pick', 'optionsPickRow');
+  pick.dataset.kind = 'domain';
+  pick.dataset.host = pageHost;
+  pick.dataset.rule = entry.host;
+  pick.addEventListener('change', () => {
+    togglePick(picked, { kind: 'domain', host: pageHost, rule: entry.host }, pick.checked);
+    syncSelectionUi();
+  });
+  li.appendChild(pick);
 
   const code = document.createElement('code');
   code.textContent = entry.host;
@@ -113,8 +327,8 @@ function renderDomainEntry(pageHost: string, entry: DomainEntry): HTMLLIElement 
 
   const del = button('optionsUnblock', 'danger');
   del.addEventListener('click', async () => {
-    await forgetDomain(store, pageHost, entry.host);
-    await render();
+    await deleteOne({ kind: 'domain', host: pageHost, rule: entry.host });
+    removeRow(li);
   });
   li.appendChild(del);
 
@@ -124,8 +338,14 @@ function renderDomainEntry(pageHost: string, entry: DomainEntry): HTMLLIElement 
 /** Network layer: ad domains learned on one site. */
 function renderDomainSite(pageHost: string, entries: DomainEntry[]): HTMLElement {
   const section = document.createElement('section');
+  section.dataset.siteKey = `domain|${pageHost}`;
+  section.dataset.countKey = 'optionsCountDomains';
 
   const header = document.createElement('header');
+
+  const sitePick = checkbox('site-pick', 'optionsPickSite');
+  header.appendChild(sitePick);
+
   const name = document.createElement('strong');
   name.textContent = t('optionsDomainHeader', [pageHost]);
   header.appendChild(name);
@@ -142,9 +362,22 @@ function renderDomainSite(pageHost: string, entries: DomainEntry[]): HTMLElement
   clear.addEventListener('click', async () => {
     if (!confirm(t('optionsConfirmClearGroup', [pageHost]))) return;
     await clearDomains(store, pageHost);
-    await render();
+    picked.clear();
+    section.remove();
+    refreshSummary();
+    syncSelectionUi();
+    ensureEmptyState();
   });
   header.appendChild(clear);
+
+  sitePick.addEventListener('change', () => {
+    for (const row of rowsOf(section)) {
+      const ref = refOfRow(row);
+      if (!ref) continue;
+      togglePick(picked, ref, sitePick.checked);
+    }
+    syncSelectionUi();
+  });
 
   section.appendChild(header);
 
@@ -164,6 +397,7 @@ function renderDomainSite(pageHost: string, entries: DomainEntry[]): HTMLElement
 async function render(): Promise<void> {
   const container = el('sites');
   container.textContent = '';
+  picked.clear();
 
   const sites = await listAllSites(store);
   const domainSites = await allDomainEntries(store);
@@ -181,10 +415,8 @@ async function render(): Promise<void> {
       : '';
 
   if (sites.length === 0 && domainSites.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'empty';
-    empty.textContent = t('optionsEmpty');
-    container.appendChild(empty);
+    ensureEmptyState();
+    syncSelectionUi();
     return;
   }
 
@@ -213,6 +445,8 @@ async function render(): Promise<void> {
       container.appendChild(renderSite(host, sortByRule(selectors, (e) => e.selector)));
     }
   }
+
+  syncSelectionUi();
 }
 
 /**
@@ -247,6 +481,11 @@ async function showListData(): Promise<void> {
 }
 
 el('refresh').addEventListener('click', () => void render());
+el('bulkdelete').addEventListener('click', () => void deletePicked());
+el('bulkclear').addEventListener('click', () => {
+  picked.clear();
+  syncSelectionUi();
+});
 
 el('export').addEventListener('click', async () => {
   const sites = await listAllSites(store);

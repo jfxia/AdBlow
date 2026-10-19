@@ -105,6 +105,36 @@
         color: var(--muted);
         text-align: center;
       }
+      /* 批量操作：选中态与行复选框。复选框放在行首，删除按钮仍在行尾，避免误点。 */
+      .bar.bulk {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        margin-bottom: 12px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        background: var(--card);
+        box-shadow: var(--shadow);
+      }
+      .bar.bulk[hidden] {
+        display: none;
+      }
+      input.pick,
+      input.site-pick {
+        flex: 0 0 auto;
+        width: 14px;
+        height: 14px;
+        margin: 0;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+      section > header input.site-pick {
+        margin-right: 2px;
+      }
+      li:has(input.pick:checked) {
+        background: var(--accent-soft);
+      }
     </style>
   </head>
   <body>
@@ -128,6 +158,14 @@
         <button id="export" data-i18n="optionsExport"></button>
         <button id="refresh" data-i18n="optionsRefresh"></button>
         <span class="count" id="summary"></span>
+      </div>
+
+      <!-- 批量操作条：只在有选中项时出现（hidden），避免长期占位。
+           勾选行复选框或站点复选框都会让它出现；"删除所选"对整站全选的情况走一次批量写入。 -->
+      <div class="bar bulk" id="bulkbar" hidden>
+        <span class="count" id="bulkcount"></span>
+        <button id="bulkdelete" class="danger" data-i18n="optionsDeleteSelected"></button>
+        <button id="bulkclear" data-i18n="optionsClearPicked"></button>
       </div>
 
       <div id="sites"></div>

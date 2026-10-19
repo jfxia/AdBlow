@@ -1,5 +1,7 @@
 {
-  "extName": { "message": "AdBlow" },
+  "extName": {
+    "message": "AdBlow"
+  },
   "extDesc": {
     "message": "Blocks pop-ups, overlays, video ads and click hijacking via behavior detection, self-learning rules and EasyList lists.",
     "description": "Store listing and extension-management summary. Must stay within 132 characters."
@@ -8,24 +10,45 @@
     "message": "AdBlow-Ad Cleaner",
     "description": "Product title shown in the popup/options UI (page title and brand row). Keep the product name as-is; translate only the part after the hyphen."
   },
-
-  "popupReading": { "message": "Loading…" },
-  "popupNotApplicable": { "message": "Not applicable to this page" },
+  "popupReading": {
+    "message": "Loading…"
+  },
+  "popupNotApplicable": {
+    "message": "Not applicable to this page"
+  },
   "popupInternalNotice": {
     "message": "Browser-internal and extension pages cannot be filtered. Use AdBlow on a regular web page."
   },
-  "popupToggleLabel": { "message": "Enable filtering on this site" },
-  "popupToggleAria": { "message": "Enable or disable filtering on this site" },
-  "popupStatRule": { "message": "Rule blocks" },
-  "popupStatHeuristic": { "message": "Detected" },
-  "popupStatLearned": { "message": "Learned rules" },
-  "popupHintDisabled": { "message": "Disabled here — filtering and learning are stopped." },
+  "popupToggleLabel": {
+    "message": "Enable filtering on this site"
+  },
+  "popupToggleAria": {
+    "message": "Enable or disable filtering on this site"
+  },
+  "popupStatRule": {
+    "message": "Rule blocks"
+  },
+  "popupStatHeuristic": {
+    "message": "Detected"
+  },
+  "popupStatLearned": {
+    "message": "Learned rules"
+  },
+  "popupHintDisabled": {
+    "message": "Disabled here — filtering and learning are stopped."
+  },
   "popupHintLearning": {
     "message": "A learned rule activates after 3 hits (currently $1 active)."
   },
-  "popupHintNoStats": { "message": "No statistics for this page yet. Reload to see them." },
-  "popupOpenOptions": { "message": "Manage rules" },
-  "popupClearSite": { "message": "Clear learned" },
+  "popupHintNoStats": {
+    "message": "No statistics for this page yet. Reload to see them."
+  },
+  "popupOpenOptions": {
+    "message": "Manage rules"
+  },
+  "popupClearSite": {
+    "message": "Clear learned"
+  },
   "popupConfirmClear": {
     "message": "Clear all rules AdBlow learned on $1?"
   },
@@ -49,16 +72,21 @@
     "message": "Stop fixing this site",
     "description": "Wall card button that turns the fix off for this site."
   },
-
-  "optionsTitle": { "message": "Rule manager" },
+  "optionsTitle": {
+    "message": "Rule manager"
+  },
   "optionsLede": {
     "message": "Hiding rules AdBlow learned on its own, site by site. You can revoke any of them individually."
   },
   "optionsWarn": {
     "message": "Once a learned rule is promoted it applies unconditionally on later visits, so it takes 3 hits to promote. If a site breaks, disable filtering for that site in the popup first, then come back and delete the suspicious rule."
   },
-  "optionsExport": { "message": "Export all rules (JSON)" },
-  "optionsRefresh": { "message": "Refresh" },
+  "optionsExport": {
+    "message": "Export all rules (JSON)"
+  },
+  "optionsRefresh": {
+    "message": "Refresh"
+  },
   "optionsEmpty": {
     "message": "No rules learned yet. AdBlow accumulates them automatically while you browse."
   },
@@ -68,20 +96,72 @@
   "optionsListData": {
     "message": "Built-in filter lists: fetched $1 · $2 lists · $3 network rules"
   },
-  "optionsPillActive": { "message": "Active" },
-  "optionsPillObserving": { "message": "Observing" },
-  "optionsPillBlocked": { "message": "Blocked" },
-  "optionsHits": { "message": "$1 hits" },
-  "optionsSeen": { "message": "seen $1×" },
-  "optionsDelete": { "message": "Delete" },
-  "optionsUnblock": { "message": "Stop blocking" },
-  "optionsClearSite": { "message": "Clear site" },
-  "optionsClearGroup": { "message": "Clear group" },
-  "optionsConfirmClearSite": { "message": "Clear all rules learned on $1?" },
-  "optionsConfirmClearGroup": { "message": "Clear all domains learned on $1?" },
-  "optionsCountSelectors": { "message": "$1 active / $2 total" },
-  "optionsCountDomains": { "message": "$1 blocked / $2 total" },
-  "optionsDomainHeader": { "message": "Network · learned on $1" },
+  "optionsPillActive": {
+    "message": "Active"
+  },
+  "optionsPillObserving": {
+    "message": "Observing"
+  },
+  "optionsPillBlocked": {
+    "message": "Blocked"
+  },
+  "optionsHits": {
+    "message": "$1 hits"
+  },
+  "optionsSeen": {
+    "message": "seen $1×"
+  },
+  "optionsDelete": {
+    "message": "Delete"
+  },
+  "optionsUnblock": {
+    "message": "Stop blocking"
+  },
+  "optionsClearSite": {
+    "message": "Clear site"
+  },
+  "optionsClearGroup": {
+    "message": "Clear group"
+  },
+  "optionsConfirmClearSite": {
+    "message": "Clear all rules learned on $1?"
+  },
+  "optionsConfirmClearGroup": {
+    "message": "Clear all domains learned on $1?"
+  },
+  "optionsPickRow": {
+    "message": "Select this rule",
+    "description": ""
+  },
+  "optionsPickSite": {
+    "message": "Select every rule of this site",
+    "description": ""
+  },
+  "optionsSelected": {
+    "message": "$1 selected ($2 site(s))",
+    "description": ""
+  },
+  "optionsDeleteSelected": {
+    "message": "Delete selected",
+    "description": ""
+  },
+  "optionsClearPicked": {
+    "message": "Clear selection",
+    "description": ""
+  },
+  "optionsConfirmDeleteSelected": {
+    "message": "Delete the $1 selected rule(s)? This cannot be undone.",
+    "description": ""
+  },
+  "optionsCountSelectors": {
+    "message": "$1 active / $2 total"
+  },
+  "optionsCountDomains": {
+    "message": "$1 blocked / $2 total"
+  },
+  "optionsDomainHeader": {
+    "message": "Network · learned on $1"
+  },
   "optionsDomainHint": {
     "message": "A domain is blocked automatically after appearing in ads 3 times. Domains also used by normal content are never learned."
   }
