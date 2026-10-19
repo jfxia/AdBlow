@@ -272,6 +272,45 @@ export function isInsideRealContent(el: Element): boolean {
   return el.closest(CONTENT_MARKERS.join(',')) !== null;
 }
 
+/**
+ * An editorial list sitting inside an ad-named container.
+ *
+ * Why (real false positive, 2026-10-19, finance.sina.com.cn): the portal names its ad **slot
+ * wrappers** `directAd_*` and `m-p-ad-*`. When a slot has no ad to show, it renders editorial
+ * headlines inside instead of collapsing. `directAd_dell_fidx_01` splits to `direct ad dell
+ * fidx 01`, matches the strong token `ad`, and naming alone (= threshold) hid the whole list:
+ * nine content lists on the homepage, up to 22 article links each.
+ *
+ * The discriminator is content shape, not the name: a creative carries 0–2 links, an editorial
+ * list carries many same-site article links with the text to go with them.
+ */
+export const EDITORIAL_LIST_MIN_LINKS = 3;
+export const EDITORIAL_LIST_MIN_TEXT = 40;
+
+export function looksLikeEditorialList(el: Element, pageHost: string): boolean {
+  const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+  if (text.length < EDITORIAL_LIST_MIN_TEXT) return false;
+
+  const pageReg = registrableDomain(pageHost);
+  let sameSite = 0;
+  for (const a of Array.from(el.querySelectorAll('a[href]'))) {
+    // Links inside blocks we already hid are not evidence (same rule as scoreNode).
+    if (a.closest('[data-adblow-hidden]') !== null) continue;
+    const href = a.getAttribute('href') ?? '';
+    if (!href || /^(?:javascript|mailto|tel):/i.test(href) || href.startsWith('#')) continue;
+    let hostname: string;
+    try {
+      hostname = new URL(href, `https://${pageHost}`).hostname;
+    } catch {
+      continue;
+    }
+    if (registrableDomain(hostname) !== pageReg) continue;
+    sameSite += 1;
+    if (sameSite >= EDITORIAL_LIST_MIN_LINKS) return true;
+  }
+  return false;
+}
+
 /** Media selector: images, video, embedded objects. */
 export const MEDIA_TAGS = 'img,video,source,embed,object,picture';
 
@@ -315,7 +354,13 @@ export function createJudge(
 
     // ① Deterministic naming: strong naming may overturn the text-volume proxy, because
     // naming is explicit evidence — a `.sponsored-post` stays an ad slot even with text inside.
-    if (naming >= NAMING_STRONG) return hit();
+    //
+    // Except when the slot holds an editorial list (see looksLikeEditorialList): the name then
+    // only says "an ad would go here", and portals do fill such slots with headline lists when
+    // no ad fills. Behavioural evidence still settles it.
+    if (naming >= NAMING_STRONG && (!looksLikeEditorialList(el, host) || behavior >= threshold)) {
+      return hit();
+    }
 
     // Navigation is page skeleton: short labels escape text volume, so gate it separately.
     if (isNavigationLike(el) || isInsideNavigation(el)) return null;
