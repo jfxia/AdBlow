@@ -1,13 +1,13 @@
 # AdBlow 发布清单（Microsoft Edge 加载项商店）
 
 **商店页面**：https://microsoftedge.microsoft.com/addons/detail/adblow/omfepilfkagfdjejmdlkkphecllioion
-（已上架 v1.0.0；当前开发版本 v1.0.2）
+（已上架 v1.0.0；当前开发版本 v1.0.3）
 
 ## 一、产物
 
 | 用途 | 文件 |
 |---|---|
-| **上传商店的扩展包** | `release/adblow-1.0.2-edge.zip` |
+| **上传商店的扩展包** | `release/adblow-1.0.3-edge.zip` |
 | **GitHub Release 附件：列表快照** | `release/adblow-filter-lists-<抓取日期>.zip`（名字取自 `filters/meta.json` 的 `fetchedAt`） |
 | 商店列表图标 | `store/icon-300.png`（300×300） |
 | 商店截图 | `store/store-1280x800-options-{zhCN,enUS}.png`、`store/store-1280x800-popup-{zhCN,enUS}.png` |
@@ -130,7 +130,7 @@ AdBlow 的行为**全部在本地**，没有任何服务端：
       `manifest.json` 的 `version` 与 `package.json` 一致（`pnpm release:github` 每次发布前都会再验一遍）
 - [x] 包内**不含** `_metadata/`（浏览器加载扩展时自动生成的索引缓存，约 6 MB）
 - [x] `name` / `version` / `description` / `icons` / `default_locale` 齐全
-- [x] `version` 为 `x.y.z`（1.0.2），由 `package.json` 单一来源注入
+- [x] `version` 为 `x.y.z`（1.0.3），由 `package.json` 单一来源注入
 - [x] manifest 与界面用到的每个文案 key 在 5 种语言里都存在
 - [x] 5 种语言在真实 Edge 里逐个 `--lang` 实测，文案正确、无空文案、无文字溢出
 - [x] 904 项测试通过 · 24 类干扰视线广告验收 **24/24** · 试点站 E2E 全通过

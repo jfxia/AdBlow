@@ -144,7 +144,7 @@ pnpm build          # 产出 dist/
 随后在 `edge://extensions`（或 `chrome://extensions`）中启用开发者模式，选择“加载解压缩的
 扩展”，指向 `dist/` 目录。
 
-面向商店的发布包由 `pnpm package` 生成，当前版本为 `release/adblow-1.0.2-edge.zip`；v1.0.0 已在
+面向商店的发布包由 `pnpm package` 生成，当前版本为 `release/adblow-1.0.3-edge.zip`；v1.0.0 已在
 Edge 加载项商店上架。一次发布由三条命令串起来——`pnpm version:bump`、`pnpm package` 与
 `pnpm release:github`（见「构建与打包」与「发布」两节）。
 
@@ -344,5 +344,5 @@ MIT 授权，因此整个交付物按 GPL-3.0 分发；本仓库自行实现的�
 ---
 
 <div align="center">
-<sub>AdBlow 1.0.2 · Manifest V3 · Edge 与 Chrome</sub>
+<sub>AdBlow 1.0.3 · Manifest V3 · Edge 与 Chrome</sub>
 </div>
