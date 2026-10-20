@@ -20,15 +20,16 @@
 
 ## What it is
 
-AdBlow is an ad blocker for Microsoft Edge and Google Chrome, built on Manifest V3. The filtering
-engine, the user interface and the build toolchain are all implemented from scratch.
+Filter lists work by comparing request addresses and element selectors. An ad that steps around the
+lists still shows up: a script builds an overlay into the page after load; the creative comes from a
+domain that appears nowhere else; the element grows to fill the screen; the click is routed through
+an endpoint on the site's own domain; the image address is hidden in a base64 CDN path. None of
+these has an entry in a list, so a list-only blocker lets them through.
 
-Alongside the rule matching provided by the EasyList family of filter lists, the extension runs a
-runtime judgement stage that evaluates each element on its behaviour. It looks for elements
-injected into the page by script rather than present in the document, media served from a domain
-that appears nowhere else on the page, abnormal growth in geometry, links routed through a
-redirect endpoint on the site's own domain, and images proxied through a base64 path on a CDN. Ads
-of this kind rarely appear in filter lists, but they leave observable behaviour behind.
+AdBlow is an ad blocker for Microsoft Edge and Google Chrome, built on Manifest V3, and it exists to
+catch exactly those ads. Beyond matching the EasyList family of filter lists, it watches how each
+element behaves at runtime and judges from that. The filtering engine, the user interface and the
+build toolchain are all implemented from scratch.
 
 ## Design trade-offs
 
@@ -45,9 +46,10 @@ media, scripts or stylesheets. The trade-off is stated explicitly:
 
 > Better to miss an ad than to break a page.
 
-Unlike AdBlock Plus and similar products, AdBlow has no paid "Acceptable Ads" whitelist, and it
-does not unblock advertising in exchange for payment. The build refuses to fetch a list that
-carries one.
+The same principle has a less visible side: no paid unblocking. AdBlock Plus ships "Acceptable Ads"
+on by default and lets advertisers pay to pass; AdBlow has no such whitelist, and the build refuses
+to fetch a list that carries one. The reason is the same as above: a blocker that can sell an
+exemption is no longer judging only by whether something looks like an ad.
 
 ## Architecture
 
@@ -94,8 +96,11 @@ internal interfaces can be probed.
 
 ### Behaviour engine
 
-The content script records a pristine snapshot early in page load and diffs against it, scoring
-each element for ad likeness. The signals are: whether the element was script-injected, whether it
+The content script records a pristine snapshot early in page load and diffs against it, then scores
+each element for ad likeness. The snapshot is there for one reason: once the page has loaded,
+"content the page shipped" and "nodes a script added later" look identical in the DOM, and only the
+diff separates them. That is what the script-injected signal is measured from. The signals are:
+whether the element was script-injected, whether it
 carries cross-site links or media, whether it holds a cross-site iframe, whether it grew
 unexpectedly, whether its links carry promo parameters, where its naming falls across three
 confidence tiers, and whether it forms a full-screen overlay, a click layer, a fake close button or
@@ -125,8 +130,10 @@ data table is inlined in the script so that it takes effect before page scripts 
 
 ### Self-learning
 
-Hiding selectors and ad domains are recorded per site, and become active after 3 cumulative hits.
-Every entry is listed in the rule manager, and can be deleted individually or exported as JSON.
+Hiding selectors and ad domains are recorded per site and become active only after 3 cumulative
+hits. One hit can be a page that merely looks ad-like; a rule is worth keeping once it repeats. Even
+then it applies only on the site that taught it, and can be revoked at any time. Every entry is
+listed in the rule manager, and can be deleted individually or exported as JSON.
 
 ### Per-site switch
 
@@ -291,7 +298,7 @@ positive that actually shipped:
 - Learned rules apply only to the site that produced them (`initiatorDomains`); a domain learned
   on site A cannot affect site B.
 - Implicit rules never block a `main_frame`; only an explicit `$document` rule may do so.
-- `html`, `body` and `head` are never hidden. Hiding them blanks the page.
+- AdBlow never hides `html`, `body` or `head`: hiding any of them empties the page.
 - A page-level hiding budget limits the proportion of text and links that may be hidden, and
   elements carrying body content or navigation are exempt.
 - Hiding sets `display`, `visibility` and `pointer-events` together, and re-checks afterwards.
