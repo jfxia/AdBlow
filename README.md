@@ -20,25 +20,30 @@
 
 ## What it is
 
-Filter lists work by comparing request addresses and element selectors. An ad that steps around the
-lists still shows up: a script builds an overlay into the page after load; the creative comes from a
-domain that appears nowhere else; the element grows to fill the screen; the click is routed through
-an endpoint on the site's own domain; the image address is hidden in a base64 CDN path. None of
-these has an entry in a list, so a list-only blocker lets them through.
+Most ad blockers have the same shape: a rule list that someone maintains, plus an engine that applies it.
+A request that matches an entry is blocked; an element that matches a selector is hidden. The approach
+works, and it has a blind spot by construction: as soon as an ad changes its face, it is no longer in
+the list.
 
-AdBlow is an ad blocker for Microsoft Edge and Google Chrome, built on Manifest V3, and it exists to
-catch exactly those ads. Beyond matching the EasyList family of filter lists, it watches how each
-element behaves at runtime and judges from that. The filtering engine, the user interface and the
-build toolchain are all implemented from scratch.
+The usual ways of changing face are: a script builds an overlay after load; the creative is served from
+a domain that appears nowhere else on the page; an element renders normally and then grows to fill the
+screen; the click is routed through the site's own endpoint, so nothing outside looks like an ad; the
+image address is hidden in a base64 CDN path. None of them appears in any list, so a list-only blocker
+cannot catch them.
+
+AdBlow judges differently: it does not look at what an ad looks like, but at what it did in the page.
+It still applies the EasyList family of lists, and on top of that watches each element at runtime:
+whether the element was built by script, where its media comes from, whether it grew abnormally, where
+its links point. It decides from that. The filtering engine, the user interface and the build toolchain
+are all implemented from scratch.
 
 ## Design trade-offs
 
-**Judgement is not limited to filter lists.** The common approach matches requests and selectors
-against rules, and anything the lists have not seen passes through. AdBlow adds runtime
-observation on top of that, covering two widespread evasion techniques: rewriting an ad link into
-a redirect endpoint on the site's own domain, with a payload that declares `{"kind":"ad", ...}`,
-and wrapping the real media address in base64 inside a path served by the site's own CDN. Both are
-unwrapped to the real address first, and the decision is then made on that address.
+**Judgement is not limited to filter lists.** Two of the techniques the runtime stage looks for need
+unwrapping before they can be judged: an ad link rewritten into a redirect endpoint on the site's own
+domain, with a payload that declares `{"kind":"ad", ...}`, and a real media address wrapped in base64
+inside a path served by the site's own CDN. In both cases the ad looks exactly like a same-site link
+or a same-site asset from the outside, so AdBlow unwraps the real address first and decides on that.
 
 **A false positive costs more than a miss.** Every rule produced by self-learning is scoped to the
 site that produced it, can be revoked individually, and by construction never applies to images,
