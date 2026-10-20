@@ -37,6 +37,8 @@ whether the element was built by script, where its media comes from, whether it 
 its links point. It decides from that. The filtering engine, the user interface and the build toolchain
 are all implemented from scratch.
 
+In the implementation those trade-offs are concrete: all judgement happens locally, with no telemetry, no account and no remote configuration; there is no paid whitelist, so no channel exists for paying an ad through; and a rule produced by self-learning applies only on the site that taught it, and can be revoked entry by entry.
+
 ## Design trade-offs
 
 **Judgement is not limited to filter lists.** Two of the techniques the runtime stage looks for need
