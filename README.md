@@ -7,7 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-904%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-939%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 [![CI](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
 [![auto-release](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
@@ -78,31 +78,36 @@ documentation in October 2026; corrections are welcome.
 
 ### Network layer
 
-6 filter lists (EasyList, EasyList China, EasyPrivacy, uBlock filters / privacy / badware)
-compiled into declarativeNetRequest rulesets. 128,023 input rules are deduplicated and validated
-down to 20,913 block rules and 2,365 exceptions across 6 rulesets, with 106,595 domain anchors
-collapsed into 114 rules.
+AdBlow compiles six filter lists (EasyList, EasyList China, EasyPrivacy, and uBlock's filters,
+privacy and badware) into declarativeNetRequest rulesets at build time. Of 128,023 input rules,
+deduplication and validation keep 20,913 block rules and 2,365 exceptions across six rulesets.
+106,595 domain anchors are collapsed into 114 rules: kept one per domain, the anchors would both
+inflate the package and reach the browser's static-rule ceiling sooner.
 
 ### Element hiding
 
-25,467 domain-specific selectors covering 11,357 domains, split into 256 hash shards and requested
-by the content script on demand. The extension does not use `web_accessible_resources`, which
-leaves one less surface available for detection.
+AdBlow ships 25,467 domain-scoped selectors covering 11,357 domains. Fitting that table into every
+tab is not practical, so the rules are hashed into 256 shards and the content script asks the
+background worker only for the shards its site falls in. The extension declares no
+`web_accessible_resources`, so page scripts cannot enumerate the shard addresses and fewer
+internal interfaces can be probed.
 
 ### Behaviour engine
 
-A diff against a pristine snapshot taken early in page load, plus an ad-likeness score per
-element. Signals include script injection, cross-site links and media, cross-site iframes, growth
-in geometry, promo query parameters, ad naming across three confidence tiers, full-screen
-overlays, click layers, fake close buttons and link farms. A match records
-`data-adblow-reason` and `data-adblow-why`, so triaging a false positive can be traced directly to
-the mechanism and the evidence behind it.
+The content script records a pristine snapshot early in page load and diffs against it, scoring
+each element for ad likeness. The signals are: whether the element was script-injected, whether it
+carries cross-site links or media, whether it holds a cross-site iframe, whether it grew
+unexpectedly, whether its links carry promo parameters, where its naming falls across three
+confidence tiers, and whether it forms a full-screen overlay, a click layer, a fake close button or
+a link farm. A match writes `data-adblow-reason` and `data-adblow-why`, so triaging a false
+positive leads straight to the mechanism and the evidence behind it.
 
 ### Anti-hijack guards
 
-Four behaviours are restricted in the page's MAIN world: `window.open` calls, click hijacking,
-popup-state writes to `localStorage`, `sessionStorage` and `window.name`, and document-level click
-handlers that only perform navigation.
+Page scripts can interfere with filtering as well, so AdBlow restricts four behaviours in the
+page's MAIN world: `window.open` calls, click hijacking, popup-state writes to `localStorage`,
+`sessionStorage` and `window.name`, and document-level click handlers that only perform
+navigation.
 
 ### Anti-adblock walls
 
@@ -173,7 +178,7 @@ step is required. If they are unreachable altogether, the same lists are attache
 ## Build and package
 
 ```bash
-pnpm test           # 904 unit and integration tests, run in-process
+pnpm test           # 939 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -271,7 +276,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             904 unit and integration tests (jsdom)
+tests/             939 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -296,7 +301,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 904 tests, 0 failures
+node tests/run-all.ts           # 939 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 
