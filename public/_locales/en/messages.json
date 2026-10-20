@@ -164,5 +164,17 @@
   },
   "optionsDomainHint": {
     "message": "A domain is blocked automatically after appearing in ads 3 times. Domains also used by normal content are never learned."
+  },
+  "optionsClickWatchTitle": {
+    "message": "Click-hijack observations",
+    "description": ""
+  },
+  "optionsClickWatchHint": {
+    "message": "On these sites, a click on ordinary content was followed by a top-level navigation to another site. These are records only; the extension does not act on them yet.",
+    "description": ""
+  },
+  "optionsClickWatchRow": {
+    "message": "$1 time(s) · last $2 · went to $3",
+    "description": ""
   }
 }

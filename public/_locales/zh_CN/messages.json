@@ -164,5 +164,17 @@
   },
   "optionsDomainHint": {
     "message": "域名累计在广告里出现 3 次后自动拦截。凡是也被正常内容使用的域名一律不学。"
+  },
+  "optionsClickWatchTitle": {
+    "message": "点击劫持观测",
+    "description": ""
+  },
+  "optionsClickWatchHint": {
+    "message": "下列站点在点击普通内容后，顶层页面跳到了别的站点。这些只是记录，扩展尚未据此拦截任何操作。",
+    "description": ""
+  },
+  "optionsClickWatchRow": {
+    "message": "$1 次 · 最近 $2 · 跳向 $3",
+    "description": ""
   }
 }

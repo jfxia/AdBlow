@@ -100,6 +100,13 @@
         padding: 7px 13px 0;
         margin: 0;
       }
+      #clickwatch h2 {
+        font-size: 14px;
+        margin: 20px 0 4px;
+      }
+      #clickwatch .lede {
+        margin-bottom: 10px;
+      }
       .empty {
         padding: 34px 6px;
         color: var(--muted);
@@ -167,6 +174,9 @@
         <button id="bulkdelete" class="danger" data-i18n="optionsDeleteSelected"></button>
         <button id="bulkclear" data-i18n="optionsClearPicked"></button>
       </div>
+
+      <!-- 点击后跨站跳转的观测（只记录）：后台写入 clickwatch:<站点>，这里只读展示 -->
+      <div id="clickwatch" hidden></div>
 
       <div id="sites"></div>
     </div>

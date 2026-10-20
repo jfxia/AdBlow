@@ -164,5 +164,17 @@
   },
   "optionsDomainHint": {
     "message": "Un dominio se bloquea automáticamente tras aparecer 3 veces en anuncios. Los dominios que también usa el contenido normal nunca se aprenden."
+  },
+  "optionsClickWatchTitle": {
+    "message": "Observaciones de secuestro de clics",
+    "description": ""
+  },
+  "optionsClickWatchHint": {
+    "message": "En estos sitios, un clic sobre contenido normal fue seguido de una navegación de nivel superior a otro sitio. Son solo registros; la extensión todavía no actúa sobre ellos.",
+    "description": ""
+  },
+  "optionsClickWatchRow": {
+    "message": "$1 vez/veces · última $2 · hacia $3",
+    "description": ""
   }
 }

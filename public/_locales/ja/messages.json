@@ -164,5 +164,17 @@
   },
   "optionsDomainHint": {
     "message": "ドメインは広告内に 3 回出現すると自動的に遮断されます。通常のコンテンツでも使われているドメインは学習しません。"
+  },
+  "optionsClickWatchTitle": {
+    "message": "クリックハイジャックの観測",
+    "description": ""
+  },
+  "optionsClickWatchHint": {
+    "message": "以下のサイトでは、通常の内容をクリックした直後に上位フレームが別サイトへ遷移しました。記録のみで、拡張はまだこれを理由に何も遮断していません。",
+    "description": ""
+  },
+  "optionsClickWatchRow": {
+    "message": "$1 回 · 最終 $2 · 遷移先 $3",
+    "description": ""
   }
 }

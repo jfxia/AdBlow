@@ -512,3 +512,81 @@ el('export').addEventListener('click', async () => {
 applyI18n();
 void render();
 void showListData();
+
+
+// ── Click-triggered navigation observations ─────────────────────────────────
+//
+// Record-only data written by the background script (see src/engine/clickWatch.ts): a click on
+// ordinary content followed by a cross-site top-level navigation. Shown so that a misbehaving
+// site leaves a visible trace; nothing acts on it yet.
+
+const CLICK_WATCH_PREFIX = 'clickwatch:';
+
+type ClickWatchRow = { host: string; count: number; lastAt: number; targetHost: string };
+
+async function renderClickWatch(): Promise<void> {
+  const box = el('clickwatch');
+  box.textContent = '';
+
+  const keys = (await store.keys()).filter((key) => key.startsWith(CLICK_WATCH_PREFIX));
+  if (keys.length === 0) {
+    box.hidden = true;
+    return;
+  }
+
+  const rows: ClickWatchRow[] = [];
+  for (const key of keys) {
+    const value = await store.get<{ count?: number; lastAt?: number; lastTargetHost?: string }>(key);
+    if (!value) continue;
+    rows.push({
+      host: key.slice(CLICK_WATCH_PREFIX.length),
+      count: typeof value.count === 'number' ? value.count : 0,
+      lastAt: typeof value.lastAt === 'number' ? value.lastAt : 0,
+      targetHost: typeof value.lastTargetHost === 'string' ? value.lastTargetHost : '',
+    });
+  }
+  rows.sort((a, b) => b.count - a.count || b.lastAt - a.lastAt);
+
+  const title = document.createElement('h2');
+  title.textContent = t('optionsClickWatchTitle');
+  box.appendChild(title);
+
+  const hint = document.createElement('p');
+  hint.className = 'lede';
+  hint.textContent = t('optionsClickWatchHint');
+  box.appendChild(hint);
+
+  const section = document.createElement('section');
+  const list = document.createElement('ul');
+  list.className = 'rows';
+  for (const row of rows) {
+    const li = document.createElement('li');
+
+    const code = document.createElement('code');
+    code.textContent = row.host;
+    li.appendChild(code);
+
+    const meta = document.createElement('span');
+    meta.className = 'meta';
+    meta.textContent = t('optionsClickWatchRow', [
+      String(row.count),
+      row.lastAt ? new Date(row.lastAt).toLocaleString() : '-',
+      row.targetHost || '-',
+    ]);
+    li.appendChild(meta);
+
+    const del = button('optionsDelete', 'danger');
+    del.addEventListener('click', async () => {
+      await store.remove(`${CLICK_WATCH_PREFIX}${row.host}`);
+      await renderClickWatch();
+    });
+    li.appendChild(del);
+
+    list.appendChild(li);
+  }
+  section.appendChild(list);
+  box.appendChild(section);
+  box.hidden = false;
+}
+
+void renderClickWatch();

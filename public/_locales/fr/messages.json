@@ -164,5 +164,17 @@
   },
   "optionsDomainHint": {
     "message": "Un domaine est bloqué automatiquement après 3 apparitions dans des publicités. Les domaines aussi utilisés par du contenu normal ne sont jamais appris."
+  },
+  "optionsClickWatchTitle": {
+    "message": "Observations de détournement de clic",
+    "description": ""
+  },
+  "optionsClickWatchHint": {
+    "message": "Sur ces sites, un clic sur du contenu ordinaire a été suivi d'une navigation de premier niveau vers un autre site. Ce ne sont que des enregistrements ; l'extension n'agit pas encore dessus.",
+    "description": ""
+  },
+  "optionsClickWatchRow": {
+    "message": "$1 fois · dernier $2 · vers $3",
+    "description": ""
   }
 }
