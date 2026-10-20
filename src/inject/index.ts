@@ -20,8 +20,26 @@ import { looksLikeTrackingListener, shouldAllowOpen } from './guards.ts';
 const HIDDEN_ATTR = 'data-adblow-hidden';
 
 let hadUserGesture = false;
-for (const type of ['pointerdown', 'keydown', 'touchstart'] as const) {
-  addEventListener(type, () => { hadUserGesture = true; }, { capture: true, passive: true });
+/**
+ * Whether the last gesture landed on something the user would expect to open a window.
+ *
+ * Popunder SDKs open their ad window from the *first click anywhere*, so the target of the
+ * gesture is the only thing that separates them from a share button.
+ */
+let gestureOnControl = false;
+const CONTROL_SELECTOR =
+  'a[href], button, input, select, textarea, summary, label, [role="button"], [onclick], [contenteditable="true"]';
+
+for (const type of ['pointerdown', 'mousedown', 'click', 'keydown', 'touchstart'] as const) {
+  addEventListener(
+    type,
+    (ev) => {
+      hadUserGesture = true;
+      const target = ev.target instanceof Element ? ev.target : null;
+      gestureOnControl = target?.closest?.(CONTROL_SELECTOR) != null;
+    },
+    { capture: true, passive: true },
+  );
 }
 
 /** Hide immediately, using the same marker and styles as the content script. */
@@ -43,7 +61,7 @@ Object.defineProperty(window, 'open', {
   writable: false,
   value: (url?: string | URL, target?: string, features?: string): Window | null => {
     const href = String(url ?? '');
-    if (!shouldAllowOpen(href, location.hostname, hadUserGesture)) {
+    if (!shouldAllowOpen(href, location.hostname, hadUserGesture, gestureOnControl)) {
       console.debug('[adblow] 已拦截 window.open', href, target);
       return null;
     }

@@ -1,20 +1,29 @@
 import { registrableDomain } from '../engine/score.ts';
 
 /**
- * window.open allow policy: without a user gesture only same-registrable-domain, non-empty
- * targets pass. The site under test opened popups/checkout pages via a gesture-less
- * window.open and reopened them after reload from persisted state (design doc §1.4).
- * Pure function, directly testable in Node.
+ * window.open allow policy.
+ *
+ * Without a user gesture only same-registrable-domain, non-empty targets pass (the site under
+ * test opened popups/checkout pages via a gesture-less `window.open` and reopened them after
+ * reload from persisted state, design doc §1.4).
+ *
+ * With a gesture, what matters is **where the gesture landed**. A click on a link, button or
+ * other control is the user asking for that window, so it passes. A click on ordinary text or
+ * background is not: that is exactly the trigger a popunder SDK waits for (2026-10-20,
+ * missav.watch ships `__htapop` with `type:"popunder"`, 1001×800, counting `clickedElement`),
+ * so a cross-site window from such a click is refused. Same-site opens still pass, so ordinary
+ * pages that open their own popups keep working.
  */
 export function shouldAllowOpen(
   url: string,
   pageHost: string,
   hadUserGesture: boolean,
+  gestureOnControl = true,
 ): boolean {
-  // Links the user clicked themselves always pass, so normal features keep working.
-  if (hadUserGesture) return true;
-
+  // Empty and javascript: targets are never a real window, gesture or not.
   if (!url || url === 'about:blank' || url.startsWith('javascript:')) return false;
+
+  if (hadUserGesture && gestureOnControl) return true;
 
   try {
     const parsed = new URL(url, `https://${pageHost}`);
