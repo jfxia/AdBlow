@@ -584,3 +584,36 @@ async function boot(): Promise<void> {
 }
 
 void boot();
+
+
+// ── Click-triggered navigation watch (record only) ───────────────────────────
+//
+// Observation, not enforcement. A click on ordinary content is reported to the service worker,
+// which records a cross-site top-frame navigation that follows within a few seconds; the rule
+// manager shows the result. Nothing here changes what the page is allowed to do.
+
+/** Controls the user expects to open something: a click there is not the hijack shape. */
+const CLICK_WATCH_CONTROL_SELECTOR =
+  'a[href], button, input, select, textarea, summary, label, [role="button"], [onclick], [contenteditable="true"]';
+
+let clickWatchLastAt = 0;
+addEventListener(
+  'click',
+  (ev) => {
+    if (ev.isTrusted === false) return; // script-synthesised: not a user click
+    if (window.top !== window) return; // only the top document can navigate the tab
+    const target = ev.target instanceof Element ? ev.target : null;
+    if (target?.closest?.(CLICK_WATCH_CONTROL_SELECTOR)) return;
+    const now = Date.now();
+    if (now - clickWatchLastAt < 1000) return; // one report per second is plenty
+    clickWatchLastAt = now;
+    try {
+      void chrome.runtime
+        .sendMessage({ kind: 'click-plain', url: location.href, at: now })
+        .catch(() => {});
+    } catch {
+      // Extension reloaded or tab torn down: nothing to report.
+    }
+  },
+  { capture: true, passive: true },
+);

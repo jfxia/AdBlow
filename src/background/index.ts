@@ -237,3 +237,149 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
 
   return false;
 });
+
+
+// ── Click-triggered navigation watch (record only) ───────────────────────────
+//
+// The content script reports clicks that landed on ordinary content; this side records a
+// cross-site top-frame navigation that follows within a few seconds. Observation only: no
+// behaviour depends on it, so a wrong record costs a line in the rule manager, not a page.
+//
+// The two signals arrive on independent channels and either may be first (a page that
+// redirects inside its own click handler starts navigating before the message is handled),
+// so both are stored and whichever arrives second settles the pair.
+import {
+  clickWatchKey,
+  mergeIncident,
+  shouldRecordClickNavigation,
+  type ClickIncident,
+  type PlainClick,
+} from '../engine/clickWatch.ts';
+
+const CLICK_PENDING_KEY = 'clickWatchPending';
+const CLICK_NAV_KEY = 'clickWatchNav';
+const CLICK_PENDING_TTL_MS = 60_000;
+
+type PendingClicks = Record<string, PlainClick>;
+type PendingNav = { fromUrl: string; toUrl: string; at: number };
+type PendingNavs = Record<string, PendingNav>;
+
+async function readSession<T>(key: string): Promise<T> {
+  const stored = await chrome.storage.session.get(key);
+  const value = stored[key];
+  return (value && typeof value === 'object' ? value : {}) as T;
+}
+
+async function writeSession(key: string, value: unknown): Promise<void> {
+  await chrome.storage.session.set({ [key]: value });
+}
+
+/** Convert a pair into a record if it qualifies, then clear both sides for that tab. */
+async function settle(tabId: number): Promise<void> {
+  const key = String(tabId);
+  const clicks = await readSession<PendingClicks>(CLICK_PENDING_KEY);
+  const navs = await readSession<PendingNavs>(CLICK_NAV_KEY);
+  const click = clicks[key];
+  const nav = navs[key];
+  if (!click || !nav) return;
+
+  const now = Date.now();
+  const verdict = shouldRecordClickNavigation({ click, toUrl: nav.toUrl, now });
+
+  // A page's own initial load also produces a navigation event, and it may pair with the click
+  // that arrives right after. That pair is same-host and must not consume the click: the real
+  // (cross-site) navigation is still on its way and needs it.
+  const sameOrigin =
+    verdict.reason === 'same host' || verdict.reason === 'same registrable domain';
+  if (sameOrigin) {
+    delete navs[key];
+    await writeSession(CLICK_NAV_KEY, navs);
+    return;
+  }
+
+  delete clicks[key];
+  delete navs[key];
+  await writeSession(CLICK_PENDING_KEY, clicks);
+  await writeSession(CLICK_NAV_KEY, navs);
+  if (!verdict.record) return;
+
+  const storageKey = clickWatchKey(click.host);
+  const stored = await chrome.storage.local.get(storageKey);
+  const existing = stored[storageKey] as ClickIncident | undefined;
+  const incident = mergeIncident(existing, click.host, verdict.targetHost ?? '', now);
+  await chrome.storage.local.set({ [storageKey]: incident });
+  console.debug('[adblow] 点击后跨站跳转已记录', click.host, '→', verdict.targetHost, '次数', incident.count);
+}
+
+async function rememberPlainClick(tabId: number, url: string, at: number): Promise<void> {
+  let host = '';
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return;
+  }
+  if (!host) return;
+  const clicks = await readSession<PendingClicks>(CLICK_PENDING_KEY);
+  clicks[String(tabId)] = { host, url, at };
+  await writeSession(CLICK_PENDING_KEY, clicks);
+  await settle(tabId);
+}
+
+async function noteNavigation(tabId: number, toUrl: string, fromUrl: string): Promise<void> {
+  const navs = await readSession<PendingNavs>(CLICK_NAV_KEY);
+  navs[String(tabId)] = { fromUrl, toUrl, at: Date.now() };
+  await writeSession(CLICK_NAV_KEY, navs);
+  await settle(tabId);
+}
+
+/** Drop entries that can no longer matter (a tab that never settled). */
+async function dropStale(): Promise<void> {
+  const now = Date.now();
+  const clicks = await readSession<PendingClicks>(CLICK_PENDING_KEY);
+  const navs = await readSession<PendingNavs>(CLICK_NAV_KEY);
+  let changed = false;
+  for (const [key, click] of Object.entries(clicks)) {
+    if (now - click.at > CLICK_PENDING_TTL_MS) {
+      delete clicks[key];
+      changed = true;
+    }
+  }
+  for (const [key, nav] of Object.entries(navs)) {
+    if (now - nav.at > CLICK_PENDING_TTL_MS) {
+      delete navs[key];
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  await writeSession(CLICK_PENDING_KEY, clicks);
+  await writeSession(CLICK_NAV_KEY, navs);
+}
+
+chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+  const msg = message as { kind?: string; url?: string; at?: number } | null;
+  if (!msg || msg.kind !== 'click-plain') return;
+  const tabId = sender.tab?.id;
+  if (tabId === undefined) return;
+  void rememberPlainClick(
+    tabId,
+    typeof msg.url === 'string' ? msg.url : '',
+    typeof msg.at === 'number' ? msg.at : Date.now(),
+  ).then(dropStale);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const url = changeInfo.url;
+  if (!url) return;
+  void noteNavigation(tabId, url, tab?.pendingUrl ?? tab?.url ?? url).then(dropStale);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void (async () => {
+    const clicks = await readSession<PendingClicks>(CLICK_PENDING_KEY);
+    const navs = await readSession<PendingNavs>(CLICK_NAV_KEY);
+    delete clicks[String(tabId)];
+    delete navs[String(tabId)];
+    await writeSession(CLICK_PENDING_KEY, clicks);
+    await writeSession(CLICK_NAV_KEY, navs);
+  })();
+});
