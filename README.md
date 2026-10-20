@@ -7,7 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-939%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-942%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 [![CI](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
 [![auto-release](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
@@ -192,7 +192,7 @@ step is required. If they are unreachable altogether, the same lists are attache
 ## Build and package
 
 ```bash
-pnpm test           # 939 unit and integration tests, run in-process
+pnpm test           # 942 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -290,7 +290,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             939 unit and integration tests (jsdom)
+tests/             942 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -315,7 +315,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 939 tests, 0 failures
+node tests/run-all.ts           # 942 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 

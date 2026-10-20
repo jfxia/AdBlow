@@ -2,6 +2,7 @@ import { isInvisibleClickLayer } from '../engine/clickLayer.ts';
 import { keysToScrub, scrubWindowName } from '../engine/scrub.ts';
 import {
   NAVIGATION_EVENT_TYPES,
+  isNavigationSource,
   looksLikeNavigationHijack,
   shouldBlockClick,
 } from './clickGuard.ts';
@@ -149,13 +150,22 @@ setInterval(scrub, 2000);
 // clickGuard.ts. Element-level listeners are untouched, so buttons/links keep working.
 const rawAddEventListener = EventTarget.prototype.addEventListener;
 
+/** Targets whose handlers are page-wide: a listener here can redirect any click. */
+function isPageWideTarget(target: EventTarget | null): boolean {
+  if (!target) return false;
+  if (target === window || target === document) return true;
+  // Handlers attached to <body>/<html> are just as page-wide, and this is the shape
+  // `document.body.addEventListener('click', …)` uses to hijack every click.
+  return target === document.body || target === document.documentElement;
+}
+
 EventTarget.prototype.addEventListener = function patched(
   this: EventTarget,
   type: string,
   listener: EventListenerOrEventListenerObject,
   options?: boolean | AddEventListenerOptions,
 ): void {
-  if (this === window || this === document) {
+  if (isPageWideTarget(this)) {
     if ((type === 'pagehide' || type === 'beforeunload') && looksLikeTrackingListener(listener)) {
       console.debug('[adblow] 已拦截卸载期上报监听器', type);
       return;
@@ -167,3 +177,84 @@ EventTarget.prototype.addEventListener = function patched(
   }
   return rawAddEventListener.call(this, type, listener, options);
 };
+
+/**
+ * The same check for handlers installed as **IDL properties** (`document.onclick = fn`) or as
+ * inline attributes (`<body onclick="…">`, which compiles to exactly that assignment).
+ *
+ * The addEventListener patch above cannot see those, and they are the most common shape of
+ * "click anywhere redirects". Measured gap (2026-10-20): a page that assigns
+ * `document.onclick = () => { location.href = ad }` kept working.
+ *
+ * Only the navigation-shaped functions are refused; any other handler installs as usual, so
+ * ordinary `onclick` handlers keep working.
+ */
+const patchedHandlerOwners = new WeakSet<object>();
+
+function patchEventHandlerProperties(target: object): void {
+  for (const type of NAVIGATION_EVENT_TYPES) {
+    const prop = `on${type}`;
+    // The accessor lives on a prototype shared by every element (Document / GlobalEventHandlers),
+    // so find the owner by walking the chain.
+    let owner: object | null = target;
+    let descriptor: PropertyDescriptor | undefined;
+    while (owner && !descriptor) {
+      descriptor = Object.getOwnPropertyDescriptor(owner, prop);
+      if (!descriptor) owner = Object.getPrototypeOf(owner) as object | null;
+    }
+    if (!owner || patchedHandlerOwners.has(owner)) continue;
+    const getter = descriptor?.get;
+    const setter = descriptor?.set;
+    if (typeof getter !== 'function' || typeof setter !== 'function') continue;
+    try {
+      Object.defineProperty(owner, prop, {
+        configurable: descriptor?.configurable ?? true,
+        enumerable: descriptor?.enumerable ?? true,
+        get: getter,
+        set(this: object, value: unknown) {
+          if (looksLikeNavigationHijack(value)) {
+            console.debug('[adblow] 已拦截文档级跳转处理函数', prop);
+            return;
+          }
+          return setter.call(this, value);
+        },
+      });
+      patchedHandlerOwners.add(owner);
+    } catch {
+      // Non-configurable accessor: nothing can be done, and nothing is broken.
+    }
+  }
+}
+
+patchEventHandlerProperties(window);
+patchEventHandlerProperties(document);
+
+/**
+ * Inline `on*` attributes on `<html>`/`<body>` are compiled by the parser, not assigned through
+ * the IDL setter, so the patch above never sees them. `<body onclick="location.href='…'">` is
+ * therefore enough to redirect any click.
+ *
+ * Only the page-wide containers are touched, and only when the attribute body is navigation
+ * shaped. A normal `<a onclick="location.href = '/next'">` lives on the element itself and is
+ * left alone, and so is everything inside the page.
+ */
+const INLINE_HANDLER_ATTRS = ['onclick', 'onmousedown', 'onmouseup', 'onpointerdown', 'onpointerup', 'ontouchstart', 'ontouchend', 'onauxclick'];
+
+function stripPageWideInlineHandlers(): void {
+  for (const el of [document.documentElement, document.body]) {
+    if (!el) continue;
+    for (const attr of INLINE_HANDLER_ATTRS) {
+      const value = el.getAttribute(attr);
+      if (!value) continue;
+      // Inline handler bodies are source text, not functions: use the text-shaped test.
+      if (!isNavigationSource(value)) continue;
+      el.removeAttribute(attr);
+      console.debug('[adblow] 已移除页面级行内跳转处理器', attr);
+    }
+  }
+}
+
+stripPageWideInlineHandlers();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', stripPageWideInlineHandlers, { once: true });
+}

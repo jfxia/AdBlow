@@ -105,7 +105,17 @@ function listenerSource(listener: unknown): string {
  * blocked too. Normal sites use `<a href>` or the History API, so this is acceptable.
  */
 export function looksLikeNavigationHijack(listener: unknown): boolean {
-  const source = listenerSource(listener);
+  return isNavigationSource(listenerSource(listener));
+}
+
+/**
+ * The same test on raw source text.
+ *
+ * Needed for inline handlers: `<body onclick="location.href='…'">` is compiled by the parser, so
+ * the value reaches us as an attribute string rather than a function, and the function-shaped
+ * helper above would see no source at all.
+ */
+export function isNavigationSource(source: string): boolean {
   if (!source) return false;
 
   // Boundary: `location` must not be part of a longer identifier (mylocation), but a
