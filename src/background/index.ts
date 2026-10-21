@@ -13,6 +13,11 @@ import { migrateLearnedSchema } from '../content/learn.ts';
 import { disabledKey } from '../content/settings.ts';
 import { chromeLocal } from '../content/storage.ts';
 import { SITE_PACKS } from '../rules/sites/index.ts';
+import {
+  BADWARE_LIST_ID,
+  createBadwareIndexLoader,
+  isBadwareHost,
+} from '../engine/badwareDomains.ts';
 
 /**
  * In-process cache of cosmetic shards (index → shard; null means unavailable, so a
@@ -49,6 +54,34 @@ async function cosmeticForHost(host: string): Promise<string[]> {
   const shards = await Promise.all(indexes.map((i) => loadShard(i)));
   return selectorsFromShards(shards, host);
 }
+
+/**
+ * Badware domain set, read from the packaged JSON once per service-worker lifetime.
+ *
+ * The previous implementation used `declarativeNetRequest.testMatchOutcome`, which Chrome
+ * documents as available only for unpacked extensions; packaged builds therefore always
+ * got no answer and had to fail closed. This snapshot works in every build.
+ *
+ * Failure direction is inverted on purpose: a missing/corrupt list means "no evidence",
+ * so the caller allows banner handling. Never letting the feature run in the store build
+ * is worse than not knowing whether one particular site is badware.
+ */
+const badwareIndex = createBadwareIndexLoader({
+  loadFile: async () => {
+    // Keep this path a string literal: tools/release/package.mjs finds reachable
+    // extension resources by scanning built JS for chrome.runtime.getURL('...').
+    const url = chrome.runtime.getURL('badware-domains.json');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
+  onLoaded: (count) => console.log(`[adblow] ${BADWARE_LIST_ID}: loaded ${count} domains`),
+  onUnavailable: (error) =>
+    console.log(
+      '[adblow] badware domains unavailable; cookie banners will still be handled',
+      error,
+    ),
+});
 
 
 /**
@@ -158,6 +191,33 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
   const msg = message as { type?: string; url?: string; host?: string } | undefined;
+
+  /**
+   * Is this host on the packaged badware-domain list?
+   *
+   * The answer has three states: `true` (matched, leave the banner alone), `false` (list
+   * loaded, no match), and `null` (list unavailable — the caller deliberately allows the
+   * banner). The old DNR gate returned `null` for a missing API and failed closed, which
+   * disabled the feature entirely in packaged builds; see the loader above.
+   */
+  if (msg?.type === 'is-badware-site') {
+    const host = msg.host ?? '';
+    if (!host) {
+      respond({ badware: null });
+      return true;
+    }
+    void (async () => {
+      try {
+        const index = await badwareIndex.load();
+        respond({ badware: index.available ? isBadwareHost(host, index.domains) : null });
+      } catch (error) {
+        // createBadwareIndexLoader resolves on its own failures; this is a last-resort guard.
+        console.warn('[adblow] badware lookup failed; allowing banner handling', error);
+        respond({ badware: null });
+      }
+    })();
+    return true;
+  }
 
   /**
    * Cosmetic rules: return the domain-specific selectors for a hostname.

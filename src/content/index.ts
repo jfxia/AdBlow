@@ -31,6 +31,8 @@ import { recordDomains } from './domainLearn.ts';
 import { isSiteDisabled, isWallFixEnabled, markWallDetected, wallFixKey, writeStats } from './settings.ts';
 import { chromeLocal } from './storage.ts';
 import { detectWall } from '../engine/antiAdblock.ts';
+import { consentGate } from '../engine/cookieConsent.ts';
+import { clickConsentControl, createConsentController, findConsentBanner } from './consent.ts';
 import {
   captureContentBaseline,
   neutralizeWall,
@@ -123,6 +125,26 @@ async function requestPristineHtml(url: string): Promise<string | null> {
   }
 }
 
+/**
+ * Ask the worker whether this host is on the packaged badware-domain list.
+ *
+ * `null` means "list unavailable" (old/corrupt artifact, message failed). The caller
+ * deliberately allows banner handling in that case: unlike the DNR gate this replaced,
+ * a missing list must not disable the feature in every packaged build.
+ */
+async function requestBadwareSite(host: string): Promise<boolean | null> {
+  try {
+    const res = (await withTimeout(
+      chrome.runtime.sendMessage({ type: 'is-badware-site', host }),
+      2500,
+    )) as { badware?: boolean | null } | null | undefined;
+    return typeof res?.badware === 'boolean' ? res.badware : null;
+  } catch (error) {
+    console.debug('[adblow] badware lookup failed; allowing banner handling', error);
+    return null;
+  }
+}
+
 function installCosmeticStyle(selectors: string[]): void {
   const style = document.createElement('style');
   style.setAttribute('data-adblow-cosmetic', '');
@@ -156,6 +178,58 @@ function installListCosmetic(selectors: string[]): number {
     console.debug(`[adblow] 列表选择器非法，已剔除 ${result.droppedInvalid.length} 条`);
   }
   return result.injected;
+}
+
+/**
+ * Cookie-consent banners: click a site-provided button, never hide anything.
+ *
+ * Two gates run inside `isAllowed`, before every look:
+ *   1. the per-site kill switch (the popup writes `disabled:<host>`);
+ *   2. the worker's badware-domain answer for this host. Only a confirmed match blocks;
+ *      a missing list (`null`) allows handling (see badwareDomains.ts).
+ *
+ * The first look is delayed so the site's own scripts can render the banner; later looks
+ * are driven by mutations and throttled by the controller. Only the top document is
+ * considered: consent banners inside ad iframes are not ours to answer.
+ */
+function installCookieConsent(): void {
+  try {
+    if (window.top !== window) return;
+  } catch {
+    return; // cross-origin top access: not a frame we can reason about
+  }
+
+  const host = location.hostname;
+  // Start the question now so the worker has time to answer before the first look.
+  const badwareSite = requestBadwareSite(host);
+
+  const isAllowed = async (): Promise<boolean> => {
+    const siteDisabled = await isSiteDisabled(store, host);
+    const gate = consentGate({ topFrame: true, siteDisabled, badwareSite: await badwareSite });
+    if (!gate.allowed) {
+      console.debug(`[adblow] cookie banner left alone: ${gate.reason}`);
+    }
+    return gate.allowed;
+  };
+
+  let observer: MutationObserver | null = null;
+  const controller = createConsentController({
+    isAllowed,
+    find: () => findConsentBanner(document),
+    click: clickConsentControl,
+    onFinish: () => observer?.disconnect(),
+    log: (message) => console.debug(`[adblow] ${message}`),
+  });
+
+  try {
+    observer = new MutationObserver(() => controller.notifyMutation());
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  } catch (error) {
+    // Without mutations the first delayed look still runs; the feature degrades, never breaks.
+    console.debug('[adblow] cookie consent observer could not attach', error);
+  }
+
+  controller.start();
 }
 
 async function boot(): Promise<void> {
@@ -584,6 +658,7 @@ async function boot(): Promise<void> {
 }
 
 void boot();
+void installCookieConsent();
 
 
 // ── Click-triggered navigation watch (record only) ───────────────────────────

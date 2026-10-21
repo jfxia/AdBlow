@@ -83,6 +83,10 @@ function makePackage(
         lists: ['easylist', 'easyprivacy'],
       }),
     },
+    {
+      name: 'badware-domains.json',
+      data: JSON.stringify({ generatedFrom: 'ublock-badware', domains: ['a.com'] }),
+    },
   ];
 
   return [...base, ...(opts.extra ?? [])]
@@ -180,6 +184,18 @@ describe('the package audit rejects a broken archive', () => {
   it('rejects a package that lost list-info.json (the file the build log never missed)', () => {
     const problems = problemsOf(makePackage({ remove: ['list-info.json'] }));
     assert.match(problems, /list-info\.json is in the archive/);
+  });
+
+  it('rejects a package that lost badware-domains.json (read via chrome.runtime.getURL)', () => {
+    const problems = problemsOf(makePackage({ remove: ['badware-domains.json'] }));
+    assert.match(problems, /badware-domains\.json is in the archive/);
+  });
+
+  it('rejects a badware-domains.json without a domains array', () => {
+    const problems = problemsOf(
+      makePackage({ replace: { 'badware-domains.json': JSON.stringify({ generatedFrom: 'x' }) } }),
+    );
+    assert.match(problems, /badware-domains\.json has a domains array/);
   });
 
   it('rejects a list-info.json that names no list at all', () => {

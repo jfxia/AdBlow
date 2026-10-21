@@ -337,6 +337,34 @@ if (existsSync(rulesetPatch)) {
   );
 }
 
+/**
+ * Badware-domain snapshot read by the worker through chrome.runtime.getURL().
+ *
+ * The worker's getURL call is what makes this file reachable for tools/release/package.mjs
+ * (it scans built JS for getURL literals). If generation was skipped -- e.g. a checkout
+ * without filters/ -- write a valid empty list rather than omitting the file: the runtime
+ * gate treats an empty list as "no match" and cookie-banner handling stays enabled.
+ */
+{
+  const source = p('filters/generated/badware-domains.json');
+  const target = `${DIST}/badware-domains.json`;
+  if (existsSync(source)) {
+    copyFileSync(source, target);
+  } else {
+    writeFileSync(
+      target,
+      JSON.stringify({ generatedFrom: 'ublock-badware', domains: [] }, null, 2),
+      'utf8',
+    );
+    console.log(
+      '未找到 badware-domains.json —— 已写入空清单（运行时横幅处理不会被该闸门拦截）',
+    );
+  }
+  const size = statSync(target).size;
+  report.push(['badware-domains.json', size, 'copy']);
+  console.log(`恶意域名清单：${size} B（badware-domains.json 已复制到 dist）`);
+}
+
 // Self-check: every file declared in the manifest must exist
 const manifest = JSON.parse(readFileSync(`${DIST}/manifest.json`, 'utf8'));
 const declared = [

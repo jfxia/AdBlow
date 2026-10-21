@@ -19,7 +19,9 @@
  *   - the mandatory manifest fields are present;
  *   - `_locales/` exists and carries the default locale's catalog;
  *   - `icons/` exists and every declared icon is a real, non-empty file;
- *   - `list-info.json` exists, parses, and names the bundled lists.
+ *   - `list-info.json` exists, parses, and names the bundled lists;
+ *   - `badware-domains.json` exists, parses, and carries a `domains` array (it is read by
+ *     the worker through `chrome.runtime.getURL`, so a manifest scan never sees it).
  * Beyond the required set it also fails on the known browser leftovers (`_metadata/`) and on
  * an archive whose file name states a different version than the manifest inside it, which
  * is what a stale or renamed artifact looks like.
@@ -193,6 +195,36 @@ export function auditPackage(buf, context = {}) {
     }
   }
 
+  /**
+   * The worker reads this through `chrome.runtime.getURL`, so the manifest and HTML scans
+   * cannot see it. Its absence would silently turn the badware gate into "no list" (which
+   * allows banner handling), i.e. a feature regression that no build log shows.
+   */
+  const badwareText = names.has('badware-domains.json')
+    ? readZipText(buf, 'badware-domains.json')
+    : null;
+  add(
+    'badware-domains.json is in the archive',
+    badwareText !== null,
+    badwareText === null ? 'badware-domains.json is missing from the archive root' : 'found',
+  );
+  if (badwareText !== null) {
+    let badware = null;
+    try {
+      badware = JSON.parse(badwareText);
+    } catch (e) {
+      add('badware-domains.json is valid JSON', false, e.message);
+    }
+    if (badware) {
+      const domains = badware.domains;
+      add(
+        'badware-domains.json has a domains array',
+        Array.isArray(domains),
+        Array.isArray(domains) ? `${domains.length} domains` : 'no `domains` array',
+      );
+    }
+  }
+
   // --- the manifest decides everything below
   const manifestText = names.has('manifest.json') ? readZipText(buf, 'manifest.json') : null;
   if (!add('manifest.json is at the archive root', manifestText !== null, manifestText === null ? 'manifest.json is missing from the archive root' : 'found')) {
@@ -335,7 +367,7 @@ export function runVerifyPackage(argv, io = {}) {
 
   log(
     `\n[ok] ${result.checks.length} checks passed: ${result.entryCount} entries, the manifest version, ` +
-      'every declared file, _locales, the icons and list-info.json are in the archive',
+      'every declared file, _locales, the icons, list-info.json and badware-domains.json are in the archive',
   );
   return 0;
 }

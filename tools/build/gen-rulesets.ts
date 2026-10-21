@@ -23,6 +23,7 @@ import {
   parseScriptletRule,
   type ScriptletRule,
 } from '../../src/engine/filterList/scriptlet.ts';
+import { BADWARE_LIST_ID, extractBadwareDomains } from '../../src/engine/badwareDomains.ts';
 
 const ROOT = new URL('../../', import.meta.url);
 const p = (rel: string) => fileURLToPath(new URL(rel, ROOT));
@@ -123,6 +124,34 @@ const { rulesets, report } = compileFilters(allFilters, {
 
 mkdirSync(OUT_DIR, { recursive: true });
 
+/**
+ * Badware-domain export for the runtime gate.
+ *
+ * `declarativeNetRequest.testMatchOutcome` cannot be used in a packaged extension, so the
+ * worker checks this build-time snapshot instead. Only `ublock-badware`'s bare domain
+ * anchors become entries; scoped rules and path rules are not evidence about the host.
+ * A missing source list still writes a valid empty file: "no list" means "no match", and
+ * cookie-banner handling must stay enabled (see src/engine/badwareDomains.ts).
+ */
+const badwareDomains = extractBadwareDomains(allFilters);
+const badwareSourcePresent = perList.some((l) => l.id === BADWARE_LIST_ID);
+const badwareJson = JSON.stringify(
+  { generatedFrom: BADWARE_LIST_ID, domains: badwareDomains },
+  null,
+  2,
+);
+writeFileSync(`${OUT_DIR}badware-domains.json`, badwareJson, 'utf8');
+if (!badwareSourcePresent) {
+  console.warn(
+    `  ${BADWARE_LIST_ID} 列表缺失：已写出空清单；运行时横幅处理不会被该闸门拦截`,
+  );
+}
+console.log(
+  `\n恶意域名清单：${badwareDomains.length} 个域名，${(badwareJson.length / 1024).toFixed(1)} KB ` +
+    `→ badware-domains.json` +
+    (badwareDomains.length === 0 ? '（空清单，不拦截任何站点）' : ''),
+);
+
 // Build-time self-check: fail hard on invalid rules. 119 rules carrying both
 // resourceTypes and excludedResourceTypes once made the whole extension fail to
 // load, with no signal on the Node side.
@@ -156,6 +185,8 @@ const fullReport = {
   rulesetSize: RULESET_SIZE,
   regexBudget: REGEX_BUDGET,
   cosmeticFiltersAvailable: cosmeticTotal,
+  badwareDomains: badwareDomains.length,
+  badwareDomainsBytes: badwareJson.length,
   perList,
   parseDropReasons: skipReasons,
   // report already holds budget / budgetUsed / budgetTruncated; spread last to
