@@ -31,8 +31,23 @@ const p = (rel: string) => fileURLToPath(new URL(rel, ROOT));
 const FILTERS_DIR = p('filters/');
 const OUT_DIR = p('filters/generated/');
 
-/** Total static-rule budget. MV3 guarantees about 30k; keep headroom. */
-const DEFAULT_BUDGET = 24_000;
+/**
+ * Total static-rule budget.
+ *
+ * Two different ceilings, and this constant sits under the smaller one:
+ *
+ *   - 30,000 is what MV3 **guarantees** every implementation will accept. Anything above it may
+ *     be dropped (with a warning) on a browser that enforces only the floor, so the budget stays
+ *     below it: 29,500 leaves room for engine-side rules.
+ *   - The measured headroom is far larger where the browser allows it: on Edge, with 23,278 rules
+ *     already loaded, `getAvailableStaticRuleCount()` reported 308,871, i.e. a ceiling near 332k.
+ *
+ * Measured 2026-10-22: this budget is **not binding** — `budgetTruncated` is 0, so no candidate is
+ * being left behind for lack of room. Raising it buys nothing until more rules become eligible;
+ * the real losses are at the parse stage (4,832 rules using options the compiler does not support)
+ * and on the cosmetic side (10,386 selectors available but not packed).
+ */
+const DEFAULT_BUDGET = 29_500;
 /** Rules per ruleset (shards allow toggling lists later). */
 const RULESET_SIZE = 4_000;
 /** Regex budget (DNR caps regexFilter separately and lower). */
