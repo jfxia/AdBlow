@@ -209,6 +209,10 @@
     "message": "セレクターが無効か安全でないか、一致する要素が多すぎます。修正してから保存してください。",
     "description": "Validation error shown when the entered selector cannot be saved."
   },
+  "contextMenuPick": {
+    "message": "AdBlow でこの要素をブロック",
+    "description": "Context-menu item shown on every page; opens the element picker with the right-clicked element already selected."
+  },
   "optionsPillPicked": {
     "message": "手動追加",
     "description": "Rule-manager pill marking a rule added by hand with the element picker."

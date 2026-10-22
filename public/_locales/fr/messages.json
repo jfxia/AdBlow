@@ -209,6 +209,10 @@
     "message": "Ce sélecteur est invalide, dangereux ou correspond à trop d’éléments. Modifiez-le puis réessayez.",
     "description": "Validation error shown when the entered selector cannot be saved."
   },
+  "contextMenuPick": {
+    "message": "Bloquer cet élément avec AdBlow",
+    "description": "Context-menu item shown on every page; opens the element picker with the right-clicked element already selected."
+  },
   "optionsPillPicked": {
     "message": "Ajouté à la main",
     "description": "Rule-manager pill marking a rule added by hand with the element picker."

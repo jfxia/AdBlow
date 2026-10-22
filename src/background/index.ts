@@ -18,6 +18,10 @@ import {
   createBadwareIndexLoader,
   isBadwareHost,
 } from '../engine/badwareDomains.ts';
+import {
+  CONTEXT_MENU_PICK_ID,
+  contextMenuPickTitle,
+} from '../engine/contextMenu.ts';
 
 /**
  * In-process cache of cosmetic shards (index → shard; null means unavailable, so a
@@ -167,8 +171,14 @@ function scheduleSync(): void {
   }, 400);
 }
 
-chrome.runtime.onInstalled.addListener(() => void syncDnrRules());
-chrome.runtime.onStartup.addListener(() => void syncDnrRules());
+chrome.runtime.onInstalled.addListener(() => {
+  void syncDnrRules();
+  registerContextMenu();
+});
+chrome.runtime.onStartup.addListener(() => {
+  void syncDnrRules();
+  registerContextMenu();
+});
 
 /**
  * Rebuild the rules on every Service Worker wake-up: DNR dynamic rules are
@@ -178,6 +188,72 @@ chrome.runtime.onStartup.addListener(() => void syncDnrRules());
  * Cost is negligible (one getDynamicRules + one idempotent updateDynamicRules).
  */
 void syncDnrRules();
+
+// ── Context menu: block the right-clicked element ───────────────────────────
+//
+// The menu only sends `{ preselected: true }` to the top frame; the content script owns
+// the DOM side (which element was right-clicked, whether it still exists). Registering
+// here, on every worker start, keeps the label in sync with the browser UI language even
+// when the extension was updated in place: Chrome persists menu items per session, while
+// the title is resolved from chrome.i18n at creation time.
+
+/**
+ * Serialised registration: the worker wakes for both onInstalled/onStartup and module
+ * evaluation, and two concurrent removeAll/create pairs would race — one removeAll could
+ * delete the item the other just created, and a duplicate id makes create fail.
+ */
+let menuRegistration: Promise<void> = Promise.resolve();
+
+function registerContextMenu(): void {
+  menuRegistration = menuRegistration
+    .then(async () => {
+      // removeAll first: this is also what makes a retry after a failed create safe.
+      await chrome.contextMenus.removeAll();
+      chrome.contextMenus.create(
+        {
+          id: CONTEXT_MENU_PICK_ID,
+          title: contextMenuPickTitle((key) => chrome.i18n.getMessage(key)),
+          // 'all' also covers links, images and selections: the item must be reachable
+          // wherever the user sees the element they want to hide.
+          contexts: ['all'],
+        },
+        () => {
+          // Must be read inside the callback, or Chrome logs an unchecked lastError.
+          const error = chrome.runtime.lastError;
+          if (error) console.warn('[adblow] 创建右键菜单失败', error.message);
+        },
+      );
+    })
+    .catch((error) => {
+      // A missing menu only hides a shortcut; DNR sync and messaging must keep working.
+      console.warn('[adblow] 右键菜单注册失败', error);
+    });
+}
+
+registerContextMenu();
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== CONTEXT_MENU_PICK_ID) return;
+  const tabId = tab?.id;
+  if (tabId === undefined) return;
+
+  // frameId 0 on purpose: the right-click recorder and the picker both live in the top
+  // document, and iframe listeners reject the message. `preselected` tells the content
+  // script to use the recorded element instead of asking for another hover/click.
+  void chrome.tabs
+    .sendMessage(tabId, { type: 'start-picker', preselected: true }, { frameId: 0 })
+    .then((response) => {
+      const reply = response as { ok?: boolean; reason?: string } | undefined;
+      if (!reply?.ok) console.debug('[adblow] 右键拾取未进入', reply?.reason);
+    })
+    .catch(() => {
+      // No receiver: chrome:// pages, the PDF viewer, or a tab loaded before the extension
+      // was installed/reloaded. Injecting a content script here would require the
+      // "scripting" permission, which this feature deliberately does not add.
+      console.debug('[adblow] 右键拾取消息没有接收方');
+    });
+});
+
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;

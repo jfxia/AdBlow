@@ -31,7 +31,7 @@ import { applyListCosmetic } from './listCosmetic.ts';
 import { recordDomains } from './domainLearn.ts';
 import { isSiteDisabled, isWallFixEnabled, markWallDetected, wallFixKey, writeStats } from './settings.ts';
 import { chromeLocal } from './storage.ts';
-import { createPicker } from './picker.ts';
+import { createPicker, resolvePreselect } from './picker.ts';
 import { t } from '../ui/i18n.ts';
 import { detectWall } from '../engine/antiAdblock.ts';
 import { consentGate } from '../engine/cookieConsent.ts';
@@ -96,7 +96,8 @@ const store = chromeLocal();
 // The picker object is created and its capture-phase blockers are installed at
 // document_start (module evaluation), *not* on first use: page scripts register their own
 // window handlers later, and only a listener installed earlier can stop a click before it
-// reaches them. `start()` merely mounts the shadow-root UI.
+// reaches them. `start()` mounts the shadow-root UI; the context-menu path additionally
+// passes the element that was right-clicked, so no second hover/click is needed.
 
 const picker = createPicker({
   doc: document,
@@ -113,15 +114,41 @@ const picker = createPicker({
 });
 picker.attach();
 
-/** Popup → content: enter picking mode (top frame only). */
+/**
+ * Element the most recent native context menu was opened on (top document only).
+ *
+ * Recorded in the capture phase so page handlers cannot hide or replace the target before
+ * this listener sees it. This event is the only DOM signal tied to the right-click itself:
+ * Chrome's menu item click arrives later as a runtime message with no element information,
+ * so the target has to be remembered here and re-validated when that message arrives.
+ */
+let contextTarget: Element | null = null;
+try {
+  if (window.top === window) {
+    window.addEventListener(
+      'contextmenu',
+      (event) => {
+        // `event.target` (not composedPath[0]) is deliberate: outside a shadow tree it is
+        // retargeted to the host, which is the node a page-level selector can describe.
+        contextTarget = event.target instanceof Element ? event.target : null;
+      },
+      { capture: true, passive: true },
+    );
+  }
+} catch (error) {
+  // Cross-origin frame or a torn-down context: no preselection, ordinary picking remains.
+  console.debug('[adblow] 右键目标记录不可用', error);
+}
+
+/** Popup or context menu → content: enter picking mode (top frame only). */
 function startPicker(
   message: unknown,
   _sender: unknown,
   respond: (response?: unknown) => void,
 ): boolean {
-  const msg = message as { type?: string } | null;
+  const msg = message as { type?: string; preselected?: boolean } | null;
   if (msg?.type !== 'start-picker') return false;
-  // Only the top frame owns the page the user sees; iframes return false so the popup's
+  // Only the top frame owns the page the user sees; iframes return false so the sender's
   // frame-0-targeted message is answered by the right document.
   if (window.top !== window) return false;
 
@@ -131,10 +158,22 @@ function startPicker(
         respond({ ok: false, reason: 'disabled' });
         return;
       }
-      picker.start();
-      respond({ ok: true });
+
+      let target: Element | null = null;
+      if (msg.preselected === true) {
+        const decision = resolvePreselect(contextTarget, document);
+        target = decision.target;
+        // Clear either way: a detached node must not be kept alive (or retried) by us.
+        contextTarget = null;
+        if (!target) {
+          console.debug(`[adblow] 右键预选不可用（${decision.fallback}），退回普通拾取`);
+        }
+      }
+
+      picker.start(target ?? undefined);
+      respond({ ok: true, preselected: target !== null });
     } catch (error) {
-      // Storage or DOM failure: tell the popup instead of leaving it waiting for a response.
+      // Storage or DOM failure: tell the sender instead of leaving it waiting for a response.
       console.warn('[adblow] 进入拾取模式失败', error);
       respond({ ok: false, reason: 'error' });
     }

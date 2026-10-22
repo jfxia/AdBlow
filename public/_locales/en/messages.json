@@ -209,6 +209,10 @@
     "message": "The selector is invalid, unsafe, or matches too many elements. Edit it and try again.",
     "description": "Validation error shown when the entered selector cannot be saved."
   },
+  "contextMenuPick": {
+    "message": "Block this element with AdBlow",
+    "description": "Context-menu item shown on every page; opens the element picker with the right-clicked element already selected."
+  },
   "optionsPillPicked": {
     "message": "Added manually",
     "description": "Rule-manager pill marking a rule added by hand with the element picker."

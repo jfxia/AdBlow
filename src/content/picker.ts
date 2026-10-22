@@ -3,8 +3,10 @@
  *
  * Interaction: highlight the hovered element with an outline, intercept the click that
  * selects it, then show a small panel where the generated CSS selector can be edited before
- * saving. Saving hides the element through the existing `hideElement` path and writes a
- * `picked` entry into `learned:<host>` (site-scoped by the storage key).
+ * saving. The context-menu entry point skips the first two steps: the caller passes the
+ * element that was right-clicked and the panel opens already filled in. Saving hides the
+ * element through the existing `hideElement` path and writes a `picked` entry into
+ * `learned:<host>` (site-scoped by the storage key).
  *
  * Two structural decisions:
  *   - the whole UI lives in a **closed shadow root**, so page CSS cannot restyle it and
@@ -15,7 +17,7 @@
  *     `stopImmediatePropagation` really keeps the click from reaching the page.
  */
 import { PICKER_MAX_MATCHES, pickerSelector, pickerSelectorProblem } from '../engine/picker.ts';
-import { PICKER_UI_ATTR, hideElement } from './engine.ts';
+import { PICKER_UI_ATTR, hideElement, isPickerUi } from './engine.ts';
 import { addPickedSelector } from './learn.ts';
 import type { KvStore } from './storage.ts';
 
@@ -43,7 +45,11 @@ export type PickerController = {
   /** Install the capture-phase blockers; call once, early (document_start). */
   attach(): void;
   detach(): void;
-  start(): void;
+  /**
+   * Mount the picker. With `preselected` the panel opens at once, already filled with that
+   * element's selector — the context-menu path has no second hover/click to wait for.
+   */
+  start(preselected?: Element): void;
   stop(): void;
   readonly active: boolean;
   /** Shadow root of the mounted UI, or null when inactive (exposed for tests). */
@@ -121,6 +127,40 @@ const PICKER_CSS = `
 `;
 
 const UNPICKABLE_TAGS = new Set(['HTML', 'BODY', 'HEAD']);
+
+/** Why a right-clicked element could not be preselected. */
+export type PreselectFallback = 'none' | 'detached' | 'picker-ui' | 'unpickable';
+
+export type PreselectDecision = {
+  /** The element to open the panel on, or null when the caller must fall back. */
+  target: Element | null;
+  /** Null when `target` exists; otherwise the reason the recorded element was unusable. */
+  fallback: PreselectFallback | null;
+};
+
+/**
+ * Can the element recorded at `contextmenu` time still be preselected?
+ *
+ * This runs when the native menu click arrives, an arbitrary time after the right-click:
+ * dynamic ads re-render, sites swap nodes on mousedown, and the user may right-click the
+ * picker's own panel while it is open. Any stale or self-referential target must degrade
+ * to ordinary picking rather than open the panel on a detached node (whose generated
+ * selector would be meaningless).
+ *
+ * Pure by design: no chrome.*, no timers, only the DOM passed in — unit-testable.
+ */
+export function resolvePreselect(
+  recorded: Element | null,
+  doc: Document,
+): PreselectDecision {
+  if (!recorded) return { target: null, fallback: 'none' };
+  if (isPickerUi(recorded)) return { target: null, fallback: 'picker-ui' };
+  // The picker itself refuses html/body/head (hiding them empties the page), so preselecting
+  // them would only show an error panel. Normal picking mode is the useful fallback.
+  if (UNPICKABLE_TAGS.has(recorded.tagName)) return { target: null, fallback: 'unpickable' };
+  if (!doc.documentElement?.contains(recorded)) return { target: null, fallback: 'detached' };
+  return { target: recorded, fallback: null };
+}
 
 export function createPicker(options: PickerOptions): PickerController {
   const { doc, host, store } = options;
@@ -452,10 +492,14 @@ export function createPicker(options: PickerOptions): PickerController {
       stop();
     },
 
-    start(): void {
+    start(preselected?: Element): void {
       if (active) return;
       buildUi();
       active = true;
+      // Context-menu path: the target is already known, so hover and the selecting click are
+      // skipped entirely. `select` shows the panel even when no selector can be generated
+      // (empty field + error), which is still better than silently doing nothing.
+      if (preselected) select(preselected);
     },
 
     stop,

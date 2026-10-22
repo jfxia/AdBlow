@@ -248,6 +248,48 @@ describe('拾取器保存：写入 picked 规则并立即隐藏', () => {
   });
 });
 
+describe('右键预选：直接打开已填好的面板', () => {
+  it('❗start(目标) 跳过悬停与点击，面板、高亮和选择器一次就位', () => {
+    const mounted = mount('<div class="ad-slot" id="target">ad</div>');
+    const target = mounted.wrap.firstElementChild!;
+    try {
+      mounted.picker.start(target);
+
+      assert.equal(mounted.picker.active, true);
+      assert.equal(panelOf(mounted.picker).hidden, false, '面板应立即显示');
+      assert.equal(inputOf(mounted.picker).value, '.ad-slot', '选择器应已生成并填入');
+      const highlight = mounted.picker.shadow!.querySelector('.highlight') as HTMLElement;
+      assert.equal(highlight.hidden, false, '目标元素应已高亮');
+    } finally {
+      mounted.picker.stop();
+      cleanup(mounted);
+    }
+  });
+
+  it('❗预选后用户仍可修改选择器并保存', async () => {
+    const mounted = mount('<div class="ad-slot" id="target">ad</div>');
+    const target = mounted.wrap.firstElementChild!;
+    try {
+      mounted.picker.start(target);
+      inputOf(mounted.picker).value = '#target';
+      click(saveOf(mounted.picker));
+
+      const selector = await Promise.race([
+        mounted.saved,
+        new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error('保存未在 2 秒内完成')), 2000),
+        ),
+      ]);
+      assert.equal(selector, '#target');
+      assert.equal(target.getAttribute('data-adblow-hidden'), '1');
+      assert.equal(mounted.picker.active, false);
+    } finally {
+      mounted.picker.stop();
+      cleanup(mounted);
+    }
+  });
+});
+
 describe('手动规则在判定层：命中即隐藏（用户显式选择优先）', () => {
   const options = (picked: string[]): JudgeOptions => ({
     injected: () => false,
