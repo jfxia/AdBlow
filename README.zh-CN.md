@@ -7,7 +7,7 @@
 **在过滤列表匹配之外，依据页面运行时的元素行为判定并拦截广告。**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![测试](https://img.shields.io/badge/tests-1124%20passing-brightgreen)](#测试与验收)
+[![测试](https://img.shields.io/badge/tests-1148%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与本地化)
 [![持续集成](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
 [![自动发版](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
@@ -64,7 +64,7 @@ AdBlow 换了一个判定依据：不看广告长什么样，看它在页面里�
 
 ### 网络层
 
-AdBlow 在构建阶段把 6 份过滤列表（EasyList、EasyList China、EasyPrivacy、uBlock 的 filters、privacy、badware）编译成 declarativeNetRequest 规则集。12.7 万条输入规则经过去重与校验，留下 20,913 条拦截规则和 2,365 条例外规则，分装在 6 卷规则集里。十万余个域名锚点则被合并成 114 条规则。域名锚点本身体积大，逐条保留既撑大安装包，也更快撞上浏览器对静态规则数量的上限。
+AdBlow 在构建阶段把 6 份过滤列表（EasyList、EasyList China、EasyPrivacy、uBlock 的 filters、privacy、badware）编译成 declarativeNetRequest 规则集。12.7 万条输入规则经过去重与校验，留下 21,118 条拦截规则和 2,365 条例外规则，分装在 6 卷规则集里。十万余个域名锚点则被合并成 114 条规则。域名锚点本身体积大，逐条保留既撑大安装包，也更快撞上浏览器对静态规则数量的上限。
 
 ### 元素隐藏
 
@@ -129,7 +129,7 @@ pnpm build          # 产出 dist/
 ## 构建与打包
 
 ```bash
-pnpm test           # 1124 项单元与集成测试，单进程内执行
+pnpm test           # 1148 项单元与集成测试，单进程内执行
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 与商店图标）
@@ -202,7 +202,7 @@ tools/
   e2e/             24 类真实浏览器验收；活站端到端
   release/         审计、zip 打包、商店截图生成
   diagnostics/     可在控制台直接执行的诊断脚本，用于定位站点异常
-tests/             1124 项单元与集成测试（jsdom）
+tests/             1148 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
 
@@ -220,7 +220,7 @@ public/            manifest、_locales、图标
 ## 测试与验收
 
 ```bash
-node tests/run-all.ts           # 1124 项测试，0 失败
+node tests/run-all.ts           # 1148 项测试，0 失败
 node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
 ```
 

@@ -48,9 +48,10 @@ export function badwareDomainFromPattern(pattern: string): string | null {
 /**
  * Domains to export from the parsed filters.
  *
- * Scoped rules (`$domain=...`) are skipped: the domain is only badware in the context of
- * another site. Exceptions (`@@`) subtract from the block set, and `$badfilter` rules are
- * ignored because they cancel another rule. The result is lowercase, unique and sorted.
+ * Scoped rules (`$domain=...`, `$to=...`, `$denyallow=...`) are skipped: the domain is
+ * only badware in the context of another site. Exceptions (`@@`) subtract from the block
+ * set, and `$badfilter` rules are ignored because they cancel another rule. The result is
+ * lowercase, unique and sorted.
  */
 export function extractBadwareDomains(
   filters: readonly ParsedFilter[],
@@ -64,6 +65,12 @@ export function extractBadwareDomains(
     if (filter.badfilter) continue;
     if (filter.initiatorDomains?.length) continue;
     if (filter.excludedInitiatorDomains?.length) continue;
+    // Same rule for target scoping (`$to=` / `$denyallow=`): the host's badness is
+    // then conditional on where the request goes. Measured examples would otherwise
+    // add legitimate hosts to the runtime gate (`||roblox.com.$all,to=~cloudflare.net`,
+    // whose trailing-dot pattern still parses to `roblox.com`).
+    if (filter.requestDomains?.length) continue;
+    if (filter.excludedRequestDomains?.length) continue;
     const domain = badwareDomainFromPattern(filter.pattern);
     if (!domain) continue;
     if (filter.exception) allowed.add(domain);

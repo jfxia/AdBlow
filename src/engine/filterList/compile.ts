@@ -36,6 +36,21 @@ export type DnrCondition = {
    * hundred rules instead of exhausting the 30k budget one rule at a time.
    */
   requestDomains?: string[];
+  /**
+   * Hosts the rule must not touch: `$denyallow=` and the `~` half of `$to=`.
+   *
+   * Coexists with `requestDomains` on purpose — the docs allow both, and DNR then
+   * applies "target is one of these AND is not one of those". The exclusion is
+   * resolved by longest suffix match, so an excluded subdomain beats an included
+   * TLD (`requestDomains: ['com']` + `excludedRequestDomains: ['bank.com']`).
+   *
+   * Known gap when both are present: a *shorter* excluded domain does not veto a
+   * longer included one (`$to=sub.a.com` + `$denyallow=a.com` still fires on
+   * `x.sub.a.com`), because DNR compares suffix lengths. One rule cannot express a
+   * stronger exclusion; the combination is rare (53 rules today), and the failure
+   * direction is "blocks where the list allowed", never the reverse.
+   */
+  excludedRequestDomains?: string[];
   isUrlFilterCaseSensitive?: boolean;
   resourceTypes?: ResourceType[];
   excludedResourceTypes?: ResourceType[];
@@ -183,6 +198,8 @@ function canonicalKey(exception: boolean, important: boolean, c: DnrCondition): 
     c.domainType ?? '',
     [...(c.initiatorDomains ?? [])].sort(),
     [...(c.excludedInitiatorDomains ?? [])].sort(),
+    [...(c.requestDomains ?? [])].sort(),
+    [...(c.excludedRequestDomains ?? [])].sort(),
   ]);
 }
 
@@ -197,6 +214,8 @@ function badfilterKey(f: ParsedFilter): string {
     f.domainType ?? '',
     [...(f.initiatorDomains ?? [])].sort(),
     [...(f.excludedInitiatorDomains ?? [])].sort(),
+    [...(f.requestDomains ?? [])].sort(),
+    [...(f.excludedRequestDomains ?? [])].sort(),
   ]);
 }
 
@@ -215,6 +234,9 @@ function valueOf(f: ParsedFilter): number {
 
   if (f.initiatorDomains?.length) v -= 50;
   if (f.excludedInitiatorDomains?.length) v -= 20;
+  // Narrower scope than the same pattern unscoped, so rank it like `$domain=`.
+  if (f.requestDomains?.length) v -= 50;
+  if (f.excludedRequestDomains?.length) v -= 20;
   if (f.domainType === 'thirdParty') v += 10;
   if (f.important) v += 30;
   return v;
@@ -250,6 +272,10 @@ function toCandidate(
   if (f.initiatorDomains?.length) condition.initiatorDomains = f.initiatorDomains;
   if (f.excludedInitiatorDomains?.length) {
     condition.excludedInitiatorDomains = f.excludedInitiatorDomains;
+  }
+  if (f.requestDomains?.length) condition.requestDomains = f.requestDomains;
+  if (f.excludedRequestDomains?.length) {
+    condition.excludedRequestDomains = f.excludedRequestDomains;
   }
 
   const allowMainFrame = opts.allowMainFrame;
@@ -298,6 +324,12 @@ function domainAnchorOf(c: Candidate): { domain: string } | null {
   if (c.regex) return null;
   if (c.condition.initiatorDomains?.length) return null;
   if (c.condition.excludedInitiatorDomains?.length) return null;
+  // A `$to=` / `$denyallow=` rule is scoped to specific target hosts; merging it
+  // with the global `||domain^` rule of the same domain would drop that scope
+  // (the merge keeps only the type union), blocking or allowing hosts the list
+  // author explicitly excluded.
+  if (c.condition.requestDomains?.length) return null;
+  if (c.condition.excludedRequestDomains?.length) return null;
   const m = /^\|\|([a-z0-9.-]+)\^?$/i.exec(c.condition.urlFilter ?? '');
   if (!m) return null;
   // Only well-formed domains qualify: upstream lists contain fragments such as
@@ -489,6 +521,10 @@ function packDomainAnchors(list: Candidate[]): {
     // Rules with initiatorDomains cannot share one domain table (different scope)
     if (c.condition.initiatorDomains?.length) continue;
     if (c.condition.excludedInitiatorDomains?.length) continue;
+    // Packing writes the pattern domains into requestDomains, which would overwrite
+    // the `$to=` list and widen a target-scoped rule to every host.
+    if (c.condition.requestDomains?.length) continue;
+    if (c.condition.excludedRequestDomains?.length) continue;
 
     const rest: DnrCondition = { ...c.condition };
     delete rest.urlFilter;
@@ -604,6 +640,8 @@ export function compileFilters(
     !c.regex &&
     !c.condition.initiatorDomains?.length &&
     !c.condition.excludedInitiatorDomains?.length &&
+    !c.condition.requestDomains?.length &&
+    !c.condition.excludedRequestDomains?.length &&
     /^\|\|[a-z0-9.-]+\^$/i.test(c.condition.urlFilter ?? '');
 
   const packable = all.filter(isPackable);

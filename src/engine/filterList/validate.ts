@@ -68,6 +68,7 @@ export function normalizeUrlFilter(urlFilter: string): { value: string; changed:
 }
 const DOMAIN_RE = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
 const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+const SINGLE_LABEL_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
 
 /**
  * Whether a value is genuinely usable as a `requestDomains` entry (or IPv4 literal).
@@ -83,6 +84,25 @@ export function isValidRequestDomain(value: string): boolean {
   const m = IPV4_RE.exec(value);
   if (m) return m.slice(1).every((o) => Number(o) <= 255);
   return false;
+}
+
+/**
+ * Whether a value may appear in a DNR domain list (`requestDomains`,
+ * `excludedRequestDomains`, and by extension the initiator lists).
+ *
+ * Looser than isValidRequestDomain by one label on purpose: `$to=com` means "any
+ * .com host", and Chromium's domain lists accept it — `PopulateIncludedAndExcludedDomains`
+ * (components/url_pattern_index) only rejects non-ASCII entries and trims trailing
+ * dots, while matching uses `url::DomainIs` plus a longest-suffix comparison, which
+ * a single label supports. Packing still requires a full domain, because a packed
+ * table is built from `||domain^` patterns and `com` there would mean every .com site.
+ *
+ * Non-ASCII is rejected because Chromium refuses a rule whose domain entry is not
+ * ASCII (internationalized hosts must be punycode).
+ */
+export function isValidDomainListEntry(value: string): boolean {
+  if (isValidRequestDomain(value)) return true;
+  return SINGLE_LABEL_RE.test(value);
 }
 
 export type RuleProblem = { ruleset: number; ruleId: number; problem: string };
@@ -133,7 +153,14 @@ export function validateRuleset(rules: DnrListRule[], rulesetIndex: number): Rul
 
     if (c.requestDomains && c.requestDomains.length === 0) at('requestDomains 为空数组');
     for (const d of c.requestDomains ?? []) {
-      if (!isValidRequestDomain(d)) at(`requestDomains 含非法域名: ${d}`);
+      if (!isValidDomainListEntry(d)) at(`requestDomains 含非法域名: ${d}`);
+    }
+
+    if (c.excludedRequestDomains && c.excludedRequestDomains.length === 0) {
+      at('excludedRequestDomains 为空数组');
+    }
+    for (const d of c.excludedRequestDomains ?? []) {
+      if (!isValidDomainListEntry(d)) at(`excludedRequestDomains 含非法域名: ${d}`);
     }
 
     if (c.initiatorDomains && c.initiatorDomains.length === 0) at('initiatorDomains 为空数组');

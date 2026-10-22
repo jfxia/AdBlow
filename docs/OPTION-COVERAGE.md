@@ -4,7 +4,7 @@
 原因里的选项名。解析器遇到第一个不支持的选项就返回，因此"该选项的规则数"是最小值；另用一次原始
 选项串扫描给出上界，两组数字都列在这里。
 
-扫描结果（2026-10-22）：规则行 169,113；因不支持的选项丢弃 **4,832** 条，因未知选项丢弃 **362** 条。
+扫描结果（2026-10-22）：规则行 169,113；因不支持的选项丢弃 **4,514** 条，因未知选项丢弃 **362** 条。
 
 ## 一、按选项排名（首个触发选项）
 
@@ -13,12 +13,12 @@
 | `popup` | 3,011 | 51 | 3,062 | 能，走现有的 popup 守卫（见下） |
 | `ghide` | 0 | 405 | 405 | 能，但对我们等于空操作 |
 | `generichide` | 0 | 366 | 366 | 能，但对我们等于空操作 |
-| `to` | 241 | 0 | 241 | 能，映射到 `requestDomains` |
+| `to` | 241 | 0 | 241 | **已实现**，映射到 `requestDomains` |
 | `redirect` | 230 | 0 | 230 | 能，需随包提供替代资源 |
 | `removeparam` | 216 | 6 | 222 | 能，映射到 `redirect.transform.removeParams` |
 | `urlskip` | 203 | 0 | 203 | 不能，uBO 私有 |
 | `redirect-rule` | 80 | 2 | 82 | 能，同 `redirect` |
-| `denyallow` | 79 | 0 | 79 | 能，映射到 `excludedRequestDomains` |
+| `denyallow` | 79 | 0 | 79 | **已实现**，映射到 `excludedRequestDomains` |
 | `/$script`、`/$doc`、`/$image` 等 | 75 | 24 | 99 | 这是解析缺陷，不是选项缺失 |
 | `csp` | 38 | 1 | 39 | 不能，DNR 没有对应能力 |
 | `ipaddress`、`replace`、`rewrite`、`reason`、`method`、`permissions`、`genericblock`、`uritransform`、`popunder` | 约 100 | 约 30 | 约 130 | 多数不能 |

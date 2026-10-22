@@ -7,7 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-1124%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-1148%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 [![CI](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
 [![auto-release](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
@@ -89,7 +89,7 @@ documentation in October 2026; corrections are welcome.
 
 AdBlow compiles six filter lists (EasyList, EasyList China, EasyPrivacy, and uBlock's filters,
 privacy and badware) into declarativeNetRequest rulesets at build time. Of 128,023 input rules,
-deduplication and validation keep 20,913 block rules and 2,365 exceptions across six rulesets.
+deduplication and validation keep 21,118 block rules and 2,365 exceptions across six rulesets.
 106,595 domain anchors are collapsed into 114 rules: kept one per domain, the anchors would both
 inflate the package and reach the browser's static-rule ceiling sooner.
 
@@ -192,7 +192,7 @@ step is required. If they are unreachable altogether, the same lists are attache
 ## Build and package
 
 ```bash
-pnpm test           # 1124 unit and integration tests, run in-process
+pnpm test           # 1148 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -290,7 +290,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             1124 unit and integration tests (jsdom)
+tests/             1148 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -315,7 +315,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 1124 tests, 0 failures
+node tests/run-all.ts           # 1148 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 

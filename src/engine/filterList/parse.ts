@@ -29,6 +29,10 @@ export type ParsedFilter = {
   initiatorDomains?: string[];
   /** Negated half of `$domain=` (`~b.com`) → DNR excludedInitiatorDomains. */
   excludedInitiatorDomains?: string[];
+  /** Positive half of `$to=` → DNR requestDomains (the request's own target host). */
+  requestDomains?: string[];
+  /** `$denyallow=` and the `~` half of `$to=` → DNR excludedRequestDomains. */
+  excludedRequestDomains?: string[];
   /** `$third-party` / `$first-party` (and their `~` forms) → DNR domainType. */
   domainType?: 'firstParty' | 'thirdParty';
 };
@@ -85,9 +89,7 @@ const UNSUPPORTED_OPTIONS = new Set([
   'replace',
   'app',
   'sitekey',
-  'denyallow',
   'method',
-  'to',
   'from',
   'header',
   'strict1p',
@@ -102,6 +104,54 @@ const NEGATED_ONLY_OPTIONS = new Set(['~document', '~subdocument', '~popup', '~a
 
 /** Pure-wildcard patterns, which would match everything. */
 const MATCHES_EVERYTHING = new Set(['*', '**', '|', '||', '^', '/', '/*']);
+
+/**
+ * One entry of a `$to=` / `$denyallow=` argument, already lowercased.
+ *
+ * A lone label is valid on purpose: `$to=com` (most of the real values) means
+ * "any .com host". DNR's domain lists accept single-label entries and match them
+ * by suffix (`url::DomainIs`), so the semantics carry over unchanged.
+ *
+ * Not valid: wildcards (`amazon.*` — DNR domain lists have no wildcard syntax),
+ * paths, ports, `^`, `|`, spaces, non-ASCII (Chrome rejects a rule whose domain
+ * entry is not ASCII) and empty labels (`a..b`, `.a.com`, `a.com.`).
+ */
+const DOMAIN_ENTRY_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/;
+
+/**
+ * Parse `$to=` / `$denyallow=` into the positive and excluded domain halves.
+ *
+ * Returns null when any entry is unusable. The caller then drops the whole rule:
+ * dropping just the entry would silently widen it (`$to=a.com|*` would mean "any
+ * host"), which is exactly the failure mode the module header warns about.
+ */
+function parseTargetDomains(
+  argument: string,
+  option: 'to' | 'denyallow',
+): { included: string[]; excluded: string[] } | null {
+  const included: string[] = [];
+  const excluded: string[] = [];
+
+  // No trimming of the items: whitespace inside an entry is a list bug, and
+  // silently repairing it would hide the bug — the rule is dropped instead.
+  for (const item of argument.split('|')) {
+    const negated = item.startsWith('~');
+    const value = (negated ? item.slice(1) : item).toLowerCase();
+    if (!DOMAIN_ENTRY_RE.test(value)) return null;
+    if (option === 'denyallow') {
+      // `denyallow` is already an exclusion list, so `~a.com` inside it would
+      // cancel the exclusion — i.e. mean nothing. Refuse rather than ignore it.
+      if (negated) return null;
+      excluded.push(value);
+    } else if (negated) {
+      excluded.push(value);
+    } else {
+      included.push(value);
+    }
+  }
+
+  return { included, excluded };
+}
 
 /**
  * Parse one filter line. Non-network rules (comments, cosmetic, scriptlets, HTML
@@ -150,6 +200,8 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
     const negative = new Set<ResourceType>();
     const initiators: string[] = [];
     const excludedInitiators: string[] = [];
+    const targets: string[] = [];
+    const excludedTargets: string[] = [];
 
     for (const rawOpt of optionText.split(',')) {
       const opt = rawOpt.trim().toLowerCase();
@@ -189,6 +241,22 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
         continue;
       }
 
+      // `~to=` / `~denyallow=`: negating the *option* is a different constraint we
+      // do not model; reading it as the positive option would invert the rule.
+      if (opt.startsWith('~to=') || opt.startsWith('~denyallow=')) {
+        return { kind: 'skip', raw, reason: `unsupported-option:${opt.slice(0, opt.indexOf('='))}` };
+      }
+
+      // `$to=` and `$denyallow=` both constrain the request's own target host.
+      if (opt.startsWith('to=') || opt.startsWith('denyallow=')) {
+        const option = opt.startsWith('to=') ? 'to' : 'denyallow';
+        const parsed = parseTargetDomains(opt.slice(option.length + 1), option);
+        if (!parsed) return { kind: 'skip', raw, reason: `bad-option-argument:${option}` };
+        targets.push(...parsed.included);
+        excludedTargets.push(...parsed.excluded);
+        continue;
+      }
+
       if (NEGATED_ONLY_OPTIONS.has(opt)) {
         return { kind: 'skip', raw, reason: `unsupported-option:${opt}` };
       }
@@ -216,6 +284,12 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
     if (negative.size) filter.excludedResourceTypes = [...negative];
     if (initiators.length) filter.initiatorDomains = initiators;
     if (excludedInitiators.length) filter.excludedInitiatorDomains = excludedInitiators;
+    // Dedupe and sort so the same input always compiles to the same rule (diffable,
+    // testable, and identical DNR conditions can then share one signature).
+    if (targets.length) filter.requestDomains = [...new Set(targets)].sort();
+    if (excludedTargets.length) {
+      filter.excludedRequestDomains = [...new Set(excludedTargets)].sort();
+    }
   }
 
   if (MATCHES_EVERYTHING.has(pattern)) return { kind: 'skip', raw, reason: 'match-everything' };

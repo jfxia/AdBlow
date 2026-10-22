@@ -68,6 +68,17 @@ describe('badware：域名锚点提取', () => {
     assert.deepEqual(domains, []);
   });
 
+  it('带 $to= / $denyallow= 作用域的规则同样不标黑', () => {
+    // Real list lines: `||roblox.com.$all,to=~cloudflare.net` would otherwise add the
+    // legitimate roblox.com to the runtime gate once $to= compiles.
+    const domains = extractBadwareDomains([
+      filter('||roblox.com^', { source: BADWARE_LIST_ID, requestDomains: ['evil.net'] }),
+      filter('||bad.com^', { source: BADWARE_LIST_ID, excludedRequestDomains: ['keep.com'] }),
+      filter('||plain.com^', { source: BADWARE_LIST_ID }),
+    ]);
+    assert.deepEqual(domains, ['plain.com']);
+  });
+
   it('例外行从黑名单里扣除；badfilter 忽略', () => {
     const domains = extractBadwareDomains([
       filter('||a.com^', { source: BADWARE_LIST_ID }),

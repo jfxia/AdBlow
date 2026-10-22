@@ -91,6 +91,80 @@ describe('parseFilterLine：网络规则基本形态', () => {
   });
 });
 
+// `$to=` (target host) and `$denyallow=` (never touch these targets) both map onto
+// DNR's domain lists, so they must survive compile as requestDomains /
+// excludedRequestDomains — and an unusable entry must drop the whole rule, never just
+// the entry (that would widen `$to=a.com|*` to "any host").
+describe('parseFilterLine：$to= 与 $denyallow=', () => {
+  it('$to= 多项映射到 requestDomains', () => {
+    assert.deepEqual(net('||ads.example^$to=a.com|b.com').requestDomains, ['a.com', 'b.com']);
+  });
+
+  it('$to= 的 ~ 项进 excludedRequestDomains', () => {
+    const f = net('||ads.example^$to=a.com|~b.com');
+    assert.deepEqual(f.requestDomains, ['a.com']);
+    assert.deepEqual(f.excludedRequestDomains, ['b.com']);
+  });
+
+  it('$to= 可以全是反向项（只排除）', () => {
+    const f = net('||ads.example^$to=~a.com|~b.com');
+    assert.equal(f.requestDomains, undefined);
+    assert.deepEqual(f.excludedRequestDomains, ['a.com', 'b.com']);
+  });
+
+  it('$to= 接受单标签（com 表示任意 .com 目标）', () => {
+    assert.deepEqual(net('||ads.example^$to=com|net').requestDomains, ['com', 'net']);
+  });
+
+  it('$denyallow= 映射到 excludedRequestDomains', () => {
+    const f = net('||ads.example^$denyallow=a.com|b.com');
+    assert.equal(f.requestDomains, undefined);
+    assert.deepEqual(f.excludedRequestDomains, ['a.com', 'b.com']);
+  });
+
+  it('$to= 与 $denyallow= 同时出现时两者都保留', () => {
+    const f = net('||ads.example^$to=a.com|~b.com,denyallow=c.com');
+    assert.deepEqual(f.requestDomains, ['a.com']);
+    assert.deepEqual(f.excludedRequestDomains, ['b.com', 'c.com']);
+  });
+
+  it('域名统一小写、去重并排序', () => {
+    // Order of appearance is deliberately reversed, with a case variant and a duplicate.
+    const f = net('||ads.example^$to=Z.com|a.com|z.com|~Y.com|~b.com');
+    assert.deepEqual(f.requestDomains, ['a.com', 'z.com']);
+    assert.deepEqual(f.excludedRequestDomains, ['b.com', 'y.com']);
+  });
+
+  it('与 $domain= / $third-party 共存', () => {
+    const f = net('||ads.example^$third-party,domain=site.com|~other.com,to=t1.com,denyallow=t2.com');
+    assert.equal(f.domainType, 'thirdParty');
+    assert.deepEqual(f.initiatorDomains, ['site.com']);
+    assert.deepEqual(f.excludedInitiatorDomains, ['other.com']);
+    assert.deepEqual(f.requestDomains, ['t1.com']);
+    assert.deepEqual(f.excludedRequestDomains, ['t2.com']);
+  });
+
+  it('❗非法域名条目 → 丢掉整条规则，而不是只丢那一项', () => {
+    for (const arg of ['a.com|*', 'a.com/b', '', 'a.com|b com', '||x^', 'a.com|', '~', 'a..com']) {
+      assert.equal(skipReason(`||ads.example^$to=${arg}`), 'bad-option-argument:to', arg);
+      assert.equal(
+        skipReason(`||ads.example^$denyallow=${arg}`),
+        'bad-option-argument:denyallow',
+        arg,
+      );
+    }
+  });
+
+  it('❗$denyallow= 里的 ~ 项表达不了，整条丢弃而不是悄悄忽略', () => {
+    assert.equal(skipReason('||ads.example^$denyallow=~a.com'), 'bad-option-argument:denyallow');
+  });
+
+  it('❗~to= / ~denyallow= 不按正向选项解析', () => {
+    assert.match(skipReason('||ads.example^$~to=a.com'), /unsupported-option:~to/);
+    assert.match(skipReason('||ads.example^$~denyallow=a.com'), /unsupported-option:~denyallow/);
+  });
+});
+
 describe('parseFilterLine：安全边界（丢弃而不是放宽）', () => {
   it('❗表达不了的选项 → 整条丢弃（忽略会放宽拦截范围）', () => {
     for (const opt of [
@@ -104,7 +178,6 @@ describe('parseFilterLine：安全边界（丢弃而不是放宽）', () => {
       'inline-script',
       'replace=/a/b/',
       'sitekey=abc',
-      'denyallow=x.com',
       'method=get',
     ]) {
       const reason = skipReason(`||x.com^$${opt}`);
@@ -309,5 +382,83 @@ describe('compileFilters：编译与预算', () => {
   it('domainType 被保留', () => {
     const { rulesets } = compileFilters(parseAll(['||x.com^$third-party']), opts);
     assert.equal(rulesets.flat()[0]!.condition.domainType, 'thirdParty');
+  });
+});
+
+describe('compileFilters：$to= / $denyallow= → 请求目标域名条件', () => {
+  const parseAll = (lines: string[]) => parseList(lines.join('\n')).network;
+  const opts = { budget: 100, rulesetSize: 100, regexBudget: 10 };
+
+  it('$to= 编译成 requestDomains', () => {
+    const { rulesets } = compileFilters(parseAll(['||ads.example^$to=a.com|b.com']), opts);
+    const c = rulesets.flat()[0]!.condition;
+    assert.deepEqual(c.requestDomains, ['a.com', 'b.com']);
+    assert.equal(c.excludedRequestDomains, undefined);
+  });
+
+  it('$to= 的反向项编译成 excludedRequestDomains', () => {
+    const { rulesets } = compileFilters(parseAll(['||ads.example^$to=a.com|~b.com']), opts);
+    const c = rulesets.flat()[0]!.condition;
+    assert.deepEqual(c.requestDomains, ['a.com']);
+    assert.deepEqual(c.excludedRequestDomains, ['b.com']);
+  });
+
+  it('$denyallow= 编译成 excludedRequestDomains', () => {
+    const { rulesets } = compileFilters(parseAll(['||ads.example^$denyallow=a.com']), opts);
+    assert.deepEqual(rulesets.flat()[0]!.condition.excludedRequestDomains, ['a.com']);
+  });
+
+  it('❗$to= 与 $denyallow= 共存：两个字段同时出现（DNR 允许并存）', () => {
+    const { rulesets } = compileFilters(
+      parseAll(['||ads.example^$to=a.com|~b.com,denyallow=c.com']),
+      opts,
+    );
+    const c = rulesets.flat()[0]!.condition;
+    assert.deepEqual(c.requestDomains, ['a.com']);
+    assert.deepEqual(c.excludedRequestDomains, ['b.com', 'c.com']);
+  });
+
+  it('与 $domain= / $third-party 同时生效', () => {
+    const { rulesets } = compileFilters(
+      parseAll(['||ads.example^$third-party,domain=site.com,to=t.com']),
+      opts,
+    );
+    const c = rulesets.flat()[0]!.condition;
+    assert.equal(c.domainType, 'thirdParty');
+    assert.deepEqual(c.initiatorDomains, ['site.com']);
+    assert.deepEqual(c.requestDomains, ['t.com']);
+  });
+
+  it('❗带 $to= 的规则不参与域名打包（否则 $to 列表会被模式域名覆盖）', () => {
+    const { rulesets, report } = compileFilters(
+      parseAll(['||a.com^', '||b.com^$to=c.com']),
+      opts,
+    );
+    assert.equal(report.packedDomains, 1, '只有无作用域的 a.com 能打包');
+    const scoped = rulesets.flat().find((r) => r.condition.urlFilter === '||b.com^')!;
+    assert.deepEqual(scoped.condition.requestDomains, ['c.com']);
+    assert.ok(rulesets.flat().some((r) => r.condition.requestDomains?.includes('a.com')));
+  });
+
+  it('❗带 $denyallow= 的规则不参与域名归并（作用域不能被抹掉）', () => {
+    const { rulesets } = compileFilters(
+      parseAll(['||a.com^', '@@||a.com^$denyallow=b.com']),
+      opts,
+    );
+    const exception = rulesets.flat().find((r) => r.action.type === 'allow')!;
+    assert.equal(exception.condition.urlFilter, '||a.com^');
+    assert.equal(exception.condition.requestDomains, undefined);
+    assert.deepEqual(exception.condition.excludedRequestDomains, ['b.com']);
+  });
+
+  it('❗同一模式不同 $to= 不会被去重成一条', () => {
+    const { rulesets } = compileFilters(
+      parseAll(['||a.com^$to=x.com', '||a.com^$to=y.com']),
+      opts,
+    );
+    assert.deepEqual(
+      rulesets.flat().map((r) => r.condition.requestDomains),
+      [['x.com'], ['y.com']],
+    );
   });
 });

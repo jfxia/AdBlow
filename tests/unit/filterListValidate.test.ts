@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MAX_REGEX_RULES,
+  isValidDomainListEntry,
   isValidRequestDomain,
   normalizeUrlFilter,
   urlFilterProblem,
@@ -44,6 +45,20 @@ describe('isValidRequestDomain', () => {
       '',
     ]) {
       assert.equal(isValidRequestDomain(d), false, d);
+    }
+  });
+});
+
+describe('isValidDomainListEntry', () => {
+  it('接受完整域名、IPv4 与单标签（$to=com 表示任意 .com 目标）', () => {
+    for (const d of ['example.com', 'a-b.co.uk', 'com', 'gov', '0.0.0.1']) {
+      assert.equal(isValidDomainListEntry(d), true, d);
+    }
+  });
+
+  it('❗拒绝通配符、路径、非 ASCII、空标签与残缺域名', () => {
+    for (const d of ['amazon.*', 'a.com/b', '', 'a b.com', '||x^', 'allyes.', '.a.com', 'a..com', '广告.com']) {
+      assert.equal(isValidDomainListEntry(d), false, d);
     }
   });
 });
@@ -140,6 +155,34 @@ describe('validateRuleset', () => {
     );
     assert.equal(problems.length, 1);
     assert.match(problems[0]!.problem, /allyes\./);
+  });
+
+  it('单标签 requestDomains / excludedRequestDomains（$to=com）不报错', () => {
+    assert.deepEqual(
+      validateRuleset(
+        [
+          rule({
+            condition: { urlFilter: '||a^', requestDomains: ['com'], excludedRequestDomains: ['bank.com'] },
+          }),
+        ],
+        1,
+      ),
+      [],
+    );
+  });
+
+  it('excludedRequestDomains 的非法条目与空数组会被抓出来', () => {
+    const bad = validateRuleset(
+      [rule({ condition: { urlFilter: '||a^', excludedRequestDomains: ['amazon.*'] } })],
+      1,
+    );
+    assert.equal(bad.length, 1);
+    assert.match(bad[0]!.problem, /excludedRequestDomains/);
+    const empty = validateRuleset(
+      [rule({ condition: { urlFilter: '||a^', excludedRequestDomains: [] } })],
+      1,
+    );
+    assert.ok(empty.some((p) => /空数组/.test(p.problem)));
   });
 
   it('空数组会被抓出来', () => {
