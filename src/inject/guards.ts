@@ -27,6 +27,12 @@ import { isPopupAllowlistedHost } from './popupAllow.ts';
  * while the escape hatch must win over the list, or a user who just allowed popups on a site
  * would still have them blocked.
  *
+ * Rules 5-8 judge the **unwrapped** target when the window opens a same-site wrapper page that
+ * carries another absolute URL in a query parameter (`/pop?url=<encoded ad>`). Such a wrapper
+ * is same-site by its own host and used to pass rule 5, after which the page itself navigated
+ * to the ad -- the measured bypass on missav.live (2026-10-22). The wrapper is only a string
+ * we read before anything loads: no redirect is followed, only the first layer is unwrapped.
+ *
  * The cost is that a site opening a cross-site window from a `<button>` (OAuth buttons, "share
  * to X", payment redirects built by script) now needs either an `<a>` markup or the per-site
  * switch. That trade is deliberate: those cases are visible and fixable, a drive-by popunder is
@@ -61,6 +67,13 @@ export type OpenReason =
 export type OpenDecision = {
   allow: boolean;
   reason: OpenReason;
+  /**
+   * Absolute URL the decision was actually made about, after unwrapping a wrapper page's
+   * query parameter (see `unwrapOpenTarget`). The block record uses it so the rule manager
+   * names the host that would have loaded, not a stream of same-site wrappers. Absent when
+   * the target could not be parsed at all.
+   */
+  targetUrl?: string;
 };
 
 function urlOf(value: string, base: string): URL | null {
@@ -88,6 +101,71 @@ function matchesAnchor(anchor: URL, target: URL): boolean {
   return sameSite(anchor.hostname, target.hostname);
 }
 
+/** How many `decodeURIComponent` passes a query value may take (double encoding is common). */
+const MAX_PARAM_DECODE_PASSES = 2;
+
+/**
+ * An absolute `http(s)` URL, or null.
+ *
+ * Deliberately narrow: the value must *be* a URL. A relative reference (`/login`), another
+ * scheme (`javascript:`, `data:`) or a word (`abc`) is not a destination carried in a
+ * parameter, so it leaves the old judgement path untouched.
+ */
+function absoluteHttpUrl(value: string): URL | null {
+  const text = value.trim();
+  if (!/^https?:\/\//i.test(text)) return null;
+  try {
+    const parsed = new URL(text);
+    return parsed.hostname ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The real destination carried by a wrapper page, or null.
+ *
+ * A same-site wrapper (`/pop?url=<encoded ad>`) is judged same-site by its own host, then the
+ * wrapper redirects to the ad. Which parameter carries the destination is site-specific
+ * (`url`, `to`, `target`, `redirect`, …), so *every* value is tested and the first one that
+ * qualifies wins. Only a cross-site `http(s)` URL qualifies: a share or sign-in page that puts
+ * `https://same.site/...` or `https://accounts.google.com/...` in a parameter keeps its old
+ * judgement. Decoding is bounded (`MAX_PARAM_DECODE_PASSES`); a value that fails to decode
+ * after that is simply not a wrapper target. Nothing is fetched or followed here -- this is
+ * one string read before the window opens, not redirect tracing.
+ */
+function wrapperTargetOf(wrapper: URL, pageHost: string): string | null {
+  for (const value of wrapper.searchParams.values()) {
+    let candidate = value;
+    for (let pass = 0; ; pass += 1) {
+      const target = absoluteHttpUrl(candidate);
+      if (target && !sameSite(target.hostname, pageHost)) return target.href;
+      if (pass >= MAX_PARAM_DECODE_PASSES) break;
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(candidate);
+      } catch {
+        break; // Malformed percent sequence: keep the value as delivered.
+      }
+      if (decoded === candidate) break;
+      candidate = decoded;
+    }
+  }
+  return null;
+}
+
+/**
+ * Absolute URL of the destination a `window.open` target really leads to, or null when the
+ * target is not a wrapper carrying a cross-site URL.
+ *
+ * Exported for the guard in `inject/index.ts`: the `$popup` denylist has to be checked against
+ * this URL too, or a listed host hidden behind a wrapper is never seen.
+ */
+export function unwrapOpenTarget(url: string, pageHost: string): string | null {
+  const wrapper = urlOf(url, `https://${pageHost}`);
+  return wrapper ? wrapperTargetOf(wrapper, pageHost) : null;
+}
+
 /**
  * Full policy decision, with the reason.
  *
@@ -105,36 +183,47 @@ export function decideOpen(request: OpenRequest): OpenDecision {
   // 2. A window with no user gesture is drive-by by definition.
   if (!hadUserGesture) return { allow: false, reason: 'no-gesture' };
 
+  // The target is read here rather than at rule 5 so that rule 4 can report the real host, but
+  // the *order* of the rules below is unchanged: the site switch and the `$popup` list still
+  // answer before a malformed URL does.
+  const wrapper = urlOf(url, `https://${pageHost}`);
+  const unwrappedHref = wrapper ? wrapperTargetOf(wrapper, pageHost) : null;
+  // A cross-site target carried by a same-site wrapper replaces the wrapper for rules 5-8.
+  const target = unwrappedHref ? (urlOf(unwrappedHref, `https://${pageHost}`) ?? wrapper) : wrapper;
+  const targetUrl = target?.href;
+
   // 3. The per-site escape hatch: the user asked for this site's popups, so everything with a
   //    gesture passes, including the `$popup` list below. Deliberately placed before rule 4.
-  if (request.siteAllowsPopups) return { allow: true, reason: 'site-permitted' };
+  if (request.siteAllowsPopups) return { allow: true, reason: 'site-permitted', targetUrl };
 
   // 4. The packaged `$popup` denylist outranks the allow rules below: a play button is still a
-  //    play button when it fires an ad window.
-  if (request.popupDenied) return { allow: false, reason: 'popup-list' };
+  //    play button when it fires an ad window. The caller checks the list against the unwrapped
+  //    target as well, so a listed host behind a wrapper lands here.
+  if (request.popupDenied) return { allow: false, reason: 'popup-list', targetUrl };
 
-  const target = urlOf(url, `https://${pageHost}`);
   if (!target) return { allow: false, reason: 'invalid-target' };
 
   // 5. The page's own windows (help, checkout, media player) stay allowed.
-  if (sameSite(target.hostname, pageHost)) return { allow: true, reason: 'same-site' };
+  if (sameSite(target.hostname, pageHost)) return { allow: true, reason: 'same-site', targetUrl };
 
   // 6. A real link to that site: the user clicked something that points at the same place.
+  //    The anchor is NOT unwrapped: an `<a href="/pop?url=<ad>">` is a link to the wrapper,
+  //    not evidence that the user meant the ad, so it does not whitelist the decoded target.
   const anchorHref = request.gestureAnchorHref;
   if (anchorHref) {
     const anchor = urlOf(anchorHref, `https://${pageHost}`);
     if (anchor && matchesAnchor(anchor, target)) {
-      return { allow: true, reason: 'anchor-target' };
+      return { allow: true, reason: 'anchor-target', targetUrl };
     }
   }
 
   // 7. Stable sign-in / checkout infrastructure (see popupAllow.ts).
   if (isPopupAllowlistedHost(target.hostname)) {
-    return { allow: true, reason: 'allowlisted-host' };
+    return { allow: true, reason: 'allowlisted-host', targetUrl };
   }
 
   // 8. Unknown cross-site target: refuse.
-  return { allow: false, reason: 'cross-site' };
+  return { allow: false, reason: 'cross-site', targetUrl };
 }
 
 /** Boolean view of `decideOpen`, matching the name older call sites use. */

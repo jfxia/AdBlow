@@ -11,7 +11,7 @@ import {
   looksLikeNavigationHijack,
   shouldBlockClick,
 } from './clickGuard.ts';
-import { decideOpen, looksLikeTrackingListener } from './guards.ts';
+import { decideOpen, looksLikeTrackingListener, unwrapOpenTarget } from './guards.ts';
 
 /**
  * MAIN world injection.
@@ -75,6 +75,10 @@ Object.defineProperty(window, 'open', {
   writable: false,
   value: (url?: string | URL, target?: string, features?: string): Window | null => {
     const href = String(url ?? '');
+    // A same-site wrapper (`/pop?url=<encoded ad>`) hides the real destination from the
+    // `$popup` list: the list is keyed by the host the window lands on. Check it against the
+    // unwrapped target as well, otherwise a wrapper defeats the denylist entirely.
+    const unwrappedHref = unwrapOpenTarget(href, location.hostname);
     const decision = decideOpen({
       url: href,
       pageHost: location.hostname,
@@ -82,20 +86,25 @@ Object.defineProperty(window, 'open', {
       gestureAnchorHref,
       // Passing location.href as the base resolves relative targets, so `//host/x` and
       // `/x` are judged by their real host instead of being skipped.
-      popupDenied: popupDeny.isDenied(href, location.href),
+      popupDenied:
+        popupDeny.isDenied(href, location.href) ||
+        (unwrappedHref !== null && popupDeny.isDenied(unwrappedHref)),
       // Read every call (it is one attribute lookup): the switch can be toggled while the
       // page is open, and caching it would keep the old answer until reload.
       siteAllowsPopups: readPopupAllowance(document),
     });
     if (!decision.allow) {
+      // The record and the log name the *real* destination: for a wrapper page the wrapper's
+      // host is the same site the user is already on, which says nothing about the block.
+      const realTarget = decision.targetUrl ?? href;
       if (decision.reason === 'popup-list') {
-        console.debug('[adblow] 已拦截 popup 弹窗', href);
+        console.debug('[adblow] 已拦截 popup 弹窗', realTarget);
       } else {
-        console.debug('[adblow] 已拦截 window.open', href, target, decision.reason);
+        console.debug('[adblow] 已拦截 window.open', href, target, decision.reason, realTarget);
       }
       // Leave a record the isolated world forwards to the worker (per-site count + last
       // target), so a site broken by the new default is diagnosable from the rule manager.
-      if (href) announcePopupBlock(document, href);
+      if (href) announcePopupBlock(document, realTarget);
       return null;
     }
     return rawOpen(url as string, target, features);
