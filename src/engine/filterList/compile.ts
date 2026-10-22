@@ -242,6 +242,32 @@ function valueOf(f: ParsedFilter): number {
   return v;
 }
 
+/**
+ * Convert a list's regex text into a DNR `regexFilter`, or null when DNR cannot accept it.
+ *
+ * Lists write regex rules as `/…/`; those slashes are syntax, not part of the pattern, and DNR
+ * rejects them. DNR runs RE2, which has no backreferences, lookaround, possessive quantifiers or
+ * `\C`, and **one** invalid `regexFilter` makes the whole ruleset fail to load, which makes the
+ * extension uninstallable. Measured 2026-10-22: `\1` in a badware rule (`…\?t=\1&cid=…`) broke
+ * every install, and the build self-check had not looked at regexes at all.
+ */
+export function dnrRegexFilter(pattern: string): string | null {
+  let body = pattern.trim();
+  if (body.length > 2 && body.startsWith('/') && body.endsWith('/')) body = body.slice(1, -1);
+  body = body.trim();
+  if (!body || body.length > 2000) return null;
+
+  if (/\\[1-9]/.test(body)) return null; // backreferences
+  if (/\(\?(?:<|=|!|>|#)/.test(body)) return null; // lookaround, atomic group, comment
+  if (/(?:[*+?]|\{\d+(?:,\d*)?\})\+/.test(body)) return null; // possessive quantifier
+  if (/\\[Ck]/.test(body)) return null; // \C, \k<name>
+
+  // DNR applies the regex to the URL, so a leading anchor is redundant; dropping it also avoids
+  // implementations that refuse anchored patterns.
+  if (body.startsWith('^')) body = body.slice(1);
+  return body;
+}
+
 function toCandidate(
   f: ParsedFilter,
   opts: Required<CompileOptions>,
@@ -251,7 +277,11 @@ function toCandidate(
   if (f.regex) {
     const simplified = simplifyRegex(f.pattern.slice(1, -1));
     if (simplified) condition.urlFilter = simplified;
-    else condition.regexFilter = f.pattern;
+    else {
+      const regex = dnrRegexFilter(f.pattern);
+      if (!regex) return { dropped: 'invalid-regex' };
+      condition.regexFilter = regex;
+    }
   } else {
     // DNR forbids a leading `||*`, and one illegal rule stops the whole extension
     // from installing, so normalize to `*` as the docs advise; counted in the report.
