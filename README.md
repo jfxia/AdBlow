@@ -137,6 +137,11 @@ data table is inlined in the script so that it takes effect before page scripts 
 
 ### Element picker
 
+![Picker panel: hover highlight and an editable selector](docs/images/element-picker.png)
+
+![Toolbar popup: site switch, counters and the picker entry](docs/images/popup-panel.png)
+
+
 Beyond automatic judgement, an element can be picked by hand: use "Pick an element" in the popup, or
 right-click anywhere and choose "Block this element with AdBlow", which opens the panel with that
 element already selected. The panel shows the generated selector (editable); saving hides the element
