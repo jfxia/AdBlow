@@ -5,6 +5,24 @@
 
 ---
 
+## v1.0.5
+
+### 中文（简体）
+
+- 新增元素选取器：在页面上拾取任意元素，为它生成一条只在本站生效的隐藏规则。元素当场隐藏，规则可在规则管理页看到（标记为「手动添加」）并随时撤销；手动规则不参与自动清理，不会因长期未命中被删除。
+- 新增右键菜单入口「使用 AdBlow 拦截该元素」：右键页面元素即可弹出拾取面板并预选该元素，确认后保存。为此新增 `contextMenus` 权限，不涉及浏览数据读取。
+- 自动处理 cookie 同意提示：默认点击「接受」；横幅若提供「拒绝全部」则优先拒绝。站点属于恶意域名清单、或用户在弹窗里关闭了该站点过滤时，不改动其横幅。只点击按钮，不隐藏元素。
+- 过滤规则增加约 205 条：支持 `$to` 与 `$denyallow` 两个选项（对应目标域名的包含与排除），并修正三处会让规则作用范围被静默放宽的问题。
+
+### English
+
+- Added the element picker: pick any element on a page and it becomes a hiding rule for that site only. The element is hidden immediately, the rule appears in the rule manager marked as manual, and it can be revoked at any time. Manual rules are exempt from the automatic caps and expiry.
+- Added the right-click entry "Block this element with AdBlow": the picker panel opens with the element under the cursor already selected. This adds the `contextMenus` permission, which does not grant access to browsing data.
+- Added automatic handling of cookie consent prompts: "Accept" is clicked by default, and "Reject all" is preferred when the same prompt offers it. Prompts on sites in the badware list, or on sites where filtering is switched off, are left alone. Only buttons are clicked; nothing is hidden.
+- About 205 more filter rules: `$to` and `$denyallow` are now supported (target-domain inclusion and exclusion), and three cases where a rule's scope could be silently widened were fixed.
+
+---
+
 ## v1.0.4
 
 ### 中文（简体）

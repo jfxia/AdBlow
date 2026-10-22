@@ -7,7 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-1148%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-1162%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 [![CI](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
 [![auto-release](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
@@ -178,7 +178,7 @@ pnpm build          # -> dist/
 Then enable Developer mode in `edge://extensions` (or `chrome://extensions`) and choose **Load
 unpacked**, pointing at the `dist/` directory.
 
-The store package is produced by `pnpm package` (`release/adblow-1.0.4-edge.zip`); v1.0.0 is already
+The store package is produced by `pnpm package` (`release/adblow-1.0.5-edge.zip`); v1.0.0 is already
 listed on the Edge Add-ons store. A release is assembled by three commands — `pnpm version:bump`,
 `pnpm package` and `pnpm release:github` (see [Build and package](#build-and-package)).
 
@@ -192,7 +192,7 @@ step is required. If they are unreachable altogether, the same lists are attache
 ## Build and package
 
 ```bash
-pnpm test           # 1148 unit and integration tests, run in-process
+pnpm test           # 1162 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -290,7 +290,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             1148 unit and integration tests (jsdom)
+tests/             1162 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -315,7 +315,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 1148 tests, 0 failures
+node tests/run-all.ts           # 1162 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 
@@ -411,5 +411,5 @@ keep their own licenses.
 ---
 
 <div align="center">
-<sub>AdBlow 1.0.4 · Manifest V3 · Edge &amp; Chrome</sub>
+<sub>AdBlow 1.0.5 · Manifest V3 · Edge &amp; Chrome</sub>
 </div>
