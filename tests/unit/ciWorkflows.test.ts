@@ -147,8 +147,12 @@ describe('the push and pull-request workflow', () => {
     assert.match(ciWf, /permissions:\n {2}contents: read/);
   });
 
-  it('cancels a superseded run of the same ref', () => {
-    assert.match(ciWf, /concurrency:[\s\S]{0,400}?group: ci-[\s\S]{0,400}?cancel-in-progress: true/);
+  it('cancels only pull-request runs, so a push always finishes', () => {
+    // A cancelled push run would skip the acceptance job entirely (measured 2026-10-22: three
+    // rapid pushes cancelled each other and a ruleset that broke installation reached master).
+    assert.match(ciWf, /concurrency:[\s\S]{0,400}?group: ci-/);
+    assert.match(ciWf, /cancel-in-progress: \$\{\{\s*github\.event_name == 'pull_request'\s*\}\}/);
+    assert.doesNotMatch(ciWf, /cancel-in-progress: true/);
   });
 });
 
