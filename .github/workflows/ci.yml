@@ -15,10 +15,15 @@ permissions:
   contents: read
 
 concurrency:
-  # A newer push to the same ref makes the running gate obsolete: cancel it. The group is
-  # per ref, so pushes to two branches do not cancel each other.
+  # The group is per ref, so pushes to two branches do not cancel each other.
+  #
+  # Cancelling is now limited to pull requests. Measured 2026-10-22: three pushes in a row
+  # cancelled each other, the run that loads dist/ in a real Edge never finished, and a ruleset
+  # that stopped the extension from installing at all still reached master. A branch gate that
+  # never runs is worse than a slow one, so a push always runs to completion; a pull request may
+  # still cancel, because there the newest commit is the one worth reporting on.
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
