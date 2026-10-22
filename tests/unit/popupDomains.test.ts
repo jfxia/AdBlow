@@ -41,7 +41,7 @@ function popupFilter(pattern: string, overrides: Partial<ParsedFilter> = {}): Pa
   };
 }
 
-function newDoc(url = 'https://missav.watch/'): Document {
+function newDoc(url = 'https://videos.example/'): Document {
   return new JSDOM('<!doctype html><html><head></head><body></body></html>', { url }).window
     .document;
 }
@@ -248,9 +248,9 @@ describe('MAIN world：从 DOM 读取名单（懒加载 + 失败放行）', () =
     const doc = newDoc();
     installPopupDenyElement(doc, ['ads.example']);
     const gate = createPopupDenyGate(doc);
-    assert.equal(gate.isDenied('https://ads.example/x', 'https://missav.watch/'), true);
-    assert.equal(gate.isDenied('https://sub.ads.example/x', 'https://missav.watch/'), true);
-    assert.equal(gate.isDenied('https://other.example/x', 'https://missav.watch/'), false);
+    assert.equal(gate.isDenied('https://ads.example/x', 'https://videos.example/'), true);
+    assert.equal(gate.isDenied('https://sub.ads.example/x', 'https://videos.example/'), true);
+    assert.equal(gate.isDenied('https://other.example/x', 'https://videos.example/'), false);
   });
 
   it('❗读不到名单（元素缺失 / JSON 坏 / 空文本）→ 放行', () => {
@@ -275,18 +275,18 @@ describe('MAIN world：从 DOM 读取名单（懒加载 + 失败放行）', () =
   it('不依赖启动顺序：先调用守卫、后写入元素，下一次调用就能命中', () => {
     const doc = newDoc();
     const gate = createPopupDenyGate(doc);
-    assert.equal(gate.isDenied('https://ads.example/x', 'https://missav.watch/'), false);
+    assert.equal(gate.isDenied('https://ads.example/x', 'https://videos.example/'), false);
     installPopupDenyElement(doc, ['ads.example']);
-    assert.equal(gate.isDenied('https://ads.example/x', 'https://missav.watch/'), true);
+    assert.equal(gate.isDenied('https://ads.example/x', 'https://videos.example/'), true);
   });
 
   it('相对地址按 base 解析后再比主机', () => {
     const doc = newDoc();
     installPopupDenyElement(doc, ['ads.example']);
     const gate = createPopupDenyGate(doc);
-    assert.equal(gate.isDenied('//ads.example/x', 'https://missav.watch/page'), true);
+    assert.equal(gate.isDenied('//ads.example/x', 'https://videos.example/page'), true);
     assert.equal(gate.isDenied('/local', 'https://ads.example/page'), true);
-    assert.equal(gate.isDenied('/local', 'https://missav.watch/page'), false);
+    assert.equal(gate.isDenied('/local', 'https://videos.example/page'), false);
   });
 
   it('空目标与不可解析目标放行（由手势策略单独判断）', () => {

@@ -5,6 +5,22 @@
 
 ---
 
+## v1.0.6
+
+### 中文（简体）
+
+- 拦截「点一下弹出广告窗口」：默认拒绝跨站开窗，只在有明确依据时放行（同站地址、指向同一地点的链接、登录/分享/支付这类固定基础设施），恶意站点名单作为附加的一层。被拦截的开窗按站点记录，可在规则管理页查看。
+- 识别跳板链接：解码查询参数里的绝对地址，按解码后的目标判定，记录写入真实目标。
+- 弹窗面板新增「允许本站弹窗」开关，判定误伤时可逐站放行。
+
+### English
+
+- Blocks click-triggered ad windows: a cross-site window is now refused by default and allowed only with a reason (same-site address, a link pointing at the same place, or sign-in/share/checkout infrastructure), with the badware list as an extra layer. Blocked windows are recorded per site and listed in the rule manager.
+- Recognises hop links: an absolute address inside a query parameter is decoded and judged as the real target, and the record names that target.
+- Added a per-site "allow popups" switch for cases where the rule is wrong for a site.
+
+---
+
 ## v1.0.5
 
 ### 中文（简体）

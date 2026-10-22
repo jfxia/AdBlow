@@ -30,7 +30,7 @@ import { isPopupAllowlistedHost } from './popupAllow.ts';
  * Rules 5-8 judge the **unwrapped** target when the window opens a same-site wrapper page that
  * carries another absolute URL in a query parameter (`/pop?url=<encoded ad>`). Such a wrapper
  * is same-site by its own host and used to pass rule 5, after which the page itself navigated
- * to the ad -- the measured bypass on missav.live (2026-10-22). The wrapper is only a string
+ * to the ad -- the measured bypass on videos.example (2026-10-22). The wrapper is only a string
  * we read before anything loads: no redirect is followed, only the first layer is unwrapped.
  *
  * The cost is that a site opening a cross-site window from a `<button>` (OAuth buttons, "share

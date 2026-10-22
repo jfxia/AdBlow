@@ -5,14 +5,14 @@ import { isPopupHost } from '../../src/engine/popupDomains.ts';
 import { mergePopupBlockRecord } from '../../src/engine/popupBlock.ts';
 
 /**
- * Measured bypass (2026-10-22, missav.live): the play button fired
- * `window.open('https://missav.live/pop?url=<encoded ad>')`. The wrapper is same-site, so the
+ * Measured bypass (2026-10-22, videos.example): the play button fired
+ * `window.open('https://videos.example/pop?url=<encoded ad>')`. The wrapper is same-site, so the
  * same-site rule allowed the window, and the wrapper then navigated to the ad. These cases pin
  * the fix: a target carried in a query parameter is judged as the real destination, while
  * share / sign-in links that carry same-site or allowlisted addresses keep the old behaviour.
  */
-const PAGE = 'missav.live';
-const AD = 'https://diffusedpassionquaking.com/1919723/?3';
+const PAGE = 'videos.example';
+const AD = 'https://ads.example/1919723/?3';
 const WRAP = `https://${PAGE}/pop?url=${encodeURIComponent(AD)}`;
 const enc = encodeURIComponent;
 
@@ -23,7 +23,7 @@ function targetHost(decision: OpenDecision): string {
 }
 
 /** Mirrors inject/index.ts: the `$popup` list is checked against the raw and unwrapped URL. */
-const LISTED = new Set(['diffusedpassionquaking.com']);
+const LISTED = new Set(['ads.example']);
 function decideWithPopupList(rawUrl: string, pageHost = PAGE): OpenDecision {
   const unwrapped = unwrapOpenTarget(rawUrl, pageHost);
   const listed = (candidate: string): boolean => {
@@ -46,7 +46,7 @@ describe('window.open 同站包装页：按解码后的真实目标判定', () =
     const decision = decideOpen({ url: WRAP, pageHost: PAGE, hadUserGesture: true });
     assert.equal(decision.allow, false);
     assert.equal(decision.reason, 'cross-site');
-    assert.equal(targetHost(decision), 'diffusedpassionquaking.com');
+    assert.equal(targetHost(decision), 'ads.example');
   });
 
   it('相对写法的包装页同样按解码后的目标判定', () => {
@@ -57,7 +57,7 @@ describe('window.open 同站包装页：按解码后的真实目标判定', () =
     });
     assert.equal(decision.allow, false);
     assert.equal(decision.reason, 'cross-site');
-    assert.equal(targetHost(decision), 'diffusedpassionquaking.com');
+    assert.equal(targetHost(decision), 'ads.example');
   });
 
   it('参数名不固定：to / target / redirect / go / next / continue 都解', () => {
@@ -69,7 +69,7 @@ describe('window.open 同站包装页：按解码后的真实目标判定', () =
       });
       assert.equal(decision.allow, false, name);
       assert.equal(decision.reason, 'cross-site', name);
-      assert.equal(targetHost(decision), 'diffusedpassionquaking.com', name);
+      assert.equal(targetHost(decision), 'ads.example', name);
     }
   });
 
@@ -82,7 +82,7 @@ describe('window.open 同站包装页：按解码后的真实目标判定', () =
     });
     assert.equal(decision.allow, false);
     assert.equal(decision.reason, 'cross-site');
-    assert.equal(targetHost(decision), 'diffusedpassionquaking.com');
+    assert.equal(targetHost(decision), 'ads.example');
   });
 
   it('解码出白名单主机 → 放行（allowlisted-host）', () => {
@@ -106,7 +106,7 @@ describe('window.open 同站包装页：按解码后的真实目标判定', () =
 
   it('解码出同站地址 → 按原判定（same-site 放行）', () => {
     const decision = decideOpen({
-      url: `https://${PAGE}/share?url=${enc('https://www.missav.live/archives/1/')}`,
+      url: `https://${PAGE}/share?url=${enc('https://www.videos.example/archives/1/')}`,
       pageHost: PAGE,
       hadUserGesture: true,
     });
@@ -133,7 +133,7 @@ describe('window.open 同站包装页：按解码后的真实目标判定', () =
     const decision = decideWithPopupList(WRAP);
     assert.equal(decision.allow, false);
     assert.equal(decision.reason, 'popup-list');
-    assert.equal(targetHost(decision), 'diffusedpassionquaking.com');
+    assert.equal(targetHost(decision), 'ads.example');
     // A wrapper whose decoded host is not listed is still judged by the gesture rules.
     assert.equal(
       decideWithPopupList(`https://${PAGE}/pop?url=${enc('https://not-listed.example/x')}`).reason,
@@ -159,7 +159,7 @@ describe('window.open 同站包装页：按解码后的真实目标判定', () =
     ]) {
       assert.equal(decision.allow, false);
       const record = mergePopupBlockRecord(null, PAGE, targetHost(decision), 1000);
-      assert.equal(record.lastTargetHost, 'diffusedpassionquaking.com');
+      assert.equal(record.lastTargetHost, 'ads.example');
     }
   });
 
@@ -183,7 +183,7 @@ describe('window.open 同站包装页：按解码后的真实目标判定', () =
     });
     assert.equal(decision.allow, true);
     assert.equal(decision.reason, 'anchor-target');
-    assert.equal(targetHost(decision), 'diffusedpassionquaking.com');
+    assert.equal(targetHost(decision), 'ads.example');
   });
 
   it('站点开关仍然压过解码后的判定', () => {
@@ -209,8 +209,8 @@ describe('unwrapOpenTarget：只解一层，不做跳转追踪', () => {
   });
 
   it('同站参数不值得解包（保持原判定路径）', () => {
-    assert.equal(unwrapOpenTarget(`/share?url=${enc('https://missav.live/x')}`, PAGE), null);
-    assert.equal(unwrapOpenTarget(`/share?url=${enc('https://a.b.missav.live/x')}`, PAGE), null);
+    assert.equal(unwrapOpenTarget(`/share?url=${enc('https://videos.example/x')}`, PAGE), null);
+    assert.equal(unwrapOpenTarget(`/share?url=${enc('https://a.b.videos.example/x')}`, PAGE), null);
   });
 
   it('跨站绝对地址 → 返回解码后的绝对 URL', () => {
@@ -226,7 +226,7 @@ describe('unwrapOpenTarget：只解一层，不做跳转追踪', () => {
     // ...but a cross-site URL nested inside that parameter *is* the destination it names.
     assert.equal(
       unwrapOpenTarget(`/pop?url=${enc(`https://other.example/hop?to=${enc(AD)}`)}`, PAGE),
-      'https://other.example/hop?to=https%3A%2F%2Fdiffusedpassionquaking.com%2F1919723%2F%3F3',
+      'https://other.example/hop?to=https%3A%2F%2Fads.example%2F1919723%2F%3F3',
     );
   });
 

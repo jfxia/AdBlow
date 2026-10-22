@@ -10,11 +10,11 @@ import {
 
 /**
  * 观测（只记录、不改行为）：点击普通内容之后，顶层框架跳到了别的站点，就记一笔。
- * 之所以换成"看结果"，是因为按源码形状判断会被混淆/间接调用绕过（missav 的 popunder SDK 就是）。
+ * 之所以换成"看结果"，是因为按源码形状判断会被混淆/间接调用绕过（the video site 的 popunder SDK 就是）。
  */
 const click = (over: Partial<PlainClick> = {}): PlainClick => ({
-  host: 'missav.watch',
-  url: 'https://www.missav.watch/dm339',
+  host: 'videos.example',
+  url: 'https://www.videos.example/dm339',
   at: 1_000_000,
   ...over,
 });
@@ -42,7 +42,7 @@ describe('shouldRecordClickNavigation', () => {
   it('同站路由变化不记录', () => {
     const r = shouldRecordClickNavigation({
       click: click(),
-      toUrl: 'https://www.missav.watch/other',
+      toUrl: 'https://www.videos.example/other',
       now: 1_000_000 + 500,
     });
     assert.equal(r.record, false);
@@ -51,7 +51,7 @@ describe('shouldRecordClickNavigation', () => {
   it('同注册域名、不同子域不记录', () => {
     const r = shouldRecordClickNavigation({
       click: click(),
-      toUrl: 'https://cn.missav.watch/x',
+      toUrl: 'https://cn.videos.example/x',
       now: 1_000_000 + 500,
     });
     assert.equal(r.record, false);
@@ -87,9 +87,9 @@ describe('shouldRecordClickNavigation', () => {
 
 describe('mergeIncident / clickWatchKey', () => {
   it('首次记录 count=1，并保留首个时间与样本', () => {
-    const rec = mergeIncident(null, 'missav.watch', 'ads.example.com', 1000);
+    const rec = mergeIncident(null, 'videos.example', 'ads.example.com', 1000);
     assert.deepEqual(rec, {
-      host: 'missav.watch',
+      host: 'videos.example',
       count: 1,
       firstAt: 1000,
       lastAt: 1000,
@@ -99,8 +99,8 @@ describe('mergeIncident / clickWatchKey', () => {
   });
 
   it('重复记录累加，firstAt 不变，lastAt 与样本更新', () => {
-    const first = mergeIncident(null, 'missav.watch', 'ads.example.com', 1000);
-    const second = mergeIncident(first, 'missav.watch', 'tracker.example', 5000);
+    const first = mergeIncident(null, 'videos.example', 'ads.example.com', 1000);
+    const second = mergeIncident(first, 'videos.example', 'tracker.example', 5000);
     assert.equal(second.count, 2);
     assert.equal(second.firstAt, 1000);
     assert.equal(second.lastAt, 5000);
@@ -114,6 +114,6 @@ describe('mergeIncident / clickWatchKey', () => {
   });
 
   it('存储键带前缀', () => {
-    assert.equal(clickWatchKey('missav.watch'), 'clickwatch:missav.watch');
+    assert.equal(clickWatchKey('videos.example'), 'clickwatch:videos.example');
   });
 });

@@ -3,7 +3,7 @@
  *
  * Why it exists: the existing guards inspect a handler's *source text* (`location.href = …`,
  * `window.open(…)`) and refuse to install it. That covers the common shapes but not obfuscated
- * or indirect code — and the missav.watch popunder SDK is exactly the obfuscated kind. The
+ * or indirect code — and the videos.example popunder SDK is exactly the obfuscated kind. The
  * general answer is to look at the **outcome** instead: a top-frame navigation to another site
  * that follows a click on ordinary content, seconds later.
  *

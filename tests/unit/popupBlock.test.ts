@@ -14,13 +14,13 @@ import {
 describe('弹窗拦截记录', () => {
   it('键名固定为 popupblock:<host>', () => {
     assert.equal(POPUP_BLOCK_PREFIX, 'popupblock:');
-    assert.equal(popupBlockKey('missav.watch'), 'popupblock:missav.watch');
+    assert.equal(popupBlockKey('videos.example'), 'popupblock:videos.example');
   });
 
   it('第一次拦截建立记录', () => {
-    const record = mergePopupBlockRecord(null, 'missav.watch', 'ads.example', 1000);
+    const record = mergePopupBlockRecord(null, 'videos.example', 'ads.example', 1000);
     assert.deepEqual(record, {
-      host: 'missav.watch',
+      host: 'videos.example',
       count: 1,
       firstAt: 1000,
       lastAt: 1000,

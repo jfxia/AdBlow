@@ -7,7 +7,7 @@ import {
   shouldBlockClick,
 } from '../../src/inject/clickGuard.ts';
 
-const HOST = 'www.missav.watch';
+const HOST = 'www.videos.example';
 
 const base = {
   trusted: true,
@@ -24,9 +24,9 @@ describe('isCrossSiteHref', () => {
   });
 
   it('同站与相对链接', () => {
-    assert.equal(isCrossSiteHref('https://www.missav.watch/dm339', HOST), false);
+    assert.equal(isCrossSiteHref('https://www.videos.example/dm339', HOST), false);
     assert.equal(isCrossSiteHref('/dm339', HOST), false);
-    assert.equal(isCrossSiteHref('https://missav.watch/x', HOST), false, '同可注册域名');
+    assert.equal(isCrossSiteHref('https://videos.example/x', HOST), false, '同可注册域名');
   });
 
   it('空值与非法值不抛异常', () => {

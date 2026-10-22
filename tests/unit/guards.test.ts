@@ -7,7 +7,7 @@ import {
   type OpenRequest,
 } from '../../src/inject/guards.ts';
 
-const HOST = 'missav.watch';
+const HOST = 'videos.example';
 const AD = 'https://ads.example.com/landing';
 
 function req(overrides: Partial<OpenRequest> = {}): OpenRequest {
@@ -30,7 +30,7 @@ describe('window.open：默认拒绝跨站，只有明确依据才放行', () =>
   it('没有用户手势 → 拒绝，即使目标同站', () => {
     assert.equal(decideOpen(req({ url: '/player', hadUserGesture: false })).reason, 'no-gesture');
     assert.equal(
-      decideOpen(req({ url: 'https://www.missav.watch/x', hadUserGesture: false })).allow,
+      decideOpen(req({ url: 'https://www.videos.example/x', hadUserGesture: false })).allow,
       false,
     );
   });
@@ -38,10 +38,10 @@ describe('window.open：默认拒绝跨站，只有明确依据才放行', () =>
   it('同注册域名（eTLD+1）→ 放行，任意子域层级', () => {
     for (const url of [
       '/archives/1/',
-      'https://missav.watch/x',
-      'https://www.missav.watch/x',
-      'https://a.b.missav.watch/x',
-      '//www.missav.watch/x',
+      'https://videos.example/x',
+      'https://www.videos.example/x',
+      'https://a.b.videos.example/x',
+      '//www.videos.example/x',
     ]) {
       const decision = decideOpen(req({ url }));
       assert.equal(decision.allow, true, url);
@@ -114,7 +114,7 @@ describe('window.open：默认拒绝跨站，只有明确依据才放行', () =>
   it('$popup 名单命中 → 无条件拒绝（高于同站 / 链接 / 白名单）', () => {
     for (const request of [
       req({ popupDenied: true }),
-      req({ url: 'https://www.missav.watch/x', popupDenied: true }),
+      req({ url: 'https://www.videos.example/x', popupDenied: true }),
       req({ url: 'https://www.paypal.com/checkout', popupDenied: true }),
       req({ url: 'https://player.example.com/x', gestureAnchorHref: 'https://player.example.com/x', popupDenied: true }),
     ]) {
