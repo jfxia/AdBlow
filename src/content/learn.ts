@@ -9,7 +9,9 @@
  * Growth is bounded by the safety valves in ruleLimits.ts: observing selectors expire
  * after 30 days without a hit, promoted ones are capped per site, and hit counters decay
  * with age. Every entry point (write AND read) prunes, because data written before the
- * valves existed may already be over any cap and must be trimmed on first sight.
+ * valves existed may already be over any cap and must be trimmed on first sight. Entries
+ * the user picked by hand (`picked`) are the one exception: automatic cleanup never
+ * removes them (see addPickedSelector and pruneSelectorEntries).
  *
  * Storage is an injected KvStore, so this module needs no chrome.* and is
  * directly testable under Node.
@@ -53,6 +55,11 @@ export type LearnedEntry = {
    * rules learned by an older build.
    */
   lastHitAt?: number;
+  /**
+   * Added by hand through the element picker. Such an entry is promoted immediately and is
+   * exempt from every automatic cleanup policy (see ruleLimits.pruneSelectorEntries).
+   */
+  picked?: boolean;
 };
 
 export type LearnedMap = Record<string, LearnedEntry>;
@@ -124,6 +131,44 @@ export async function recordHit(
   );
   // In the pathological case where the just-hit selector is itself evicted by the cap,
   // storage no longer holds it; the returned entry is still the one that was counted.
+  return next[selector] ?? entry;
+}
+
+/**
+ * Store a selector the user picked by hand.
+ *
+ * Written into the same per-site store as learned rules (the `learned:<host>` key is what
+ * scopes it to this site), but flagged `picked` + promoted so it applies on the next visit
+ * and no pruning pass may remove it. Re-picking an existing selector keeps its hit counter
+ * and simply refreshes the flag/anchor instead of minting a duplicate.
+ */
+export async function addPickedSelector(
+  store: KvStore,
+  host: string,
+  selector: string,
+  options: LimitOptions = {},
+): Promise<LearnedEntry> {
+  const now = resolveNow(options.now);
+  const limits = resolveLimits(options.limits);
+  const key = learnedKey(host);
+  const current = (await store.get<LearnedMap>(key)) ?? {};
+  const existing = current[selector];
+  const entry: LearnedEntry = {
+    selector,
+    hits: existing?.hits ?? 1,
+    promoted: true,
+    picked: true,
+    lastHitAt: now,
+  };
+
+  const next = await persistPrunedSelectors(
+    store,
+    key,
+    { ...current, [selector]: entry },
+    now,
+    limits,
+    true,
+  );
   return next[selector] ?? entry;
 }
 

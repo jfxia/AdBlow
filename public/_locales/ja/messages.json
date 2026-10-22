@@ -176,5 +176,45 @@
   "optionsClickWatchRow": {
     "message": "$1 回 · 最終 $2 · 遷移先 $3",
     "description": ""
+  },
+  "popupPickElement": {
+    "message": "ページ要素を選択",
+    "description": "Popup button that starts the element picker on the current page."
+  },
+  "popupPickFailed": {
+    "message": "このページでは選択モードを開始できません。ページを再読み込みするか、通常の Web ページでお試しください。",
+    "description": "Popup notice shown when the element picker cannot start on this page."
+  },
+  "pickerTitle": {
+    "message": "ページ要素を選択",
+    "description": "Heading of the on-page picker panel."
+  },
+  "pickerHint": {
+    "message": "マウスで要素をハイライトし、クリックで選択します。Esc キーでキャンセルします。",
+    "description": "Instruction line in the on-page picker panel."
+  },
+  "pickerSelectorLabel": {
+    "message": "CSS セレクター（編集可能）",
+    "description": "Label of the editable CSS selector field in the picker panel."
+  },
+  "pickerSave": {
+    "message": "保存して非表示",
+    "description": "Picker button that saves the rule and hides the element."
+  },
+  "pickerCancel": {
+    "message": "キャンセル",
+    "description": "Picker button that leaves picking mode without saving."
+  },
+  "pickerInvalid": {
+    "message": "セレクターが無効か安全でないか、一致する要素が多すぎます。修正してから保存してください。",
+    "description": "Validation error shown when the entered selector cannot be saved."
+  },
+  "optionsPillPicked": {
+    "message": "手動追加",
+    "description": "Rule-manager pill marking a rule added by hand with the element picker."
+  },
+  "optionsPickedMeta": {
+    "message": "手動選択 · 自動整理の対象外",
+    "description": "Rule-manager note explaining a manually picked rule is exempt from cleanup."
   }
 }

@@ -13,6 +13,7 @@ import {
   findLinkFarms,
   hideElement,
   holdsRealContent,
+  isPickerUi,
   mustNotHide,
   judgeGrownElement,
   learnableAdDomains,
@@ -25,11 +26,13 @@ import {
   type Hit,
   type JudgeOptions,
 } from './engine.ts';
-import { promotedSelectors, recordHit } from './learn.ts';
+import { allEntries, recordHit } from './learn.ts';
 import { applyListCosmetic } from './listCosmetic.ts';
 import { recordDomains } from './domainLearn.ts';
 import { isSiteDisabled, isWallFixEnabled, markWallDetected, wallFixKey, writeStats } from './settings.ts';
 import { chromeLocal } from './storage.ts';
+import { createPicker } from './picker.ts';
+import { t } from '../ui/i18n.ts';
 import { detectWall } from '../engine/antiAdblock.ts';
 import { consentGate } from '../engine/cookieConsent.ts';
 import { clickConsentControl, createConsentController, findConsentBanner } from './consent.ts';
@@ -87,6 +90,65 @@ const BACKFILL_TIMEOUT_MS = 6000;
 const WALL_DEBOUNCE_MS = 800;
 
 const store = chromeLocal();
+
+// ── Element picker wiring ────────────────────────────────────────────────────
+//
+// The picker object is created and its capture-phase blockers are installed at
+// document_start (module evaluation), *not* on first use: page scripts register their own
+// window handlers later, and only a listener installed earlier can stop a click before it
+// reaches them. `start()` merely mounts the shadow-root UI.
+
+const picker = createPicker({
+  doc: document,
+  host: location.hostname,
+  store,
+  strings: () => ({
+    title: t('pickerTitle'),
+    hint: t('pickerHint'),
+    selectorLabel: t('pickerSelectorLabel'),
+    save: t('pickerSave'),
+    cancel: t('pickerCancel'),
+    invalid: t('pickerInvalid'),
+  }),
+});
+picker.attach();
+
+/** Popup → content: enter picking mode (top frame only). */
+function startPicker(
+  message: unknown,
+  _sender: unknown,
+  respond: (response?: unknown) => void,
+): boolean {
+  const msg = message as { type?: string } | null;
+  if (msg?.type !== 'start-picker') return false;
+  // Only the top frame owns the page the user sees; iframes return false so the popup's
+  // frame-0-targeted message is answered by the right document.
+  if (window.top !== window) return false;
+
+  void (async () => {
+    try {
+      if (await isSiteDisabled(store, location.hostname)) {
+        respond({ ok: false, reason: 'disabled' });
+        return;
+      }
+      picker.start();
+      respond({ ok: true });
+    } catch (error) {
+      // Storage or DOM failure: tell the popup instead of leaving it waiting for a response.
+      console.warn('[adblow] 进入拾取模式失败', error);
+      respond({ ok: false, reason: 'error' });
+    }
+  })();
+  return true;
+}
+
+try {
+  chrome.runtime.onMessage?.addListener(startPicker);
+} catch (error) {
+  // A reloaded extension has no runtime bridge; the rest of the content script still runs.
+  console.debug('[adblow] 拾取器消息通道不可用', error);
+}
+
 
 async function loadPacks(url: string): Promise<SitePack[]> {
   try {
@@ -166,7 +228,7 @@ function installListCosmetic(selectors: string[]): number {
   const result = applyListCosmetic(
     document,
     selectors,
-    (el) => holdsRealContent(el) || mustNotHide(el),
+    (el) => holdsRealContent(el) || mustNotHide(el) || isPickerUi(el),
   );
   if (result.droppedForContent.length) {
     console.debug(
@@ -242,9 +304,16 @@ async function boot(): Promise<void> {
   }
 
   const packs = await loadPacks(location.href);
-  const learned = await promotedSelectors(store, host);
-  const selectorSet = selectorsFrom(packs, learned, (r) =>
-    console.warn('[adblow] 规则包被误伤护栏拒绝，整包丢弃', r.packId, r.problems),
+  // One pruned read for both kinds: `learned` (auto-derived, evidence still required) and
+  // `picked` (manual, hides on match). Reading them separately would prune the same map twice.
+  const entries = await allEntries(store, host);
+  const learned = entries.filter((e) => e.promoted && !e.picked).map((e) => e.selector);
+  const picked = entries.filter((e) => e.picked).map((e) => e.selector);
+  const selectorSet = selectorsFrom(
+    packs,
+    learned,
+    (r) => console.warn('[adblow] 规则包被误伤护栏拒绝，整包丢弃', r.packId, r.problems),
+    picked,
   );
 
   // Only curated (site-pack) selectors may enter the anti-flash stylesheet: it has

@@ -176,5 +176,45 @@
   "optionsClickWatchRow": {
     "message": "$1 fois · dernier $2 · vers $3",
     "description": ""
+  },
+  "popupPickElement": {
+    "message": "Choisir un élément",
+    "description": "Popup button that starts the element picker on the current page."
+  },
+  "popupPickFailed": {
+    "message": "Impossible de démarrer le sélecteur sur cette page. Rechargez la page ou essayez sur une page web normale.",
+    "description": "Popup notice shown when the element picker cannot start on this page."
+  },
+  "pickerTitle": {
+    "message": "Choisir un élément",
+    "description": "Heading of the on-page picker panel."
+  },
+  "pickerHint": {
+    "message": "Déplacez le pointeur pour surligner un élément, puis cliquez pour le sélectionner. Appuyez sur Échap pour annuler.",
+    "description": "Instruction line in the on-page picker panel."
+  },
+  "pickerSelectorLabel": {
+    "message": "Sélecteur CSS (modifiable)",
+    "description": "Label of the editable CSS selector field in the picker panel."
+  },
+  "pickerSave": {
+    "message": "Enregistrer et masquer",
+    "description": "Picker button that saves the rule and hides the element."
+  },
+  "pickerCancel": {
+    "message": "Annuler",
+    "description": "Picker button that leaves picking mode without saving."
+  },
+  "pickerInvalid": {
+    "message": "Ce sélecteur est invalide, dangereux ou correspond à trop d’éléments. Modifiez-le puis réessayez.",
+    "description": "Validation error shown when the entered selector cannot be saved."
+  },
+  "optionsPillPicked": {
+    "message": "Ajouté à la main",
+    "description": "Rule-manager pill marking a rule added by hand with the element picker."
+  },
+  "optionsPickedMeta": {
+    "message": "Choisi à la main · exempt du nettoyage automatique",
+    "description": "Rule-manager note explaining a manually picked rule is exempt from cleanup."
   }
 }

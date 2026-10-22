@@ -63,6 +63,12 @@
       .switch-row {
         background: var(--bg-soft);
       }
+      #pick-element {
+        width: 100%;
+      }
+      #pick-element[hidden] {
+        display: none;
+      }
       footer {
         display: flex;
         gap: 8px;
@@ -113,6 +119,8 @@
         </div>
       </dl>
       <p class="hint" id="stats-hint" hidden></p>
+
+      <button id="pick-element" class="primary" data-i18n="popupPickElement" hidden></button>
     </main>
 
     <footer>

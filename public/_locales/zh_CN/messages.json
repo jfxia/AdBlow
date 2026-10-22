@@ -176,5 +176,45 @@
   "optionsClickWatchRow": {
     "message": "$1 次 · 最近 $2 · 跳向 $3",
     "description": ""
+  },
+  "popupPickElement": {
+    "message": "拾取页面元素",
+    "description": "Popup button that starts the element picker on the current page."
+  },
+  "popupPickFailed": {
+    "message": "无法在当前页面进入拾取模式。请刷新页面，或在普通网页上重试。",
+    "description": "Popup notice shown when the element picker cannot start on this page."
+  },
+  "pickerTitle": {
+    "message": "拾取页面元素",
+    "description": "Heading of the on-page picker panel."
+  },
+  "pickerHint": {
+    "message": "移动鼠标高亮元素，点击即选中；按 Esc 取消。",
+    "description": "Instruction line in the on-page picker panel."
+  },
+  "pickerSelectorLabel": {
+    "message": "CSS 选择器（可修改）",
+    "description": "Label of the editable CSS selector field in the picker panel."
+  },
+  "pickerSave": {
+    "message": "保存并隐藏",
+    "description": "Picker button that saves the rule and hides the element."
+  },
+  "pickerCancel": {
+    "message": "取消",
+    "description": "Picker button that leaves picking mode without saving."
+  },
+  "pickerInvalid": {
+    "message": "选择器无效、不安全或匹配元素过多，请修改后再保存。",
+    "description": "Validation error shown when the entered selector cannot be saved."
+  },
+  "optionsPillPicked": {
+    "message": "手动添加",
+    "description": "Rule-manager pill marking a rule added by hand with the element picker."
+  },
+  "optionsPickedMeta": {
+    "message": "手动拾取 · 不参与自动清理",
+    "description": "Rule-manager note explaining a manually picked rule is exempt from cleanup."
   }
 }

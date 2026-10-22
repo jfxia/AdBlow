@@ -226,13 +226,22 @@ function renderEntry(host: string, entry: LearnedEntry): HTMLLIElement {
   li.appendChild(code);
 
   const pill = document.createElement('span');
-  pill.className = entry.promoted ? 'pill on' : 'pill';
-  pill.textContent = t(entry.promoted ? 'optionsPillActive' : 'optionsPillObserving');
+  // Manual rule: a distinct pill, because it behaves differently (applies on match and is
+  // exempt from every automatic cleanup policy) and must be recognisable at a glance.
+  if (entry.picked) {
+    // `on` keeps the promoted/active counters (which count `.pill.on`) correct; the more
+    // specific `.pill.picked` rule provides the manual-rule colour.
+    pill.className = 'pill picked on';
+    pill.textContent = t('optionsPillPicked');
+  } else {
+    pill.className = entry.promoted ? 'pill on' : 'pill';
+    pill.textContent = t(entry.promoted ? 'optionsPillActive' : 'optionsPillObserving');
+  }
   li.appendChild(pill);
 
   const meta = document.createElement('span');
   meta.className = 'meta';
-  meta.textContent = t('optionsHits', [entry.hits]);
+  meta.textContent = entry.picked ? t('optionsPickedMeta') : t('optionsHits', [entry.hits]);
   li.appendChild(meta);
 
   const del = button('optionsDelete', 'danger');

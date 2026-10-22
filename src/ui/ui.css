@@ -261,6 +261,13 @@ input[type="checkbox"]:disabled + .switch {
   background: color-mix(in srgb, var(--ok) 10%, transparent);
 }
 
+/* Manual (picked) rule: brand-coloured, so it reads as "chosen by you", not "learned". */
+.pill.picked {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+}
+
 ul.rows {
   list-style: none;
   margin: 0;

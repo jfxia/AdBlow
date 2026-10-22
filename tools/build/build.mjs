@@ -166,8 +166,12 @@ if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
   // keys used by data-i18n / data-i18n-* in the UI
   for (const m of [...readFileSync('src/ui/popup.html', 'utf8').matchAll(/data-i18n(?:-[a-z]+)?="([^"]+)"/g)]) used.add(m[1]);
   for (const m of [...readFileSync('src/ui/options.html', 'utf8').matchAll(/data-i18n(?:-[a-z]+)?="([^"]+)"/g)]) used.add(m[1]);
-  // keys passed to t('key') in JS
-  for (const file of ['src/ui/popup.ts', 'src/ui/options.ts']) {
+  // keys passed to t('key') in JS (UI pages plus the content-script picker strings)
+  for (const file of [
+    'src/ui/popup.ts',
+    'src/ui/options.ts',
+    'src/content/index.ts',
+  ]) {
     for (const m of [...readFileSync(file, 'utf8').matchAll(/\bt\('([A-Za-z0-9_]+)'/g)]) used.add(m[1]);
   }
 

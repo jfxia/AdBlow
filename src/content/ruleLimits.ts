@@ -185,6 +185,12 @@ export type SelectorLike = {
   promoted: boolean;
   /** Epoch ms of the last hit; absent on data written before limits existed. */
   lastHitAt?: number;
+  /**
+   * Added by hand through the element picker. Manual rules are the user's explicit
+   * decision, so no automatic policy may ever delete one: they are exempt from the
+   * per-site caps and from both TTLs (see pruneSelectorEntries).
+   */
+  picked?: boolean;
 };
 
 export type DomainLike = {
@@ -195,7 +201,11 @@ export type DomainLike = {
 };
 
 export const effectiveSelectorHits = (entry: SelectorLike, now: number, limits: RuleLimits): number =>
-  decayHits(entry.hits, anchorOf(entry.lastHitAt, now), now, limits.decayIntervalMs);
+  // A picked rule is never pruned, so decaying its counter would only understate it in the
+  // UI and make a manual rule look weaker than an automatically learned one.
+  entry.picked
+    ? entry.hits
+    : decayHits(entry.hits, anchorOf(entry.lastHitAt, now), now, limits.decayIntervalMs);
 
 export const effectiveDomainHits = (entry: DomainLike, now: number, limits: RuleLimits): number =>
   decayHits(entry.hits, anchorOf(entry.lastSeenAt, now), now, limits.decayIntervalMs);
@@ -233,6 +243,12 @@ function splitTop<T>(list: readonly T[], max: number, rank: (a: T, b: T) => numb
 /**
  * Selector policy.
  *
+ * Manual (`picked`) entries are kept unconditionally. They are exempt from the observing
+ * TTL, the promoted TTL, the per-site caps and decay: a rule the user added by hand must
+ * not silently disappear after 30/90 days, which users would rightly report as a bug. The
+ * caps therefore bound only the automatically learned set, and picked entries do not
+ * compete for its slots.
+ *
  * Observing entries: dropped once stale (observingTtlMs without a hit) — an
  * unpromoted guess is not a rule yet — and capped at maxObservingPerSite by hit weight.
  * Promoted entries: dropped for age only while the promoted set is over its cap, and then
@@ -253,8 +269,10 @@ export function pruneSelectorEntries<T extends SelectorLike>(
     anchorOf(b.lastHitAt, now) - anchorOf(a.lastHitAt, now) ||
     (a.selector < b.selector ? -1 : a.selector > b.selector ? 1 : 0);
 
-  const observing = entries.filter((e) => !e.promoted);
-  const promoted = entries.filter((e) => e.promoted);
+  // The caps apply to the learned set only; manual rules are outside the policy entirely.
+  const auto = entries.filter((e) => !e.picked);
+  const observing = auto.filter((e) => !e.promoted);
+  const promoted = auto.filter((e) => e.promoted);
 
   // Observing: TTL is unconditional.
   const liveObserving = observing.filter((e) => ageOf(e) < limits.observingTtlMs);

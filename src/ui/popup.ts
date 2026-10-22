@@ -52,6 +52,7 @@ function showNotice(text: string, hostLabel = false): void {
   el('stats').hidden = true;
   el('stats-hint').hidden = true;
   el('wall-card').hidden = true;
+  el('pick-element').hidden = true;
   if (hostLabel) el('host').textContent = t('popupNotApplicable');
 }
 
@@ -100,6 +101,12 @@ async function render(): Promise<void> {
   enabledBox.checked = !disabled;
   el('toggle-row').hidden = false;
 
+  // Picking is an explicit user action, but it still writes a hiding rule for this site, so
+  // it follows the per-site kill switch rather than bypassing it.
+  const pick = el<HTMLButtonElement>('pick-element');
+  pick.hidden = false;
+  pick.disabled = disabled;
+
   const [stats, entries] = await Promise.all([readStats(store, host), allEntries(store, host)]);
   const promoted = entries.filter((e) => e.promoted).length;
 
@@ -136,6 +143,31 @@ el('wall-toggle').addEventListener('click', async () => {
   // Same key the content script reads (and watches via chrome.storage.onChanged).
   await setWallFixEnabled(store, host, !fixOn);
   await render();
+});
+
+el('pick-element').addEventListener('click', async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === undefined) {
+    showNotice(t('popupPickFailed'));
+    return;
+  }
+  try {
+    // frameId 0: only the top document should enter picking mode; iframe listeners ignore
+    // the message, and the popup needs one definite answer.
+    const response = (await chrome.tabs.sendMessage(
+      tab.id,
+      { type: 'start-picker' },
+      { frameId: 0 },
+    )) as { ok?: boolean } | undefined;
+    if (response?.ok) {
+      window.close();
+      return;
+    }
+    showNotice(t('popupPickFailed'));
+  } catch {
+    // No content script on this page (browser-internal page, just-reloaded extension).
+    showNotice(t('popupPickFailed'));
+  }
 });
 
 el('clear-site').addEventListener('click', async () => {

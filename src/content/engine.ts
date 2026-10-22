@@ -109,13 +109,20 @@ export function makeInjectionTest(index: PristineIndex, reliable: boolean): Inje
 export type SelectorSet = {
   curated: string[];
   learned: string[];
+  /**
+   * Rules the user added with the element picker. They hide on match **without** needing
+   * naming/behaviour evidence: a manual pick is an explicit instruction, unlike an
+   * auto-derived guess. Kept apart from `learned` so the two privileges stay legible.
+   */
+  picked?: string[];
 };
 
-/** Collect selectors: rule packs → curated, learned → learned. */
+/** Collect selectors: rule packs → curated, learned → learned, manual picks → picked. */
 export function selectorsFrom(
   packs: SitePack[],
   learned: string[],
   onReject?: (r: Rejection) => void,
+  picked: string[] = [],
 ): SelectorSet {
   const curated = new Set<string>();
 
@@ -128,7 +135,11 @@ export function selectorsFrom(
     for (const s of pack.cosmetic) curated.add(s);
   }
 
-  return { curated: [...curated], learned: [...new Set(learned)] };
+  return {
+    curated: [...curated],
+    learned: [...new Set(learned)],
+    picked: [...new Set(picked)],
+  };
 }
 
 /** Behaviour score a weak naming needs to count (one cross-site link = 4). */
@@ -471,6 +482,25 @@ export function looksLikeContentBlock(
 const NEVER_HIDE_TAGS = new Set(['HTML', 'BODY', 'HEAD']);
 
 /**
+ * Mark of the picker's own host element.
+ *
+ * The picker mounts its UI inside a shadow root, but the host itself is a plain element in
+ * the page's light DOM, so the engine would otherwise judge it like any other node. Both
+ * the judge and every hiding path treat this subtree as off-limits: the picker must never
+ * be classified as an ad and never hide itself mid-pick.
+ */
+export const PICKER_UI_ATTR = 'data-adblow-picker-ui';
+
+/** Is this element part of the picker UI (host or, in tests, its wrapper)? */
+export function isPickerUi(el: Element): boolean {
+  try {
+    return el.closest(`[${PICKER_UI_ATTR}]`) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Hide with inline styles.
  *
  * Not a stylesheet: an inline `!important` sits at the top of the author origin and cannot be
@@ -488,6 +518,8 @@ const NEVER_HIDE_TAGS = new Set(['HTML', 'BODY', 'HEAD']);
  */
 export function hideElement(el: Element, reason?: string): void {
   if (NEVER_HIDE_TAGS.has(el.tagName)) return;
+  // The picker is our own UI: hiding it would break the very interaction in progress.
+  if (isPickerUi(el)) return;
   el.setAttribute('data-adblow-hidden', '1');
   if (reason) el.setAttribute(REASON_ATTR, reason);
   const style = (el as HTMLElement).style;
@@ -856,6 +888,7 @@ export const GROWTH_BONUS = 4;
  * component that grew once must not become a permanent rule.
  */
 export function judgeGrownElement(el: Element, options: JudgeOptions): Verdict | null {
+  if (isPickerUi(el)) return null;
   if (isHidden(el)) return null;
   if (holdsRealContent(el)) return null;
 
@@ -1122,7 +1155,7 @@ export function matchesAny(el: Element, selectors: string[]): boolean {
   }
 }
 
-export type Verdict = { kind: 'rule' } | { kind: 'heuristic'; hit: Hit };
+export type Verdict = { kind: 'rule' } | { kind: 'picked' } | { kind: 'heuristic'; hit: Hit };
 
 export type JudgeOptions = {
   injected: InjectionTest;
@@ -1143,14 +1176,32 @@ export type JudgeOptions = {
  *   - `curated` (site packs): evidence + fixture regressions, hidden on match
  *   - `learned` (auto-derived): only exempt from "must be proven script-injected", still needs
  *     naming or behaviour evidence of its own (see SelectorSet)
+ *   - `picked` (manual): an explicit user instruction, hidden on match like `curated`, and
+ *     unlike automatic sources it overrides the content guard
  *
- * "Never hide an element holding content" is a global invariant, curated included.
+ * "Never hide an element holding content" is the invariant for every **automatic** source,
+ * curated included. A manual pick is the single exception: it is the user's explicit choice
+ * and can be revoked in the rule manager (see judgeElement).
  */
 export function judgeElement(el: Element, options: JudgeOptions): Verdict | null {
+  if (isPickerUi(el)) return null;
   if (isHidden(el)) return null;
-  if (holdsRealContent(el)) return null;
 
   const { threshold = SCORE_THRESHOLD } = options;
+
+  // A manual pick is an explicit instruction about this exact node. It therefore hides on
+  // match *before* the content guard: the user saw the element and chose it, and the rule is
+  // revocable in the manager. Automatic sources (curated/learned/heuristics) stay bound by
+  // "never hide content"; for them this exception must not exist.
+  if (
+    options.selectors.picked !== undefined &&
+    options.selectors.picked.length > 0 &&
+    matchesAny(el, options.selectors.picked)
+  ) {
+    return { kind: 'picked' };
+  }
+
+  if (holdsRealContent(el)) return null;
 
   if (options.selectors.curated.length > 0 && matchesAny(el, options.selectors.curated)) {
     return { kind: 'rule' };
@@ -1188,14 +1239,21 @@ export function applyVerdict(
   budget?: HidingBudget,
 ): Verdict | null {
   if (!verdict) return null;
+  // Picker UI is never a hiding target, even if a broad selector happens to match it.
+  if (isPickerUi(el)) return null;
   // Page-level budget fallback: never blank the whole page (see createHidingBudget).
-  if (budget && !budget.canHide(el)) return null;
+  // A manual pick is exempt: it is one explicit node the user asked to hide, not a
+  // per-element judgement that could run away. The hide is still counted, so the budget
+  // stays conservative for automatic rules that follow.
+  if (verdict.kind !== 'picked' && budget && !budget.canHide(el)) return null;
   const reason =
     verdict.kind === 'rule'
       ? 'rule'
-      : (verdict.hit?.reasons ?? []).includes('learned-selector')
-        ? 'learned'
-        : 'heuristic';
+      : verdict.kind === 'picked'
+        ? 'picked'
+        : (verdict.hit?.reasons ?? []).includes('learned-selector')
+          ? 'learned'
+          : 'heuristic';
   // Record **which evidence** fired: the most valuable information when triaging a misfire.
   if (verdict.kind === 'heuristic' && verdict.hit.reasons.length) {
     el.setAttribute(WHY_ATTR, verdict.hit.reasons.join(','));
@@ -1345,7 +1403,7 @@ export function sweep(root: ParentNode, options: JudgeOptions): SweepResult {
     if (isHidden(el)) continue;
     const verdict = applyVerdict(el, judgeElement(el, options), options.budget);
     if (!verdict) continue;
-    if (verdict.kind === 'rule') result.hiddenByRule += 1;
+    if (verdict.kind === 'rule' || verdict.kind === 'picked') result.hiddenByRule += 1;
     else {
       result.hiddenByHeuristic += 1;
       result.hits.push(verdict.hit);
