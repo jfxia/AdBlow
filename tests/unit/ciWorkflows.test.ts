@@ -150,9 +150,13 @@ describe('the push and pull-request workflow', () => {
   it('cancels only pull-request runs, so a push always finishes', () => {
     // A cancelled push run would skip the acceptance job entirely (measured 2026-10-22: three
     // rapid pushes cancelled each other and a ruleset that broke installation reached master).
-    assert.match(ciWf, /concurrency:[\s\S]{0,400}?group: ci-/);
-    assert.match(ciWf, /cancel-in-progress: \$\{\{\s*github\.event_name == 'pull_request'\s*\}\}/);
-    assert.doesNotMatch(ciWf, /cancel-in-progress: true/);
+    assert.match(ciWf, /concurrency:/);
+    assert.ok(ciWf.includes("group: ci-"));
+    assert.ok(
+      ciWf.includes("cancel-in-progress: ${{ github.event_name == 'pull_request' }}"),
+      "push runs must not be cancelled",
+    );
+    assert.ok(!ciWf.includes("cancel-in-progress: true"));
   });
 });
 
