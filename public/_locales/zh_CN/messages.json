@@ -25,6 +25,12 @@
   "popupToggleAria": {
     "message": "在本站启用或关闭过滤"
   },
+  "popupAllowPopupsLabel": {
+    "message": "允许本站弹窗"
+  },
+  "popupAllowPopupsAria": {
+    "message": "允许或禁止本站打开跨站弹窗"
+  },
   "popupStatRule": {
     "message": "规则拦截"
   },
@@ -175,6 +181,18 @@
   },
   "optionsClickWatchRow": {
     "message": "$1 次 · 最近 $2 · 跳向 $3",
+    "description": ""
+  },
+  "optionsPopupBlockTitle": {
+    "message": "被拦截的弹窗尝试",
+    "description": ""
+  },
+  "optionsPopupBlockHint": {
+    "message": "下列站点有开窗请求被弹窗守卫拒绝。最后一栏是页面最近一次试图打开的主机；若属于正常功能，可在该站点的扩展面板里打开「允许本站弹窗」。",
+    "description": ""
+  },
+  "optionsPopupBlockRow": {
+    "message": "$1 次 · 最近 $2 · 目标 $3",
     "description": ""
   },
   "popupPickElement": {

@@ -369,6 +369,35 @@ if (existsSync(rulesetPatch)) {
   console.log(`恶意域名清单：${size} B（badware-domains.json 已复制到 dist）`);
 }
 
+/**
+ * Popup-denylist snapshot read by the worker through chrome.runtime.getURL() and handed to the
+ * content script, which publishes it into the page for the MAIN-world window.open guard.
+ *
+ * Same packaging rule as the badware list: the worker's getURL literal is what makes this file
+ * reachable for tools/release/package.mjs. When generation was skipped, write a valid empty
+ * list instead of omitting the file -- the guard treats an empty list as "no match" and falls
+ * back to the deny-by-default policy.
+ */
+{
+  const source = p('filters/generated/popup-domains.json');
+  const target = `${DIST}/popup-domains.json`;
+  if (existsSync(source)) {
+    copyFileSync(source, target);
+  } else {
+    writeFileSync(
+      target,
+      JSON.stringify({ generatedFrom: 'popup-rules', domains: [] }, null, 2),
+      'utf8',
+    );
+    console.log(
+      '未找到 popup-domains.json —— 已写入空清单（运行时窗口守卫只按默认策略判断）',
+    );
+  }
+  const size = statSync(target).size;
+  report.push(['popup-domains.json', size, 'copy']);
+  console.log(`弹窗域名清单：${size} B（popup-domains.json 已复制到 dist）`);
+}
+
 // Self-check: every file declared in the manifest must exist
 const manifest = JSON.parse(readFileSync(`${DIST}/manifest.json`, 'utf8'));
 const declared = [

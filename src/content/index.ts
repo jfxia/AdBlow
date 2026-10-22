@@ -29,7 +29,20 @@ import {
 import { allEntries, recordHit } from './learn.ts';
 import { applyListCosmetic } from './listCosmetic.ts';
 import { recordDomains } from './domainLearn.ts';
-import { isSiteDisabled, isWallFixEnabled, markWallDetected, wallFixKey, writeStats } from './settings.ts';
+import {
+  POPUP_ALLOW_PREFIX,
+  isPopupAllowed,
+  isSiteDisabled,
+  isWallFixEnabled,
+  markWallDetected,
+  wallFixKey,
+  writeStats,
+} from './settings.ts';
+import {
+  POPUP_BLOCK_EVENT,
+  installPopupDenyElement,
+  publishPopupAllowance,
+} from '../engine/popupDomains.ts';
 import { chromeLocal } from './storage.ts';
 import { createPicker, resolvePreselect } from './picker.ts';
 import { t } from '../ui/i18n.ts';
@@ -90,6 +103,141 @@ const BACKFILL_TIMEOUT_MS = 6000;
 const WALL_DEBOUNCE_MS = 800;
 
 const store = chromeLocal();
+
+// ── Popup policy data for the MAIN world ────────────────────────────────────
+//
+// The window.open guard runs in the page's MAIN world, where neither chrome.storage nor
+// extension files are reachable. This script is the bridge, and it publishes **data only**:
+//   - `$popup` denylist → `<script type="application/json" id="adblow-popup-deny">`, an inert
+//     element the browser never executes;
+//   - the per-site "allow popups" switch → an attribute on `<html>`, so a toggle in the popup
+//     UI applies to the already-open page without a reload.
+//
+// The list is requested from the worker instead of fetched here: a content-script fetch of an
+// extension resource runs with the page's origin and would need `web_accessible_resources`,
+// exposing the list to every page (the cosmetic shards are handled the same way).
+//
+// Everything here runs at document_start, before `boot()`: the policy must be in place before
+// the first click, and none of it depends on the per-site kill switch.
+
+/** Insert the deny list, retrying if the document root does not exist yet. */
+function publishPopupDeny(domains: readonly string[]): void {
+  if (installPopupDenyElement(document, domains)) return;
+  const retry = (): void => {
+    if (installPopupDenyElement(document, domains)) {
+      document.removeEventListener('readystatechange', retry);
+    }
+  };
+  document.addEventListener('readystatechange', retry);
+}
+
+async function publishPopupDenyList(): Promise<void> {
+  try {
+    const res = (await withTimeout(
+      chrome.runtime.sendMessage({ type: 'get-popup-deny' }),
+      2500,
+    )) as { domains?: unknown } | null | undefined;
+    // `null`/missing means the worker could not read the packaged list. Publish nothing: the
+    // `$popup` layer then adds no denial, and the default cross-site policy is unchanged.
+    // Missing data is not evidence against a site, so it must not create a denial.
+    if (!Array.isArray(res?.domains)) return;
+    const domains = res.domains.filter((value): value is string => typeof value === 'string');
+    publishPopupDeny(domains);
+  } catch (error) {
+    console.debug('[adblow] popup denylist unavailable; windows follow the default policy', error);
+  }
+}
+
+/** Publish the switch value, retrying if the document root does not exist yet. */
+function publishPopupSettingNow(allowed: boolean): void {
+  if (publishPopupAllowance(document, allowed)) return;
+  const retry = (): void => {
+    if (publishPopupAllowance(document, allowed)) {
+      document.removeEventListener('readystatechange', retry);
+    }
+  };
+  document.addEventListener('readystatechange', retry);
+}
+
+/**
+ * Resolve the switch for the page this frame belongs to.
+ *
+ * The switch is stored per top-level site, so a frame asks the worker (only it sees the tab
+ * URL). If the worker cannot answer, the frame's own host is used -- the same key a top
+ * document would read, so a failure degrades to "works in the top frame only" rather than
+ * "never allowed".
+ */
+async function popupAllowedForPage(): Promise<boolean> {
+  try {
+    const res = (await withTimeout(
+      chrome.runtime.sendMessage({ type: 'get-popup-allow' }),
+      2500,
+    )) as { allowed?: unknown } | null | undefined;
+    if (typeof res?.allowed === 'boolean') return res.allowed;
+  } catch (error) {
+    console.debug('[adblow] popup switch lookup failed; falling back to this host', error);
+  }
+  return isPopupAllowed(store, location.hostname);
+}
+
+async function publishPopupSetting(): Promise<void> {
+  try {
+    publishPopupSettingNow(await popupAllowedForPage());
+  } catch (error) {
+    // Storage failure means "not allowed": the safe default is the deny policy.
+    console.debug('[adblow] could not read the popup switch', error);
+  }
+}
+
+void publishPopupDenyList();
+void publishPopupSetting();
+
+try {
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area !== 'local' || !changes) return;
+    // Any site's switch may be the tab's top-level one, which a frame cannot derive; ask again
+    // rather than filtering by this frame's host.
+    if (!Object.keys(changes).some((key) => key.startsWith(POPUP_ALLOW_PREFIX))) return;
+    void publishPopupSetting();
+  });
+} catch (error) {
+  console.debug('[adblow] popup switch watcher unavailable', error);
+}
+
+/**
+ * Forward refused windows to the worker, which keeps one record per site.
+ *
+ * The MAIN world cannot call chrome.*, so it dispatches a DOM event with a string detail; this
+ * listener is the receiving end. One record per second is enough for diagnosis and keeps a page
+ * that retries a popup in a loop from writing storage continuously.
+ */
+let popupBlockReportedAt = 0;
+try {
+  document.addEventListener(
+    POPUP_BLOCK_EVENT,
+    (event) => {
+      const detail = (event as CustomEvent).detail;
+      if (typeof detail !== 'string' || !detail) return;
+      let target: string;
+      try {
+        target = new URL(detail, location.href).href;
+      } catch {
+        return;
+      }
+      const now = Date.now();
+      if (now - popupBlockReportedAt < 1000) return;
+      popupBlockReportedAt = now;
+      try {
+        void chrome.runtime.sendMessage({ type: 'record-popup-block', target }).catch(() => {});
+      } catch {
+        // Extension reloaded or tab torn down: the record is optional.
+      }
+    },
+    { capture: true },
+  );
+} catch (error) {
+  console.debug('[adblow] popup block recorder unavailable', error);
+}
 
 // ── Element picker wiring ────────────────────────────────────────────────────
 //

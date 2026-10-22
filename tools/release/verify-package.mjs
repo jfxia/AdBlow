@@ -21,7 +21,10 @@
  *   - `icons/` exists and every declared icon is a real, non-empty file;
  *   - `list-info.json` exists, parses, and names the bundled lists;
  *   - `badware-domains.json` exists, parses, and carries a `domains` array (it is read by
- *     the worker through `chrome.runtime.getURL`, so a manifest scan never sees it).
+ *     the worker through `chrome.runtime.getURL`, so a manifest scan never sees it);
+ *   - `popup-domains.json` exists, parses, and carries a `domains` array, for the same
+ *     reason: the worker reads it for the MAIN-world window.open guard, and its loss would
+ *     silently degrade that guard to its default policy without any build-log symptom.
  * Beyond the required set it also fails on the known browser leftovers (`_metadata/`) and on
  * an archive whose file name states a different version than the manifest inside it, which
  * is what a stale or renamed artifact looks like.
@@ -225,6 +228,36 @@ export function auditPackage(buf, context = {}) {
     }
   }
 
+  /**
+   * The popup denylist is read by the worker the same way, then published into the page for the
+   * MAIN-world `window.open` guard. Missing it would leave the guard on its default policy, a
+   * degradation no manifest or build-log line would show.
+   */
+  const popupText = names.has('popup-domains.json')
+    ? readZipText(buf, 'popup-domains.json')
+    : null;
+  add(
+    'popup-domains.json is in the archive',
+    popupText !== null,
+    popupText === null ? 'popup-domains.json is missing from the archive root' : 'found',
+  );
+  if (popupText !== null) {
+    let popup = null;
+    try {
+      popup = JSON.parse(popupText);
+    } catch (e) {
+      add('popup-domains.json is valid JSON', false, e.message);
+    }
+    if (popup) {
+      const domains = popup.domains;
+      add(
+        'popup-domains.json has a domains array',
+        Array.isArray(domains),
+        Array.isArray(domains) ? `${domains.length} domains` : 'no `domains` array',
+      );
+    }
+  }
+
   // --- the manifest decides everything below
   const manifestText = names.has('manifest.json') ? readZipText(buf, 'manifest.json') : null;
   if (!add('manifest.json is at the archive root', manifestText !== null, manifestText === null ? 'manifest.json is missing from the archive root' : 'found')) {
@@ -367,7 +400,8 @@ export function runVerifyPackage(argv, io = {}) {
 
   log(
     `\n[ok] ${result.checks.length} checks passed: ${result.entryCount} entries, the manifest version, ` +
-      'every declared file, _locales, the icons, list-info.json and badware-domains.json are in the archive',
+      'every declared file, _locales, the icons, list-info.json, badware-domains.json and ' +
+      'popup-domains.json are in the archive',
   );
   return 0;
 }

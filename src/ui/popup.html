@@ -104,6 +104,15 @@
         <label for="enabled" data-i18n="popupToggleLabel"></label>
       </div>
 
+      <!-- Escape hatch: denying cross-site windows by default can break scripted popups that are
+           legitimate (OAuth, payment, share). The user decides per site. Independent of the
+           "disable filtering" switch above on purpose. -->
+      <div class="card switch-row" id="popup-allow-row" hidden>
+        <input type="checkbox" id="popup-allow" />
+        <label class="switch" for="popup-allow" data-i18n-aria="popupAllowPopupsAria"></label>
+        <label for="popup-allow" data-i18n="popupAllowPopupsLabel"></label>
+      </div>
+
       <dl class="stats" id="stats" hidden>
         <div class="stat">
           <dt data-i18n="popupStatRule"></dt>

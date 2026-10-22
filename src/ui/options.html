@@ -100,11 +100,13 @@
         padding: 7px 13px 0;
         margin: 0;
       }
-      #clickwatch h2 {
+      #clickwatch h2,
+      #popupblock h2 {
         font-size: 14px;
         margin: 20px 0 4px;
       }
-      #clickwatch .lede {
+      #clickwatch .lede,
+      #popupblock .lede {
         margin-bottom: 10px;
       }
       .empty {
@@ -177,6 +179,11 @@
 
       <!-- 点击后跨站跳转的观测（只记录）：后台写入 clickwatch:<站点>，这里只读展示 -->
       <div id="clickwatch" hidden></div>
+
+      <!-- Refused window.open attempts (record only): the worker writes popupblock:<site>.
+           Denying cross-site windows by default can break a legitimate feature; this is where
+           the user checks what was blocked and then allows popups for that site. -->
+      <div id="popupblock" hidden></div>
 
       <div id="sites"></div>
     </div>

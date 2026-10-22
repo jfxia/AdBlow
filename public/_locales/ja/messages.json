@@ -25,6 +25,12 @@
   "popupToggleAria": {
     "message": "このサイトのフィルタを有効／無効にする"
   },
+  "popupAllowPopupsLabel": {
+    "message": "このサイトのポップアップを許可"
+  },
+  "popupAllowPopupsAria": {
+    "message": "このサイトが開くクロスサイトのポップアップを許可または遮断する"
+  },
   "popupStatRule": {
     "message": "ルール遮断"
   },
@@ -175,6 +181,18 @@
   },
   "optionsClickWatchRow": {
     "message": "$1 回 · 最終 $2 · 遷移先 $3",
+    "description": ""
+  },
+  "optionsPopupBlockTitle": {
+    "message": "遮断されたポップアップの試行",
+    "description": ""
+  },
+  "optionsPopupBlockHint": {
+    "message": "以下のサイトで、ポップアップガードがウィンドウを拒否しました。最後の列は、ページが直近に開こうとしたホストです。正当な機能の場合は、そのサイトの拡張パネルで「このサイトのポップアップを許可」をオンにしてください。",
+    "description": ""
+  },
+  "optionsPopupBlockRow": {
+    "message": "$1 回 · 最終 $2 · 対象 $3",
     "description": ""
   },
   "popupPickElement": {

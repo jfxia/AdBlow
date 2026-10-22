@@ -31,6 +31,10 @@
 3,011 条拦截规则，语义是"这些域名发起的弹窗一律拦掉"。AdBlow 已有 `window.open` 守卫，只需把
 这些域名做成一张拒绝清单交给守卫；命中即拒绝，不依赖用户手势落点。这是单笔收益最大的一项。
 
+> 已完成（2026-10-22）：实际解析 3,055 条 `$popup` 规则，导出 2,738 个裸域名锚点到
+> `filters/generated/popup-domains.json`（60.5 KB），由内容脚本发布为 inert JSON、MAIN world 守卫
+> 在 `window.open` 时读取。解析结果不再计入"未支持选项"；同批改动还把跨站开窗改成默认拒绝。
+
 **2. `to` 与 `denyallow`：320 条，实现成本最低。**
 `$to=` 就是 DNR 的 `requestDomains`，`$denyallow=` 就是 `excludedRequestDomains`，两者都是一行
 映射，不需要新机制。
@@ -51,7 +55,7 @@
 ## 四、建议顺序
 
 1. **`to` + `denyallow`**（320 条，改动最小，先验证映射正确性）；
-2. **`$popup` 拒绝清单**（3,011 条，复用现有守卫）；
+2. ~~**`$popup` 拒绝清单**（3,011 条，复用现有守卫）~~ 已完成；
 3. **`redirect` / `redirect-rule` + `removeparam`**（534 条，需要随包资源与 `redirect` 动作）；
 4. **修 `$` 出现在模式中的解析缺陷**（99 条，属于解析器 bug，与选项无关）；
 5. `ghide` / `generichide` 作为空操作接受（771 条，行为不变，仅清理统计）。

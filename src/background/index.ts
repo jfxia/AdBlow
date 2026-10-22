@@ -10,7 +10,7 @@ import {
 } from '../engine/filterList/cosmetic.ts';
 import { allPromotedDomainScopes } from '../content/domainLearn.ts';
 import { migrateLearnedSchema } from '../content/learn.ts';
-import { disabledKey } from '../content/settings.ts';
+import { disabledKey, isPopupAllowed } from '../content/settings.ts';
 import { chromeLocal } from '../content/storage.ts';
 import { SITE_PACKS } from '../rules/sites/index.ts';
 import {
@@ -18,6 +18,13 @@ import {
   createBadwareIndexLoader,
   isBadwareHost,
 } from '../engine/badwareDomains.ts';
+import { createDomainIndexLoader } from '../engine/domainList.ts';
+import { POPUP_LIST_ID } from '../engine/popupDomains.ts';
+import {
+  mergePopupBlockRecord,
+  popupBlockKey,
+  type PopupBlockRecord,
+} from '../engine/popupBlock.ts';
 import {
   CONTEXT_MENU_PICK_ID,
   contextMenuPickTitle,
@@ -85,6 +92,30 @@ const badwareIndex = createBadwareIndexLoader({
       '[adblow] badware domains unavailable; cookie banners will still be handled',
       error,
     ),
+});
+
+/**
+ * Popup-denylist snapshot, read from the packaged JSON once per service-worker lifetime.
+ *
+ * Same reason as the badware snapshot: the MAIN-world guard cannot read extension files, so the
+ * content script asks for the list here and publishes it into the page. A missing file is not a
+ * reason to fail anything -- the caller then publishes nothing, and the MAIN-world guard allows
+ * the window (see src/engine/popupDomains.ts).
+ */
+const popupDenyIndex = createDomainIndexLoader({
+  loadFile: async () => {
+    // Keep this path a string literal: tools/release/package.mjs finds reachable
+    // extension resources by scanning built JS for chrome.runtime.getURL('...'). Passing the
+    // POPUP_DOMAINS_FILE constant would hide the file from that scan and the packaged build
+    // would silently lose it.
+    const url = chrome.runtime.getURL('popup-domains.json');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
+  onLoaded: (count) => console.log(`[adblow] ${POPUP_LIST_ID}: loaded ${count} domains`),
+  onUnavailable: (error) =>
+    console.debug('[adblow] popup denylist unavailable; window.open keeps the gesture policy', error),
 });
 
 
@@ -265,8 +296,43 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
-  const msg = message as { type?: string; url?: string; host?: string } | undefined;
+/**
+ * Serialised popup-block record writes.
+ *
+ * Every frame can report a refused window, and the record is a read-modify-write: without a
+ * queue two reports interleave and one count is lost. In-memory is enough — the worker may be
+ * recycled, but a lost count on a diagnostic record is not a correctness problem.
+ */
+let popupBlockWrites: Promise<void> = Promise.resolve();
+
+function recordPopupBlock(siteHost: string, targetHost: string): Promise<void> {
+  popupBlockWrites = popupBlockWrites.then(async () => {
+    try {
+      const store = chromeLocal();
+      const key = popupBlockKey(siteHost);
+      const existing = await store.get<PopupBlockRecord>(key);
+      await store.set(
+        key,
+        mergePopupBlockRecord(existing, siteHost, targetHost, Date.now()),
+      );
+    } catch (error) {
+      console.debug('[adblow] popup block record failed', error);
+    }
+  });
+  return popupBlockWrites;
+}
+
+/** Hostname of an http(s) URL, or '' when it does not parse / has no host. */
+function hostOfUrl(value: string): string {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return '';
+  }
+}
+
+chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
+  const msg = message as { type?: string; url?: string; host?: string; target?: string } | undefined;
 
   /**
    * Is this host on the packaged badware-domain list?
@@ -290,6 +356,68 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
         // createBadwareIndexLoader resolves on its own failures; this is a last-resort guard.
         console.warn('[adblow] badware lookup failed; allowing banner handling', error);
         respond({ badware: null });
+      }
+    })();
+    return true;
+  }
+
+  /**
+   * Is "allow popups" on for the site this frame belongs to?
+   *
+   * The switch is stored under the **tab's** top-level host, not the frame's: a window opened
+   * from an embedded player/checkout frame is still the user's page, and the escape hatch must
+   * cover it. `allowed: null` means the worker cannot tell (no tab URL), so the content script
+   * falls back to its own host.
+   */
+  if (msg?.type === 'get-popup-allow') {
+    void (async () => {
+      const topHost = hostOfUrl(sender.tab?.url ?? msg.url ?? '');
+      if (!topHost) {
+        respond({ allowed: null });
+        return;
+      }
+      try {
+        respond({ allowed: await isPopupAllowed(chromeLocal(), topHost) });
+      } catch (error) {
+        console.debug('[adblow] popup switch lookup failed', error);
+        respond({ allowed: null });
+      }
+    })();
+    return true;
+  }
+
+  /**
+   * One refused window, reported by the content script for the per-site record.
+   *
+   * The site is taken from the **tab's** URL, not from the reporting frame: a popup fired inside
+   * an ad iframe still needs to show up under the page the user is on.
+   */
+  if (msg?.type === 'record-popup-block') {
+    const target = typeof msg.target === 'string' ? msg.target : '';
+    const siteHost = hostOfUrl(sender.tab?.url ?? msg.url ?? '');
+    const targetHost = hostOfUrl(target);
+    if (siteHost && targetHost) void recordPopupBlock(siteHost, targetHost);
+    respond({ ok: Boolean(siteHost && targetHost) });
+    return true;
+  }
+
+  /**
+   * Popup denylist for the MAIN-world `window.open` guard.
+   *
+   * The content script cannot fetch an extension file itself: that request runs with the
+   * page's origin and would need `web_accessible_resources`, exposing the list to every page.
+   * The worker reads it once and hands over the array, which the content script publishes as
+   * inert JSON. `domains: null` means "list unavailable": nothing is published and the
+   * MAIN-world guard allows the window, the same failure direction as the badware gate.
+   */
+  if (msg?.type === 'get-popup-deny') {
+    void (async () => {
+      try {
+        const index = await popupDenyIndex.load();
+        respond({ domains: index.available ? [...index.domains] : null });
+      } catch (error) {
+        console.warn('[adblow] popup denylist lookup failed; allowing window.open', error);
+        respond({ domains: null });
       }
     })();
     return true;

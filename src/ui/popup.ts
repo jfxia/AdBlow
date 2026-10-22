@@ -1,9 +1,11 @@
 import { allEntries, clearSite } from '../content/learn.ts';
 import {
+  isPopupAllowed,
   isSiteDisabled,
   isWallFixEnabled,
   readStats,
   readWallDetected,
+  setPopupAllowed,
   setSiteDisabled,
   setWallFixEnabled,
 } from '../content/settings.ts';
@@ -14,8 +16,10 @@ import { applyI18n, t } from './i18n.ts';
  * Popup: per-site toggle, run stats, wall fix, and clearing this site's learned results.
  *
  * The toggle is a safety valve: a filter that misbehaves on one site must be switchable per
- * site, otherwise the only option left is disabling the whole extension. All text goes
- * through i18n (`t()` / `data-i18n`) — see ui/i18n.ts.
+ * site, otherwise the only option left is disabling the whole extension. A second switch
+ * ("allow popups on this site") exempts the site from the deny-by-default window.open policy,
+ * which is the escape hatch for a scripted OAuth/payment window the guard cannot recognise.
+ * All text goes through i18n (`t()` / `data-i18n`) — see ui/i18n.ts.
  *
  * The anti-adblock wall fix is a **separate, explicit confirmation**: the popup only offers it
  * after the content script reported a wall on this site, and the copy states exactly what it
@@ -53,6 +57,7 @@ function showNotice(text: string, hostLabel = false): void {
   el('stats-hint').hidden = true;
   el('wall-card').hidden = true;
   el('pick-element').hidden = true;
+  el('popup-allow-row').hidden = true;
   if (hostLabel) el('host').textContent = t('popupNotApplicable');
 }
 
@@ -96,10 +101,18 @@ async function render(): Promise<void> {
 
   el('host').textContent = host;
 
-  const disabled = await isSiteDisabled(store, host);
+  const [disabled, popupAllowed] = await Promise.all([
+    isSiteDisabled(store, host),
+    isPopupAllowed(store, host),
+  ]);
   const enabledBox = el<HTMLInputElement>('enabled');
   enabledBox.checked = !disabled;
   el('toggle-row').hidden = false;
+
+  // Shown even when filtering is disabled: the window.open guard is independent of the
+  // kill switch, so turning filtering off does not re-open popups.
+  el<HTMLInputElement>('popup-allow').checked = popupAllowed;
+  el('popup-allow-row').hidden = false;
 
   // Picking is an explicit user action, but it still writes a hiding rule for this site, so
   // it follows the per-site kill switch rather than bypassing it.
@@ -134,6 +147,14 @@ el<HTMLInputElement>('enabled').addEventListener('change', async (event) => {
   const enabled = (event.target as HTMLInputElement).checked;
   await setSiteDisabled(store, host, !enabled);
   await render();
+});
+
+el<HTMLInputElement>('popup-allow').addEventListener('change', async (event) => {
+  const host = await currentHost();
+  if (!host) return;
+  // The content script watches the same storage key and republishes the <html> attribute, so
+  // the page that is already open applies the change without a reload.
+  await setPopupAllowed(store, host, (event.target as HTMLInputElement).checked);
 });
 
 el('wall-toggle').addEventListener('click', async () => {

@@ -7,7 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![Tests](https://img.shields.io/badge/tests-1162%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-1224%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 [![CI](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
 [![auto-release](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
@@ -119,7 +119,7 @@ positive leads straight to the mechanism and the evidence behind it.
 Page scripts can interfere with filtering as well, so AdBlow restricts four behaviours in the
 page's MAIN world: `window.open` calls, click hijacking, popup-state writes to `localStorage`,
 `sessionStorage` and `window.name`, and document-level click handlers that only perform
-navigation.Navigation handlers installed through `document.onclick`, an inline `onclick` attribute or a listener on `body` / `html` are refused as well, and a cross-site `window.open` is allowed only when the click landed on a link or a button.
+navigation.Navigation handlers installed through `document.onclick`, an inline `onclick` attribute or a listener on `body` / `html` are refused as well. Cross-site `window.open` calls are denied by default: no user gesture is always refused; same-registrable-domain windows pass; a click on an `<a>` whose href is the same origin or registrable domain as the target passes; targets on a short list of stable sign-in / payment infrastructure (Google, Microsoft, Apple, GitHub, WeChat, QQ, Weibo, X, Facebook, Telegram, PayPal, Stripe, Alipay and similar hosts) pass; every other cross-site window is refused. Rules with the `$popup` option are exported at build time as a runtime denylist, and a hit there is refused ahead of all those allow rules. When a legitimate feature breaks, the popup's "allow popups on this site" switch disables both the default refusal and the `$popup` list for that site; refused attempts are recorded per site in the rule manager with a count and the most recent target host.
 
 ### Anti-adblock walls
 
@@ -159,10 +159,14 @@ hits. One hit can be a page that merely looks ad-like; a rule is worth keeping o
 then it applies only on the site that taught it, and can be revoked at any time. Every entry is
 listed in the rule manager, and can be deleted individually or exported as JSON.
 
-### Per-site switch
+### Per-site switches
 
 The popup provides a filtering switch for the current site. Turning it off also suspends the
-learned network rules that are active for that site.
+learned network rules that are active for that site. A separate "allow popups on this site"
+switch exists because denying cross-site windows by default can break scripted sign-in, payment
+or share windows: it disables the default refusal and the `$popup` denylist for that site only.
+Refused attempts are recorded in the rule manager, so the decision can be based on what was
+actually blocked.
 
 ### User interface
 
@@ -209,7 +213,7 @@ step is required. If they are unreachable altogether, the same lists are attache
 ## Build and package
 
 ```bash
-pnpm test           # 1162 unit and integration tests, run in-process
+pnpm test           # 1224 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -307,7 +311,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             1162 unit and integration tests (jsdom)
+tests/             1224 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -332,7 +336,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 1162 tests, 0 failures
+node tests/run-all.ts           # 1224 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 

@@ -6,6 +6,7 @@ import {
   type DomainEntry,
 } from '../content/domainLearn.ts';
 import { chromeLocal } from '../content/storage.ts';
+import { POPUP_BLOCK_PREFIX } from '../engine/popupBlock.ts';
 import { applyI18n, t } from './i18n.ts';
 import { sortByRule, sortHosts } from './ruleSorting.ts';
 import {
@@ -523,32 +524,43 @@ void render();
 void showListData();
 
 
-// ── Click-triggered navigation observations ─────────────────────────────────
+// ── Observation records (record only) ────────────────────────────────────────
 //
-// Record-only data written by the background script (see src/engine/clickWatch.ts): a click on
-// ordinary content followed by a cross-site top-level navigation. Shown so that a misbehaving
-// site leaves a visible trace; nothing acts on it yet.
+// Two kinds share one record shape `{ count, lastAt, lastTargetHost }` and one renderer:
+//   clickwatch:<site>  a click on ordinary content followed by a cross-site navigation
+//                      (src/engine/clickWatch.ts);
+//   popupblock:<site>  a window.open refused by the pop-up guard
+//                      (src/engine/popupBlock.ts).
+// Both are written by the worker and shown here so a misbehaving site leaves a visible trace.
+// They stay separate because the counts mean different things; the pop-up record is also the
+// evidence a user needs before turning on "allow popups on this site".
 
 const CLICK_WATCH_PREFIX = 'clickwatch:';
 
-type ClickWatchRow = { host: string; count: number; lastAt: number; targetHost: string };
+type HostRecordRow = { host: string; count: number; lastAt: number; targetHost: string };
 
-async function renderClickWatch(): Promise<void> {
-  const box = el('clickwatch');
+async function renderHostRecords(config: {
+  boxId: string;
+  prefix: string;
+  titleKey: string;
+  hintKey: string;
+  rowKey: string;
+}): Promise<void> {
+  const box = el(config.boxId);
   box.textContent = '';
 
-  const keys = (await store.keys()).filter((key) => key.startsWith(CLICK_WATCH_PREFIX));
+  const keys = (await store.keys()).filter((key) => key.startsWith(config.prefix));
   if (keys.length === 0) {
     box.hidden = true;
     return;
   }
 
-  const rows: ClickWatchRow[] = [];
+  const rows: HostRecordRow[] = [];
   for (const key of keys) {
     const value = await store.get<{ count?: number; lastAt?: number; lastTargetHost?: string }>(key);
     if (!value) continue;
     rows.push({
-      host: key.slice(CLICK_WATCH_PREFIX.length),
+      host: key.slice(config.prefix.length),
       count: typeof value.count === 'number' ? value.count : 0,
       lastAt: typeof value.lastAt === 'number' ? value.lastAt : 0,
       targetHost: typeof value.lastTargetHost === 'string' ? value.lastTargetHost : '',
@@ -557,12 +569,12 @@ async function renderClickWatch(): Promise<void> {
   rows.sort((a, b) => b.count - a.count || b.lastAt - a.lastAt);
 
   const title = document.createElement('h2');
-  title.textContent = t('optionsClickWatchTitle');
+  title.textContent = t(config.titleKey);
   box.appendChild(title);
 
   const hint = document.createElement('p');
   hint.className = 'lede';
-  hint.textContent = t('optionsClickWatchHint');
+  hint.textContent = t(config.hintKey);
   box.appendChild(hint);
 
   const section = document.createElement('section');
@@ -577,7 +589,7 @@ async function renderClickWatch(): Promise<void> {
 
     const meta = document.createElement('span');
     meta.className = 'meta';
-    meta.textContent = t('optionsClickWatchRow', [
+    meta.textContent = t(config.rowKey, [
       String(row.count),
       row.lastAt ? new Date(row.lastAt).toLocaleString() : '-',
       row.targetHost || '-',
@@ -586,8 +598,8 @@ async function renderClickWatch(): Promise<void> {
 
     const del = button('optionsDelete', 'danger');
     del.addEventListener('click', async () => {
-      await store.remove(`${CLICK_WATCH_PREFIX}${row.host}`);
-      await renderClickWatch();
+      await store.remove(`${config.prefix}${row.host}`);
+      await renderHostRecords(config);
     });
     li.appendChild(del);
 
@@ -598,4 +610,18 @@ async function renderClickWatch(): Promise<void> {
   box.hidden = false;
 }
 
-void renderClickWatch();
+void renderHostRecords({
+  boxId: 'clickwatch',
+  prefix: CLICK_WATCH_PREFIX,
+  titleKey: 'optionsClickWatchTitle',
+  hintKey: 'optionsClickWatchHint',
+  rowKey: 'optionsClickWatchRow',
+});
+
+void renderHostRecords({
+  boxId: 'popupblock',
+  prefix: POPUP_BLOCK_PREFIX,
+  titleKey: 'optionsPopupBlockTitle',
+  hintKey: 'optionsPopupBlockHint',
+  rowKey: 'optionsPopupBlockRow',
+});

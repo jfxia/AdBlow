@@ -1,56 +1,183 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { looksLikeTrackingListener, shouldAllowOpen } from '../../src/inject/guards.ts';
+import {
+  decideOpen,
+  looksLikeTrackingListener,
+  shouldAllowOpen,
+  type OpenRequest,
+} from '../../src/inject/guards.ts';
 
-const HOST = 'afford.gjvrohros.cc';
+const HOST = 'missav.watch';
+const AD = 'https://ads.example.com/landing';
 
-describe('shouldAllowOpen', () => {
-  it('拦截跨站无手势弹窗', () => {
-    assert.equal(shouldAllowOpen('https://spam.example.com/x', HOST, false), false);
+function req(overrides: Partial<OpenRequest> = {}): OpenRequest {
+  return { url: AD, pageHost: HOST, hadUserGesture: true, ...overrides };
+}
+
+/**
+ * The policy flipped from "a gesture on any control may open anything" to "cross-site is
+ * refused unless something concrete says the user meant it". The reported popunder fires from a
+ * real play button, so a control is no longer evidence -- only an `<a>` pointing at the target
+ * (or an allowlisted sign-in host) is.
+ */
+describe('window.open：默认拒绝跨站，只有明确依据才放行', () => {
+  it('点击播放按钮（不是 <a>）打开跨站 → 拒绝', () => {
+    const decision = decideOpen(req({ gestureAnchorHref: null }));
+    assert.equal(decision.allow, false);
+    assert.equal(decision.reason, 'cross-site');
   });
 
-  it('放行同站跳转', () => {
-    assert.equal(shouldAllowOpen('/archives/1/', HOST, true), true);
-    assert.equal(shouldAllowOpen('/archives/1/', HOST, false), true);
+  it('没有用户手势 → 拒绝，即使目标同站', () => {
+    assert.equal(decideOpen(req({ url: '/player', hadUserGesture: false })).reason, 'no-gesture');
+    assert.equal(
+      decideOpen(req({ url: 'https://www.missav.watch/x', hadUserGesture: false })).allow,
+      false,
+    );
   });
 
-  it('放行用户手势触发的跨站链接', () => {
-    assert.equal(shouldAllowOpen('https://twitter.com/x', HOST, true), true);
+  it('同注册域名（eTLD+1）→ 放行，任意子域层级', () => {
+    for (const url of [
+      '/archives/1/',
+      'https://missav.watch/x',
+      'https://www.missav.watch/x',
+      'https://a.b.missav.watch/x',
+      '//www.missav.watch/x',
+    ]) {
+      const decision = decideOpen(req({ url }));
+      assert.equal(decision.allow, true, url);
+      assert.equal(decision.reason, 'same-site', url);
+    }
   });
 
-  it('拦截空目标与 about:blank 的无手势弹窗', () => {
-    assert.equal(shouldAllowOpen('about:blank', HOST, false), false);
-    assert.equal(shouldAllowOpen('', HOST, false), false);
-    assert.equal(shouldAllowOpen('javascript:void(0)', HOST, false), false);
+  it('点击落在 <a> 上，且链接与目标同源 → 放行', () => {
+    const decision = decideOpen(
+      req({
+        url: 'https://player.example.com/watch?v=1',
+        gestureAnchorHref: 'https://player.example.com/watch?v=1',
+      }),
+    );
+    assert.equal(decision.allow, true);
+    assert.equal(decision.reason, 'anchor-target');
   });
 
-  it('同可注册域名的子域视为同站', () => {
-    assert.equal(shouldAllowOpen('https://www.gjvrohros.cc/x', HOST, false), true);
+  it('点击落在 <a> 上，链接与目标同注册域名 → 放行', () => {
+    const decision = decideOpen(
+      req({
+        url: 'https://popup.example.com/x',
+        gestureAnchorHref: 'https://www.example.com/article',
+      }),
+    );
+    assert.equal(decision.allow, true);
+    assert.equal(decision.reason, 'anchor-target');
   });
 
-  it('视觉相似但不同可注册域名的目标一律拦截', () => {
-    assert.equal(shouldAllowOpen('https://gjvrohros.cc.evil.com/x', HOST, false), false);
+  it('链接指向别的站，目标又是第三个站 → 拒绝（链接不是万能通行证）', () => {
+    const decision = decideOpen(
+      req({
+        url: 'https://ads.example.com/x',
+        gestureAnchorHref: 'https://news.example.net/article',
+      }),
+    );
+    assert.equal(decision.allow, false);
+    assert.equal(decision.reason, 'cross-site');
   });
 
-  it('非法输入不抛异常：同源放行，无法解析则拦截', () => {
-    assert.doesNotThrow(() => shouldAllowOpen('ht!tp://%%', HOST, false));
-    // Malformed strings like this parse as relative references — i.e. same-origin — so
-    // allowing them is correct: only a same-site hop, with no cross-site risk.
-    assert.equal(shouldAllowOpen('ht!tp://%%', HOST, false), true);
-    // Genuinely unparseable input must be blocked, and must not throw.
-    assert.doesNotThrow(() => shouldAllowOpen('http://[', HOST, false));
-    assert.equal(shouldAllowOpen('http://[', HOST, false), false);
+  it('javascript: 链接不算同源依据', () => {
+    const decision = decideOpen(
+      req({ url: AD, gestureAnchorHref: 'javascript:void(0)' }),
+    );
+    assert.equal(decision.allow, false);
+    assert.equal(decision.reason, 'cross-site');
+  });
+
+  it('目标主机在正常用途白名单 → 放行（登录 / 支付窗口）', () => {
+    for (const url of [
+      'https://accounts.google.com/o/oauth2/auth',
+      'https://login.microsoftonline.com/common/oauth2',
+      'https://appleid.apple.com/auth/authorize',
+      'https://checkout.stripe.com/pay/abc',
+      'https://api.weixin.qq.com/sns/oauth2',
+      'https://graph.qq.com/oauth2.0',
+    ]) {
+      const decision = decideOpen(req({ url }));
+      assert.equal(decision.allow, true, url);
+      assert.equal(decision.reason, 'allowlisted-host', url);
+    }
+  });
+
+  it('白名单按主机边界匹配，不是裸后缀', () => {
+    assert.equal(decideOpen(req({ url: 'https://notpaypal.com/x' })).allow, false);
+    assert.equal(decideOpen(req({ url: 'https://paypal.com.evil.test/x' })).allow, false);
+    assert.equal(decideOpen(req({ url: 'https://www.paypal.com/checkout' })).allow, true);
+  });
+
+  it('$popup 名单命中 → 无条件拒绝（高于同站 / 链接 / 白名单）', () => {
+    for (const request of [
+      req({ popupDenied: true }),
+      req({ url: 'https://www.missav.watch/x', popupDenied: true }),
+      req({ url: 'https://www.paypal.com/checkout', popupDenied: true }),
+      req({ url: 'https://player.example.com/x', gestureAnchorHref: 'https://player.example.com/x', popupDenied: true }),
+    ]) {
+      const decision = decideOpen(request);
+      assert.equal(decision.allow, false);
+      assert.equal(decision.reason, 'popup-list');
+    }
+  });
+
+  it('站点开关「允许本站弹窗」→ 放行跨站，并压过 $popup 名单', () => {
+    const decision = decideOpen(
+      req({ url: 'https://ads.example.com/x', popupDenied: true, siteAllowsPopups: true }),
+    );
+    assert.equal(decision.allow, true);
+    assert.equal(decision.reason, 'site-permitted');
+  });
+
+  it('站点开关不放过无手势与 javascript: 目标', () => {
+    assert.equal(
+      decideOpen(req({ hadUserGesture: false, siteAllowsPopups: true })).reason,
+      'no-gesture',
+    );
+    assert.equal(
+      decideOpen(req({ url: 'javascript:alert(1)', siteAllowsPopups: true })).reason,
+      'invalid-target',
+    );
+  });
+
+  it('空目标 / about:blank / javascript: → 拒绝（无论手势与开关）', () => {
+    for (const url of ['', 'about:blank', 'javascript:void(0)']) {
+      assert.equal(decideOpen(req({ url })).reason, 'invalid-target', url);
+      assert.equal(
+        decideOpen(req({ url, siteAllowsPopups: true })).allow,
+        false,
+        `${url} (site permitted)`,
+      );
+    }
+  });
+
+  it('无法解析的绝对地址拒绝且不抛异常', () => {
+    assert.doesNotThrow(() => decideOpen(req({ url: 'http://[' })));
+    assert.equal(decideOpen(req({ url: 'http://[' })).reason, 'invalid-target');
+    // A malformed string like this parses as a relative reference (same origin), which is a
+    // same-site hop and therefore allowed once a gesture exists.
+    assert.equal(decideOpen(req({ url: 'ht!tp://%%' })).allow, true);
   });
 
   it('协议相对地址按真实主机判定', () => {
-    assert.equal(shouldAllowOpen('//evil.example.com/x', HOST, false), false);
-    assert.equal(shouldAllowOpen('//afford.gjvrohros.cc/x', HOST, false), true);
+    assert.equal(decideOpen(req({ url: '//evil.example.com/x' })).allow, false);
+    assert.equal(decideOpen(req({ url: '//afford.gjvrohros.cc/x', pageHost: 'afford.gjvrohros.cc' })).allow, true);
   });
 
-  it('放行时不受手势状态影响（手势只放宽不收紧）', () => {
-    for (const gesture of [true, false]) {
-      assert.equal(shouldAllowOpen('https://afford.gjvrohros.cc/a', HOST, gesture), true);
-    }
+  it('视觉相似但不同注册域名的目标拒绝', () => {
+    assert.equal(
+      decideOpen(req({ url: 'https://gjvrohros.cc.evil.com/x', pageHost: 'gjvrohros.cc' })).allow,
+      false,
+    );
+  });
+
+  it('shouldAllowOpen 是同一判定的布尔视图', () => {
+    const request = req({ url: 'https://accounts.google.com/o/oauth2/auth' });
+    assert.equal(shouldAllowOpen(request), decideOpen(request).allow);
+    assert.equal(shouldAllowOpen(req()), false);
   });
 });
 

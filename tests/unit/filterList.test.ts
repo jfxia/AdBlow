@@ -174,7 +174,7 @@ describe('parseFilterLine：安全边界（丢弃而不是放宽）', () => {
       'removeparam=utm_source',
       'generichide',
       'elemhide',
-      'popup',
+      // 'popup' is not here: it is parsed as its own rule kind, see popupDomains.test.ts.
       'inline-script',
       'replace=/a/b/',
       'sitekey=abc',

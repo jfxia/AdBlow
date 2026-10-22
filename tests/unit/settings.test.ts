@@ -2,11 +2,14 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   disabledKey,
+  isPopupAllowed,
   isSiteDisabled,
   isWallFixEnabled,
   markWallDetected,
+  popupAllowKey,
   readStats,
   readWallDetected,
+  setPopupAllowed,
   setSiteDisabled,
   setWallFixEnabled,
   statsKey,
@@ -45,6 +48,41 @@ describe('站点开关（安全阀）', () => {
   it('存储里是别的真值时不误判为关闭（只有 === true 才算）', async () => {
     const store = memoryStore({ [disabledKey('a.cc')]: 'yes' });
     assert.equal(await isSiteDisabled(store, 'a.cc'), false);
+  });
+});
+
+describe('弹窗逃生门：按站点允许开窗', () => {
+  it('默认不允许；键名固定为 popupallow:<host>', async () => {
+    const store = memoryStore();
+    assert.equal(popupAllowKey('example.com'), 'popupallow:example.com');
+    assert.equal(await isPopupAllowed(store, 'example.com'), false);
+  });
+
+  it('打开后读回为允许；关闭时删键而不是写 false', async () => {
+    const store = memoryStore();
+    await setPopupAllowed(store, 'example.com', true);
+    assert.equal(await store.get<boolean>(popupAllowKey('example.com')), true);
+    assert.equal(await isPopupAllowed(store, 'example.com'), true);
+
+    await setPopupAllowed(store, 'example.com', false);
+    assert.equal(await isPopupAllowed(store, 'example.com'), false);
+    assert.ok(!(await store.keys()).includes(popupAllowKey('example.com')));
+  });
+
+  it('与"关闭本站过滤"是两把独立的开关', async () => {
+    const store = memoryStore();
+    await setSiteDisabled(store, 'a.cc', true);
+    assert.equal(await isPopupAllowed(store, 'a.cc'), false);
+
+    await setPopupAllowed(store, 'b.cc', true);
+    assert.equal(await isSiteDisabled(store, 'b.cc'), false);
+    assert.equal(await isPopupAllowed(store, 'a.cc'), false);
+    assert.equal(await isPopupAllowed(store, 'c.cc'), false);
+  });
+
+  it('非 true 的值不算允许', async () => {
+    const store = memoryStore({ [popupAllowKey('a.cc')]: 'yes' });
+    assert.equal(await isPopupAllowed(store, 'a.cc'), false);
   });
 });
 

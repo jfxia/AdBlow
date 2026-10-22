@@ -24,6 +24,38 @@ export async function setSiteDisabled(
 }
 
 /**
+ * Per-site popup escape hatch.
+ *
+ * The MAIN-world policy refuses cross-site windows by default, which is right for ads but can
+ * break a site that opens a real window from a scripted button (OAuth, "share to", payment
+ * redirect). The user decides per site instead of the extension guessing. Same storage shape as
+ * the kill switch: key present = allowed, absent = not allowed.
+ *
+ * This is independent of `disabled:<host>` on purpose: turning filtering off should not silently
+ * re-open the popup gate, and vice versa.
+ *
+ * The switch is written for the tab's top-level host; frames ask the worker about that host so
+ * enabling it on a page also covers a window opened from an embedded frame (and the MAIN-world
+ * guard runs in every frame).
+ */
+export const POPUP_ALLOW_PREFIX = 'popupallow:';
+
+export const popupAllowKey = (host: string): string => `${POPUP_ALLOW_PREFIX}${host}`;
+
+export async function isPopupAllowed(store: KvStore, host: string): Promise<boolean> {
+  return (await store.get<boolean>(popupAllowKey(host))) === true;
+}
+
+export async function setPopupAllowed(
+  store: KvStore,
+  host: string,
+  allowed: boolean,
+): Promise<void> {
+  if (allowed) await store.set(popupAllowKey(host), true);
+  else await store.remove(popupAllowKey(host));
+}
+
+/**
  * Anti-adblock wall fix, per site — **an explicit user confirmation, never automatic**.
  *
  * Default is off: the extension does not touch the page until the user asks for the fix on that

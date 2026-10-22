@@ -25,6 +25,12 @@
   "popupToggleAria": {
     "message": "Activar o desactivar el filtrado en este sitio"
   },
+  "popupAllowPopupsLabel": {
+    "message": "Permitir ventanas emergentes en este sitio"
+  },
+  "popupAllowPopupsAria": {
+    "message": "Permitir o bloquear las ventanas emergentes entre sitios que abre este sitio"
+  },
   "popupStatRule": {
     "message": "Reglas"
   },
@@ -175,6 +181,18 @@
   },
   "optionsClickWatchRow": {
     "message": "$1 vez/veces · última $2 · hacia $3",
+    "description": ""
+  },
+  "optionsPopupBlockTitle": {
+    "message": "Intentos de ventana emergente rechazados",
+    "description": ""
+  },
+  "optionsPopupBlockHint": {
+    "message": "En estos sitios el protector rechazó una ventana. La última columna es el host que la página intentó abrir más recientemente. Si es una función legítima, activa «Permitir ventanas emergentes en este sitio» en el panel de la extensión para ese sitio.",
+    "description": ""
+  },
+  "optionsPopupBlockRow": {
+    "message": "$1 vez/veces · última $2 · destino $3",
     "description": ""
   },
   "popupPickElement": {

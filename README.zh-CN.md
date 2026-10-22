@@ -7,7 +7,7 @@
 **在过滤列表匹配之外，依据页面运行时的元素行为判定并拦截广告。**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
-[![测试](https://img.shields.io/badge/tests-1162%20passing-brightgreen)](#测试与验收)
+[![测试](https://img.shields.io/badge/tests-1224%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与本地化)
 [![持续集成](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
 [![自动发版](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
@@ -76,7 +76,7 @@ AdBlow 内置 25,467 条域名限定选择器，覆盖 11,357 个域名。把整
 
 ### 反劫持
 
-页面脚本同样可能反过来干扰过滤：开新窗口、劫持点击把用户带去广告页、借弹窗状态反复弹窗、注册只负责跳转的点击处理。针对这四类动作，AdBlow 在页面的 MAIN world 里分别做了限制：调用 `window.open`；点击劫持；向弹窗状态写入数据（`localStorage`、`sessionStorage`、`window.name`）；注册「只负责跳转」的文档级点击处理函数。除此之外，页面用 `document.onclick` 赋值、行内 `onclick` 属性或注册在 `body` / `html` 上的跳转处理器会被拒绝安装；跨站 `window.open` 只在点击落在链接、按钮一类控件时放行，点击正文或空白处触发的跨站开窗会被拒绝。
+页面脚本同样可能反过来干扰过滤：开新窗口、劫持点击把用户带去广告页、借弹窗状态反复弹窗、注册只负责跳转的点击处理。针对这四类动作，AdBlow 在页面的 MAIN world 里分别做了限制：调用 `window.open`；点击劫持；向弹窗状态写入数据（`localStorage`、`sessionStorage`、`window.name`）；注册「只负责跳转」的文档级点击处理函数。除此之外，页面用 `document.onclick` 赋值、行内 `onclick` 属性或注册在 `body` / `html` 上的跳转处理器会被拒绝安装。`window.open` 改为默认不信任跨站开窗：没有用户手势一律拒绝；同注册域名的窗口放行；点击落在 `<a>` 上、且链接与目标同源或同注册域名时放行；目标属于稳定的登录 / 支付基础设施（Google、Microsoft、Apple、GitHub、微信、QQ、微博、X、Facebook、Telegram、PayPal、Stripe、支付宝等白名单主机）时放行；其余跨站开窗一律拒绝。过滤列表中的 `$popup` 规则另导出一份运行时域名名单，命中即拒绝，优先级高于上述放行条件。误伤正常功能时，弹窗里的「允许本站弹窗」只为当前站点关闭默认拒绝与 `$popup` 名单；被拒绝的开窗按站点记录在规则管理页，包含次数与最近一次的目标主机。
 
 ### 反过滤墙
 
@@ -100,7 +100,7 @@ AdBlow 支持 13 个规范的 `##+js(...)` 规则，覆盖 3,247 个域名，常
 
 ### 站点开关
 
-弹窗提供当前站点的过滤开关。关闭之后，该站点上已经生效的自学习网络规则也一并暂停。
+弹窗提供当前站点的过滤开关。关闭之后，该站点上已经生效的自学习网络规则也一并暂停。另有一个独立的「允许本站弹窗」开关：默认拒绝跨站开窗可能误伤脚本触发的登录、支付或分享窗口，该开关只为当前站点放行这类窗口；被拒绝的尝试会出现在规则管理页，便于先核对再放行。
 
 ### 界面与本地化
 
@@ -137,7 +137,7 @@ pnpm build          # 产出 dist/
 ## 构建与打包
 
 ```bash
-pnpm test           # 1162 项单元与集成测试，单进程内执行
+pnpm test           # 1224 项单元与集成测试，单进程内执行
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 与商店图标）
@@ -210,7 +210,7 @@ tools/
   e2e/             24 类真实浏览器验收；活站端到端
   release/         审计、zip 打包、商店截图生成
   diagnostics/     可在控制台直接执行的诊断脚本，用于定位站点异常
-tests/             1162 项单元与集成测试（jsdom）
+tests/             1224 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
 
@@ -228,7 +228,7 @@ public/            manifest、_locales、图标
 ## 测试与验收
 
 ```bash
-node tests/run-all.ts           # 1162 项测试，0 失败
+node tests/run-all.ts           # 1224 项测试，0 失败
 node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
 ```
 

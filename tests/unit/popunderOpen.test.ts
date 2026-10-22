@@ -1,43 +1,73 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldAllowOpen } from '../../src/inject/guards.ts';
+import { decideOpen } from '../../src/inject/guards.ts';
 
 /**
- * popunder 的触发条件是"用户在**任意位置**点了一下"，然后 `window.open` 一个广告窗口。
- * 原来的策略是"带手势就一律放行"，于是这类弹窗全都漏了过去（2026-10-20，
- * missav.watch 页面里带 `__htapop` 的 popunder SDK，1001×800，统计 clickedElement）。
+ * A popunder fires from a click **anywhere** and then calls `window.open` for an ad window.
+ * The measured site (missav.watch, 2026-10-20) ships `__htapop` with `type:"popunder"`,
+ * 1001x800 and counts clickedElement; the play button itself is the trigger.
  *
- * 现在的判断多一个维度：手势落在哪里。
+ * The old rule ("a gesture on any control passes") let exactly that through. Cross-site
+ * windows are now refused by default; only an `<a>` pointing at the target, a same-site
+ * target, or an allowlisted host passes. These cases pin the real-world scenario.
  */
-describe('shouldAllowOpen：手势落在控件上才放行跨站开窗', () => {
+describe('popunder 回归：播放按钮不再能开跨站窗口', () => {
+  const PAGE = 'missav.watch';
   const AD = 'https://ads.example.com/landing';
 
-  it('点在正文/空白处 + 跨站 → 拦截（popunder 路径）', () => {
-    assert.equal(shouldAllowOpen(AD, 'missav.watch', true, false), false);
+  it('播放按钮（<button>，不是 <a>）+ 跨站 → 拒绝', () => {
+    const decision = decideOpen({
+      url: AD,
+      pageHost: PAGE,
+      hadUserGesture: true,
+      gestureAnchorHref: null,
+    });
+    assert.equal(decision.allow, false);
+    assert.equal(decision.reason, 'cross-site');
   });
 
-  it('点在链接/按钮上 + 跨站 → 放行（分享、外链打开）', () => {
-    assert.equal(shouldAllowOpen(AD, 'missav.watch', true, true), true);
+  it('页面自己的播放/帮助窗口仍然放行', () => {
+    assert.equal(
+      decideOpen({ url: '/popup/help', pageHost: PAGE, hadUserGesture: true }).allow,
+      true,
+    );
+    assert.equal(
+      decideOpen({
+        url: 'https://www.missav.watch/popup',
+        pageHost: PAGE,
+        hadUserGesture: true,
+      }).allow,
+      true,
+    );
   });
 
-  it('点在正文/空白处 + 同站 → 放行（站点自己的弹窗）', () => {
-    assert.equal(shouldAllowOpen('/popup/help', 'missav.watch', true, false), true);
-    assert.equal(shouldAllowOpen('https://www.missav.watch/popup', 'missav.watch', true, false), true);
+  it('真实外链（用户点的就是那个站）仍然放行', () => {
+    const decision = decideOpen({
+      url: 'https://external.example/x',
+      pageHost: PAGE,
+      hadUserGesture: true,
+      gestureAnchorHref: 'https://external.example/article',
+    });
+    assert.equal(decision.allow, true);
+    assert.equal(decision.reason, 'anchor-target');
   });
 
-  it('没有任何手势时行为不变：只允许同站', () => {
-    assert.equal(shouldAllowOpen(AD, 'missav.watch', false, true), false);
-    assert.equal(shouldAllowOpen(AD, 'missav.watch', false, false), false);
-    assert.equal(shouldAllowOpen('/x', 'missav.watch', false, false), true);
+  it('无手势的一律拒绝', () => {
+    assert.equal(
+      decideOpen({ url: AD, pageHost: PAGE, hadUserGesture: false }).allow,
+      false,
+    );
   });
 
-  it('缺省参数保持旧行为（不传手势落点按控件处理）', () => {
-    assert.equal(shouldAllowOpen(AD, 'missav.watch', true), true);
-  });
-
-  it('空目标与 javascript: 一律拒绝', () => {
-    assert.equal(shouldAllowOpen('', 'missav.watch', true, true), false);
-    assert.equal(shouldAllowOpen('about:blank', 'missav.watch', true, true), false);
-    assert.equal(shouldAllowOpen('javascript:void(0)', 'missav.watch', true, true), false);
+  it('$popup 名单里的目标即使从真实外链点开也拒绝', () => {
+    const decision = decideOpen({
+      url: 'https://ads.example.com/landing',
+      pageHost: PAGE,
+      hadUserGesture: true,
+      gestureAnchorHref: 'https://ads.example.com/landing',
+      popupDenied: true,
+    });
+    assert.equal(decision.allow, false);
+    assert.equal(decision.reason, 'popup-list');
   });
 });

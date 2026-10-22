@@ -25,6 +25,12 @@
   "popupToggleAria": {
     "message": "Enable or disable filtering on this site"
   },
+  "popupAllowPopupsLabel": {
+    "message": "Allow popups on this site"
+  },
+  "popupAllowPopupsAria": {
+    "message": "Allow or block cross-site popups opened by this site"
+  },
   "popupStatRule": {
     "message": "Rule blocks"
   },
@@ -175,6 +181,18 @@
   },
   "optionsClickWatchRow": {
     "message": "$1 time(s) · last $2 · went to $3",
+    "description": ""
+  },
+  "optionsPopupBlockTitle": {
+    "message": "Refused popup attempts",
+    "description": ""
+  },
+  "optionsPopupBlockHint": {
+    "message": "On these sites the popup guard refused a window. The last column is the host the page most recently tried to open. If it is a legitimate feature, turn on \"Allow popups on this site\" in the extension panel for that site.",
+    "description": ""
+  },
+  "optionsPopupBlockRow": {
+    "message": "$1 time(s) · last $2 · target $3",
     "description": ""
   },
   "popupPickElement": {

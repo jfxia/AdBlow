@@ -25,6 +25,12 @@
   "popupToggleAria": {
     "message": "Activer ou désactiver le filtrage sur ce site"
   },
+  "popupAllowPopupsLabel": {
+    "message": "Autoriser les pop-ups sur ce site"
+  },
+  "popupAllowPopupsAria": {
+    "message": "Autoriser ou bloquer les pop-ups inter-sites ouverts par ce site"
+  },
   "popupStatRule": {
     "message": "Règles"
   },
@@ -175,6 +181,18 @@
   },
   "optionsClickWatchRow": {
     "message": "$1 fois · dernier $2 · vers $3",
+    "description": ""
+  },
+  "optionsPopupBlockTitle": {
+    "message": "Tentatives de pop-up refusées",
+    "description": ""
+  },
+  "optionsPopupBlockHint": {
+    "message": "Sur ces sites, le garde-fou des pop-ups a refusé une fenêtre. La dernière colonne indique l'hôte que la page a tenté d'ouvrir le plus récemment. S'il s'agit d'une fonction légitime, activez « Autoriser les pop-ups sur ce site » dans le panneau de l'extension pour ce site.",
+    "description": ""
+  },
+  "optionsPopupBlockRow": {
+    "message": "$1 fois · dernière $2 · cible $3",
     "description": ""
   },
   "popupPickElement": {

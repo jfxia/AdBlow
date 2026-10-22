@@ -87,6 +87,10 @@ function makePackage(
       name: 'badware-domains.json',
       data: JSON.stringify({ generatedFrom: 'ublock-badware', domains: ['a.com'] }),
     },
+    {
+      name: 'popup-domains.json',
+      data: JSON.stringify({ generatedFrom: 'popup-rules', domains: ['ads.example'] }),
+    },
   ];
 
   return [...base, ...(opts.extra ?? [])]
@@ -196,6 +200,18 @@ describe('the package audit rejects a broken archive', () => {
       makePackage({ replace: { 'badware-domains.json': JSON.stringify({ generatedFrom: 'x' }) } }),
     );
     assert.match(problems, /badware-domains\.json has a domains array/);
+  });
+
+  it('rejects a package that lost popup-domains.json (read via chrome.runtime.getURL)', () => {
+    const problems = problemsOf(makePackage({ remove: ['popup-domains.json'] }));
+    assert.match(problems, /popup-domains\.json is in the archive/);
+  });
+
+  it('rejects a popup-domains.json without a domains array', () => {
+    const problems = problemsOf(
+      makePackage({ replace: { 'popup-domains.json': JSON.stringify({ generatedFrom: 'x' }) } }),
+    );
+    assert.match(problems, /popup-domains\.json has a domains array/);
   });
 
   it('rejects a list-info.json that names no list at all', () => {

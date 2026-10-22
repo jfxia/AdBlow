@@ -45,12 +45,25 @@ function fixtureWithContentThumb(): string {
 type SendMessage = (msg: { type?: string; url?: string }) => Promise<unknown>;
 
 /** Minimal chrome stub: only the parts the content script uses. */
-function fakeChrome(options: { packs: unknown[]; pristine: string | null }): unknown {
+function fakeChrome(options: {
+  packs: unknown[];
+  pristine: string | null;
+  /** `$popup` list handed to the page; null/undefined = worker could not read it. */
+  popupDeny?: string[] | null;
+  /** Per-site popup switch answer; undefined = worker could not tell. */
+  popupAllowed?: boolean | null;
+}): unknown {
   const data: Record<string, unknown> = {};
   const sendMessage: SendMessage = async (msg) => {
     if (msg?.type === 'get-site-packs') return options.packs;
     if (msg?.type === 'get-pristine') {
       return options.pristine === null ? null : { html: options.pristine };
+    }
+    if (msg?.type === 'get-popup-deny') {
+      return { domains: Array.isArray(options.popupDeny) ? options.popupDeny : null };
+    }
+    if (msg?.type === 'get-popup-allow') {
+      return { allowed: typeof options.popupAllowed === 'boolean' ? options.popupAllowed : null };
     }
     return undefined;
   };
@@ -79,6 +92,8 @@ async function runBundle(options: {
   pristine: string | null;
   html?: string;
   host?: string;
+  popupDeny?: string[] | null;
+  popupAllowed?: boolean | null;
 }): Promise<{ doc: Document; win: Window & typeof globalThis; storage: Record<string, unknown> }> {
   const code = readFileSync(distPath, 'utf8');
   const host = options.host ?? HOST;
@@ -254,6 +269,35 @@ describe(
 
       assert.equal(dom.window.document.querySelectorAll('[data-adblow-hidden]').length, 0);
       assert.equal(dom.window.document.querySelectorAll('style[data-adblow-cosmetic]').length, 0);
+    });
+
+    it('把 $popup 名单发布成 inert JSON 元素（MAIN world 的读取源）', async () => {
+      const { doc } = await runBundle({
+        packs: [pilotPack],
+        pristine: null,
+        popupDeny: ['ads.example', 'popunder.example'],
+      });
+
+      const el = doc.getElementById('adblow-popup-deny');
+      assert.ok(el, '未发布 adblow-popup-deny 元素');
+      assert.equal(el!.tagName, 'SCRIPT');
+      // A non-JavaScript type is what keeps the element inert; anything else would execute.
+      assert.equal(el!.getAttribute('type'), 'application/json');
+      assert.deepEqual(JSON.parse(el!.textContent!), ['ads.example', 'popunder.example']);
+    });
+
+    it('名单读不到时不发布元素（MAIN world 不会据此拒绝任何窗口）', async () => {
+      const { doc } = await runBundle({ packs: [pilotPack], pristine: null, popupDeny: null });
+      assert.equal(doc.getElementById('adblow-popup-deny'), null);
+    });
+
+    it('站点开关打开时在 <html> 上发布允许标记', async () => {
+      const { doc } = await runBundle({
+        packs: [pilotPack],
+        pristine: null,
+        popupAllowed: true,
+      });
+      assert.equal(doc.documentElement.getAttribute('data-adblow-popup-allow'), '1');
     });
 
     it('内容脚本执行期间没有未捕获异常（定位 boot 静默失败）', async () => {

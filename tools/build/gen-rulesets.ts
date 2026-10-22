@@ -24,6 +24,12 @@ import {
   type ScriptletRule,
 } from '../../src/engine/filterList/scriptlet.ts';
 import { BADWARE_LIST_ID, extractBadwareDomains } from '../../src/engine/badwareDomains.ts';
+import {
+  POPUP_DOMAINS_FILE,
+  POPUP_LIST_ID,
+  extractPopupDomains,
+} from '../../src/engine/popupDomains.ts';
+import type { ParsedFilter } from '../../src/engine/filterList/parse.ts';
 
 const ROOT = new URL('../../', import.meta.url);
 const p = (rel: string) => fileURLToPath(new URL(rel, ROOT));
@@ -44,8 +50,9 @@ const OUT_DIR = p('filters/generated/');
  *
  * Measured 2026-10-22: this budget is **not binding** — `budgetTruncated` is 0, so no candidate is
  * being left behind for lack of room. Raising it buys nothing until more rules become eligible;
- * the real losses are at the parse stage (4,832 rules using options the compiler does not support)
- * and on the cosmetic side (10,386 selectors available but not packed).
+ * the real losses are at the parse stage (1,452 rules using options the compiler does not support,
+ * after `$popup` moved to the runtime denylist) and on the cosmetic side (14,335 generic selectors
+ * available but not injected).
  */
 const DEFAULT_BUDGET = 29_500;
 /** Rules per ruleset (shards allow toggling lists later). */
@@ -84,8 +91,10 @@ const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as {
   lists: { id: string; license: string; licenseUrl: string; url: string }[];
 };
 
-const perList: { id: string; network: number; cosmetic: number; skipped: number }[] = [];
+const perList: { id: string; network: number; popup: number; cosmetic: number; skipped: number }[] = [];
 const allFilters = [];
+/** `$popup` rules are a runtime denylist, never DNR rules; kept separate on purpose. */
+const allPopupFilters: ParsedFilter[] = [];
 const allCosmetic: CosmeticFilter[] = [];
 const allScriptlets: ScriptletRule[] = [];
 const skipReasons: Record<string, number> = {};
@@ -101,6 +110,7 @@ for (const entry of meta.lists) {
   perList.push({
     id: entry.id,
     network: parsed.network.length,
+    popup: parsed.popup.length,
     cosmetic: parsed.cosmetic.length,
     skipped: parsed.skipped.length,
   });
@@ -110,6 +120,7 @@ for (const entry of meta.lists) {
   }
   cosmeticTotal += parsed.cosmetic.length;
   allFilters.push(...parsed.network);
+  allPopupFilters.push(...parsed.popup);
 
   for (const c of parsed.cosmetic) {
     const f = parseCosmeticLine(c.raw);
@@ -124,6 +135,7 @@ console.log(`读取 ${perList.length} 份列表：`);
 for (const l of perList) {
   console.log(
     `  ${l.id.padEnd(16)} 网络=${String(l.network).padStart(6)} ` +
+      `popup=${String(l.popup).padStart(5)} ` +
       `cosmetic=${String(l.cosmetic).padStart(6)} 解析丢弃=${String(l.skipped).padStart(5)}`,
   );
 }
@@ -167,6 +179,31 @@ console.log(
     (badwareDomains.length === 0 ? '（空清单，不拦截任何站点）' : ''),
 );
 
+/**
+ * Popup denylist for the runtime `window.open` guard.
+ *
+ * DNR has no resource type for "a page called window.open", so these rules cannot live in the
+ * network rulesets -- compiled there they would block every request to the host. This export is
+ * the alternative: only bare domain anchors become entries (the guard knows the destination
+ * host, not the path), `@@` exceptions subtract, and scoped `$domain=` / `$to=` rules are
+ * skipped because the host is only a popup target in another site's context.
+ *
+ * A missing set of `$popup` rules still writes a valid empty file: the runtime treats an empty
+ * list as "no match" and the guard falls back to its deny-by-default policy.
+ */
+const popupDomains = extractPopupDomains(allPopupFilters);
+const popupJson = JSON.stringify(
+  { generatedFrom: POPUP_LIST_ID, domains: popupDomains },
+  null,
+  2,
+);
+writeFileSync(`${OUT_DIR}${POPUP_DOMAINS_FILE}`, popupJson, 'utf8');
+console.log(
+  `弹窗域名清单：${popupDomains.length} 个域名，${(popupJson.length / 1024).toFixed(1)} KB ` +
+    `（源自 ${allPopupFilters.length} 条 $popup 规则）→ ${POPUP_DOMAINS_FILE}` +
+    (popupDomains.length === 0 ? '（空清单，运行时不据此拒绝任何窗口）' : ''),
+);
+
 // Build-time self-check: fail hard on invalid rules. 119 rules carrying both
 // resourceTypes and excludedResourceTypes once made the whole extension fail to
 // load, with no signal on the Node side.
@@ -202,6 +239,9 @@ const fullReport = {
   cosmeticFiltersAvailable: cosmeticTotal,
   badwareDomains: badwareDomains.length,
   badwareDomainsBytes: badwareJson.length,
+  popupDomains: popupDomains.length,
+  popupDomainsBytes: popupJson.length,
+  popupRules: allPopupFilters.length,
   perList,
   parseDropReasons: skipReasons,
   // report already holds budget / budgetUsed / budgetTruncated; spread last to

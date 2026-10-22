@@ -35,11 +35,26 @@ export type ParsedFilter = {
   excludedRequestDomains?: string[];
   /** `$third-party` / `$first-party` (and their `~` forms) → DNR domainType. */
   domainType?: 'firstParty' | 'thirdParty';
+  /**
+   * `$popup`: a window-popup rule. DNR has no resource type for "the page called
+   * window.open", so these rules must never reach the network ruleset -- compiled as a
+   * network rule they would block every request to the host. They become the runtime
+   * popup-denylist instead (see src/engine/popupDomains.ts).
+   */
+  popup?: boolean;
 };
 
-/** Parse outcome: either a network rule, or a skip with a reason for the report. */
+/**
+ * Parse outcome: a network rule, a popup-only rule, a cosmetic rule, or a skip with a
+ * reason for the report.
+ *
+ * `popup` is its own kind rather than a network rule with a flag: callers must decide
+ * explicitly what to do with it, and there is no code path where forgetting that
+ * decision silently turns a `$popup` rule into "block all requests to this host".
+ */
 export type ParseOutcome =
   | { kind: 'network'; filter: ParsedFilter }
+  | { kind: 'popup'; filter: ParsedFilter }
   | { kind: 'cosmetic'; raw: string; flavor: 'basic' | 'extended' | 'scriptlet' | 'html' | 'style' }
   | { kind: 'skip'; raw: string; reason: string };
 
@@ -80,7 +95,8 @@ const UNSUPPORTED_OPTIONS = new Set([
   'shide',
   'inline-script',
   'inline-font',
-  'popup',
+  // `popup` is not here: it is parsed as its own rule kind (see ParseOutcome). `popunder`
+  // stays unsupported, so its rules are dropped rather than widened into network blocks.
   'popunder',
   'empty',
   'rewrite',
@@ -195,6 +211,8 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
     matchCase: false,
   };
 
+  let popup = false;
+
   if (optionText) {
     const positive = new Set<ResourceType>();
     const negative = new Set<ResourceType>();
@@ -221,6 +239,12 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
       }
       if (opt === 'all') {
         // `$all` means "every type", same as omitting types
+        continue;
+      }
+      if (opt === 'popup') {
+        // `~popup` is deliberately not matched here: it is the negation (a network rule
+        // for non-popup loads), which stays unsupported below.
+        popup = true;
         continue;
       }
       if (opt === 'third-party' || opt === '3p') {
@@ -295,6 +319,13 @@ export function parseFilterLine(rawLine: string): ParseOutcome {
   if (MATCHES_EVERYTHING.has(pattern)) return { kind: 'skip', raw, reason: 'match-everything' };
   if (!pattern) return { kind: 'skip', raw, reason: 'no-pattern' };
 
+  // Popup rules keep their parsed options (an exception marker, `$domain=` scope) so the
+  // exporter can honour them; they simply never become network rules.
+  if (popup) {
+    filter.popup = true;
+    return { kind: 'popup', filter };
+  }
+
   return { kind: 'network', filter };
 }
 
@@ -304,10 +335,12 @@ export function parseList(
   source?: string,
 ): {
   network: ParsedFilter[];
+  popup: ParsedFilter[];
   cosmetic: { raw: string; flavor: string }[];
   skipped: { raw: string; reason: string }[];
 } {
   const network: ParsedFilter[] = [];
+  const popup: ParsedFilter[] = [];
   const cosmetic: { raw: string; flavor: string }[] = [];
   const skipped: { raw: string; reason: string }[] = [];
 
@@ -316,6 +349,9 @@ export function parseList(
     if (outcome.kind === 'network') {
       if (source) outcome.filter.source = source;
       network.push(outcome.filter);
+    } else if (outcome.kind === 'popup') {
+      if (source) outcome.filter.source = source;
+      popup.push(outcome.filter);
     } else if (outcome.kind === 'cosmetic') {
       cosmetic.push({ raw: outcome.raw, flavor: outcome.flavor });
     } else if (outcome.reason !== 'empty' && outcome.reason !== 'comment' && outcome.reason !== 'directive') {
@@ -323,5 +359,5 @@ export function parseList(
     }
   }
 
-  return { network, cosmetic, skipped };
+  return { network, popup, cosmetic, skipped };
 }

@@ -1,4 +1,9 @@
 import { isInvisibleClickLayer } from '../engine/clickLayer.ts';
+import {
+  announcePopupBlock,
+  createPopupDenyGate,
+  readPopupAllowance,
+} from '../engine/popupDomains.ts';
 import { keysToScrub, scrubWindowName } from '../engine/scrub.ts';
 import {
   NAVIGATION_EVENT_TYPES,
@@ -6,7 +11,7 @@ import {
   looksLikeNavigationHijack,
   shouldBlockClick,
 } from './clickGuard.ts';
-import { looksLikeTrackingListener, shouldAllowOpen } from './guards.ts';
+import { decideOpen, looksLikeTrackingListener } from './guards.ts';
 
 /**
  * MAIN world injection.
@@ -21,14 +26,14 @@ const HIDDEN_ATTR = 'data-adblow-hidden';
 
 let hadUserGesture = false;
 /**
- * Whether the last gesture landed on something the user would expect to open a window.
+ * `href` of the `<a>` the last gesture landed on, or null.
  *
- * Popunder SDKs open their ad window from the *first click anywhere*, so the target of the
- * gesture is the only thing that separates them from a share button.
+ * Under the deny-by-default policy this is the one piece of gesture context that can allow a
+ * cross-site window: a link the user clicked points at the destination, and the browser would
+ * have opened it anyway. A button (`play`, `share`, `login`) is *not* evidence, because that is
+ * also the shape a popunder fires from.
  */
-let gestureOnControl = false;
-const CONTROL_SELECTOR =
-  'a[href], button, input, select, textarea, summary, label, [role="button"], [onclick], [contenteditable="true"]';
+let gestureAnchorHref: string | null = null;
 
 for (const type of ['pointerdown', 'mousedown', 'click', 'keydown', 'touchstart'] as const) {
   addEventListener(
@@ -36,7 +41,7 @@ for (const type of ['pointerdown', 'mousedown', 'click', 'keydown', 'touchstart'
     (ev) => {
       hadUserGesture = true;
       const target = ev.target instanceof Element ? ev.target : null;
-      gestureOnControl = target?.closest?.(CONTROL_SELECTOR) != null;
+      gestureAnchorHref = target?.closest?.('a[href]')?.getAttribute('href') ?? null;
     },
     { capture: true, passive: true },
   );
@@ -56,13 +61,41 @@ function hideNow(el: Element): void {
 // window.open guard
 const rawOpen = window.open.bind(window);
 
+/**
+ * Popup denylist published by the isolated world as inert JSON.
+ *
+ * The read is lazy: `isDenied` reads the element on the first call and caches it. That keeps
+ * the guard independent of startup order (the content script's fetch is async, the page may
+ * call window.open before it lands) and costs nothing on pages that never open a window.
+ */
+const popupDeny = createPopupDenyGate(document);
+
 Object.defineProperty(window, 'open', {
   configurable: false,
   writable: false,
   value: (url?: string | URL, target?: string, features?: string): Window | null => {
     const href = String(url ?? '');
-    if (!shouldAllowOpen(href, location.hostname, hadUserGesture, gestureOnControl)) {
-      console.debug('[adblow] 已拦截 window.open', href, target);
+    const decision = decideOpen({
+      url: href,
+      pageHost: location.hostname,
+      hadUserGesture,
+      gestureAnchorHref,
+      // Passing location.href as the base resolves relative targets, so `//host/x` and
+      // `/x` are judged by their real host instead of being skipped.
+      popupDenied: popupDeny.isDenied(href, location.href),
+      // Read every call (it is one attribute lookup): the switch can be toggled while the
+      // page is open, and caching it would keep the old answer until reload.
+      siteAllowsPopups: readPopupAllowance(document),
+    });
+    if (!decision.allow) {
+      if (decision.reason === 'popup-list') {
+        console.debug('[adblow] 已拦截 popup 弹窗', href);
+      } else {
+        console.debug('[adblow] 已拦截 window.open', href, target, decision.reason);
+      }
+      // Leave a record the isolated world forwards to the worker (per-site count + last
+      // target), so a site broken by the new default is diagnosable from the rule manager.
+      if (href) announcePopupBlock(document, href);
       return null;
     }
     return rawOpen(url as string, target, features);
