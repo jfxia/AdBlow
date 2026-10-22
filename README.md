@@ -89,9 +89,9 @@ documentation in October 2026; corrections are welcome.
 
 AdBlow compiles six filter lists (EasyList, EasyList China, EasyPrivacy, and uBlock's filters,
 privacy and badware) into declarativeNetRequest rulesets at build time. Of 128,023 input rules,
-deduplication and validation keep 21,118 block rules and 2,365 exceptions across six rulesets.
+deduplication and validation keep 21,117 block rules and 2,365 exceptions across six rulesets.
 106,595 domain anchors are collapsed into 114 rules: kept one per domain, the anchors would both
-inflate the package and reach the browser's static-rule ceiling sooner.
+inflate the package and reach the browser's static-rule ceiling sooner.It also supports the `$to` and `$denyallow` options (target-domain inclusion and exclusion), and checks every regex rule against the RE2 subset DNR accepts, dropping the rule otherwise.
 
 ### Element hiding
 
@@ -119,7 +119,7 @@ positive leads straight to the mechanism and the evidence behind it.
 Page scripts can interfere with filtering as well, so AdBlow restricts four behaviours in the
 page's MAIN world: `window.open` calls, click hijacking, popup-state writes to `localStorage`,
 `sessionStorage` and `window.name`, and document-level click handlers that only perform
-navigation.
+navigation.Navigation handlers installed through `document.onclick`, an inline `onclick` attribute or a listener on `body` / `html` are refused as well, and a cross-site `window.open` is allowed only when the click landed on a link or a button.
 
 ### Anti-adblock walls
 
@@ -134,6 +134,23 @@ report a wall even before anything is done about it.
 13 canonical `##+js(...)` scriptlets (`abort-on-property-read`, `set-constant`, `json-prune`,
 `abort-current-script`, `no-fetch-if`, `no-setTimeout-if` and others) covering 3,247 domains. The
 data table is inlined in the script so that it takes effect before page scripts run.
+
+### Element picker
+
+Beyond automatic judgement, an element can be picked by hand: use "Pick an element" in the popup, or
+right-click anywhere and choose "Block this element with AdBlow", which opens the panel with that
+element already selected. The panel shows the generated selector (editable); saving hides the element
+immediately, scopes the rule to the current site, and lists it under "manual" in the rule manager.
+Manual rules are exempt from the automatic caps and expiry, so a long-unused rule is never dropped.
+This adds the `contextMenus` permission, which does not grant access to browsing data.
+
+### Cookie prompts
+
+When a site shows a cookie consent banner, the extension clicks "Accept" by default so the banner
+goes away; if the same banner offers "Reject all", it prefers rejection and one tracking consent is
+not given. Banners on sites in the badware list, or on sites where filtering was switched off, are
+left alone. Only buttons are clicked and nothing is hidden, so the site remembers the choice and the
+banner does not come back.
 
 ### Self-learning
 
