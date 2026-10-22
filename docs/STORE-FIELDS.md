@@ -49,6 +49,12 @@ Blocks pop-ups, overlays, video ads and click hijacking via behavior detection, 
 新增 contextMenus 权限，仅用于页面右键菜单中的「使用 AdBlow 拦截该元素」。该权限不提供任何浏览数据、标签页内容或网络请求的访问能力；扩展仍然全部在本地处理，不上报任何信息。
 ```
 
+## Permission note (reviewer note, 430 characters)
+
+```
+The `contextMenus` permission is used for a single item: "Block this element with AdBlow" in the page context menu, which opens the element picker with the right-clicked element already selected. The permission grants no access to browsing data, page content, tab URLs or network requests. No other permission was added in this version, host permissions included; all processing stays local and nothing is reported off the device.
+```
+
 ## 提交前清单
 
 - [ ] 包：`release/adblow-1.0.5-edge.zip`（不要用同名的旧文件）
