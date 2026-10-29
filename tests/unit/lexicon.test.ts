@@ -68,9 +68,28 @@ describe('词库：强命名（广告专用术语）', () => {
     assert.equal(strength('<div class="doubleclick-slot"></div>'), NAMING_STRONG);
   });
 
-  it('属性名里的广告词也算', () => {
-    assert.equal(strength('<div data-ad-slot="1"></div>'), NAMING_STRONG);
-    assert.equal(strength('<div data-ads></div>'), NAMING_STRONG);
+  it('❗属性名不参与命名证据（YouTube ytd-shorts 事故）', () => {
+    // Real page snapshot (2026-10-29): `<ytd-shorts … move-ads-overlay-to-shorts … role="main">`
+    // is the whole Shorts page body. The boolean attribute's *name* contains `ads`, the old
+    // implementation scanned every attribute name, scored the container as strong ad naming and
+    // hid it: the page went blank while the video kept playing. A boolean attribute name is the
+    // site's internal feature switch, not an ad marker.
+    assert.equal(strength('<div move-ads-overlay-to-shorts></div>'), NAMING_NONE);
+    assert.equal(strength('<div data-ads></div>'), NAMING_NONE);
+    assert.equal(strength('<div data-ad-slot="1"></div>'), NAMING_NONE);
+  });
+
+  it('标签属性（aria-label / title / data-ad-slot）的**值**仍然计分', () => {
+    assert.equal(strength('<div aria-label="advertisement"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div title="pre-roll ad"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div data-ad-slot="ad-banner-1"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div aria-label="关闭"></div>'), NAMING_NONE);
+  });
+
+  it('类名 / id 里的广告词照旧计分（真信号不能被一起关掉）', () => {
+    assert.equal(strength('<div id="ads-top"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div class="ytp-ad-overlay"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div class="ad-slot"></div>'), NAMING_STRONG);
   });
 
   it('SSP 缩写', () => {

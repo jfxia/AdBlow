@@ -152,12 +152,28 @@ export const WEAK_NAMING_MIN_BEHAVIOR = 4;
  * `<div data-ssp-container="ssp-list">` counted as strong naming (the attribute contains
  * `data-ssp-`) and the whole article list was hidden. No evidence may overturn "this holds
  * content".
+ *
+ * ARIA landmark roles are the author's own declaration, exactly like the semantic tags above,
+ * so they belong here — this gate runs before every naming tier, and that is the point.
+ * `[role="main"]` is the one that matters most (real site, YouTube Shorts, 2026-10-29):
+ * `<ytd-shorts … role="main">` *is* the page body, and a naming false positive (a boolean
+ * attribute whose name contained `ads`) hid it — a blank page with sound still playing. A role
+ * declaration cannot be talked out of by any heuristic, which is why it is a stronger fix than
+ * tuning the naming word list.
+ *
+ * `[role="navigation"]` is also in NAVIGATION_MARKERS; repeating it here is deliberate —
+ * NAVIGATION_MARKERS is consulted *after* the strong-naming tier (ads disguised as navigation
+ * stay hideable), while this list is consulted first and grants absolute protection.
  */
 export const CONTENT_MARKERS = [
   'article[itemtype*="BlogPosting"]',
   'article[itemprop]',
   '[itemprop="articleBody"]',
   'main article',
+  '[role="main"]',
+  '[role="navigation"]',
+  '[role="banner"]',
+  '[role="contentinfo"]',
 ];
 
 /** The element is content itself, or holds real content. */
@@ -501,6 +517,16 @@ export function isPickerUi(el: Element): boolean {
 }
 
 /**
+ * Never rendered: hiding one of these is a no-op visually, yet it would leave our marker
+ * attributes on it (and `#removePlayerAD` on a `<style>` scores as ad naming, so the sweep
+ * really does target it — real page snapshot, YouTube, 2026-10-29).
+ */
+const INERT_TAGS = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'TITLE', 'NOSCRIPT', 'TEMPLATE', 'BASE']);
+
+/** XHTML namespace: the only namespace an `HTMLElement` lives in. */
+const HTML_NS = 'http://www.w3.org/1999/xhtml';
+
+/**
  * Hide with inline styles.
  *
  * Not a stylesheet: an inline `!important` sits at the top of the author origin and cannot be
@@ -515,21 +541,33 @@ export function isPickerUi(el: Element): boolean {
  *
  * `reason` goes to `data-adblow-reason` and is the only means of triaging a false positive: it must
  * be obvious whether a rule pack, heuristic, overlay, link farm or list cosmetic rule did it.
+ *
+ * Returns false when the element was left untouched (never-rendered tag, non-HTML element, or no
+ * inline style surface). Callers must not count a hide that did not happen: `verifyHiding` would
+ * otherwise keep "re-hiding" a visible element and report it as stubborn forever.
  */
-export function hideElement(el: Element, reason?: string): void {
-  if (NEVER_HIDE_TAGS.has(el.tagName)) return;
+export function hideElement(el: Element, reason?: string): boolean {
+  if (NEVER_HIDE_TAGS.has(el.tagName)) return false;
+  if (INERT_TAGS.has(el.tagName)) return false;
   // The picker is our own UI: hiding it would break the very interaction in progress.
-  if (isPickerUi(el)) return;
+  if (isPickerUi(el)) return false;
+  // Only HTML elements have the inline style surface this function drives. SVG/MathML (a
+  // different namespace) would be tagged as hidden without actually being hidden — the exact
+  // lie verifyHiding exists to catch. Namespace, not `instanceof HTMLElement`: the engine is
+  // called with documents from other realms (jsdom fixtures), where the constructor differs.
+  if (el.namespaceURI !== HTML_NS) return false;
+  const style = (el as HTMLElement).style;
+  if (!style) return false;
+
   el.setAttribute('data-adblow-hidden', '1');
   if (reason) el.setAttribute(REASON_ATTR, reason);
-  const style = (el as HTMLElement).style;
-  if (!style) return;
   style.setProperty('display', 'none', 'important');
   style.setProperty('visibility', 'hidden', 'important');
   style.setProperty('pointer-events', 'none', 'important');
   style.setProperty('height', '0', 'important');
   style.setProperty('margin', '0', 'important');
   style.setProperty('padding', '0', 'important');
+  return true;
 }
 
 /** How often the site made a hidden element visible again (diagnostics). */
@@ -589,6 +627,222 @@ export function isHidden(el: Element): boolean {
 /** The element or any ancestor is already hidden (so it is invisible). */
 export function isInsideHidden(el: Element): boolean {
   return el.closest('[data-adblow-hidden]') !== null;
+}
+
+// ── Media recovery: a block hidden before its <video> existed ────────────────
+
+/**
+ * Hide reasons media recovery may undo: the decision came from **our own automatic judging of
+ * this element**. Everything else stays hidden, deliberately:
+ *   - `rule` (site pack) and any filter-list cosmetic hit are curated/per-domain rules — an
+ *     explicit list decision, not a judgement this pass may second-guess;
+ *   - `picked` is the user's explicit instruction;
+ *   - `overlay` / `linkfarm` / `fake-close` / `click-layer` are their own shape passes;
+ *   - `anti-adblock-wall` hides a wall prompt, never content.
+ *
+ * `learned` is included (2026-10-29): it is an auto-derived selector, not a curated rule, and it is
+ * exactly where the lazy-load misfire comes back — visit one hides the empty shell by heuristic
+ * and records a selector, visit two lets that selector hide the shell again **before** the video
+ * arrives. Excluding it would turn one bad visit into a permanently blank player.
+ *
+ * Why this narrow: video ads live inside the player too, so only the automatic tiers that can
+ * misjudge an empty shell qualify. Widening this further re-opens the exact hole it closes.
+ */
+export const MEDIA_RECOVERABLE_REASONS: ReadonlySet<string> = new Set(['heuristic', 'learned']);
+
+/** Mark of an element media recovery re-showed: never hidden again on this page. */
+export const KEEP_ATTR = 'data-adblow-keep';
+
+/** Most elements a keep selector may match before it is dropped as too broad. */
+export const KEEP_SELECTOR_MAX_MATCHES = 3;
+
+/**
+ * Page-scoped "do not hide again" set.
+ *
+ * The recovered node itself carries KEEP_ATTR, which covers it for as long as it stays in the
+ * document — and that alone breaks the hide/recover loop with the upkeep sweeps. A site that
+ * re-renders the player replaces the node and loses the attribute, so a **narrow selector digest**
+ * is kept alongside it (see recoverMediaBlocks).
+ */
+export type KeepState = { selectors: Set<string> };
+
+export function createKeepState(): KeepState {
+  return { selectors: new Set<string>() };
+}
+
+/** Is this element off-limits for hiding on this page (see recoverMediaBlocks)? */
+export function isKept(el: Element, keep?: KeepState): boolean {
+  if (el.getAttribute(KEEP_ATTR) === '1') return true;
+  if (!keep) return false;
+  for (const selector of keep.selectors) {
+    try {
+      if (el.matches(selector)) return true;
+    } catch {
+      // A digest that stopped parsing must not disable the guard for every element.
+      keep.selectors.delete(selector);
+    }
+  }
+  return false;
+}
+
+/**
+ * "The video is actually showing a picture": a decoded frame (`videoWidth > 0`) **and** playback
+ * under way (`!paused`). Both are required: a paused or not-yet-decoded video proves nothing, and
+ * the empty shell we mis-hid is exactly the not-yet-decoded case.
+ */
+export function isPlayingVideo(video: Element): boolean {
+  try {
+    const { videoWidth, paused } = video as HTMLVideoElement;
+    return typeof videoWidth === 'number' && videoWidth > 0 && paused === false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Strong ad naming on the video itself or on a wrapper between it and the hidden block.
+ *
+ * A step tighter than "the block's own naming" on purpose: `<div class="video-ads"><video>` is an
+ * ad-named player inside a generically named shell, and unmasking it would put a video ad back.
+ */
+function hasStrongAdNamingUpTo(video: Element, stop: Element): boolean {
+  let node: Element | null = video;
+  while (node !== null) {
+    if (namingSignal(node).strength >= NAMING_STRONG) return true;
+    if (node === stop) return false;
+    node = node.parentElement;
+  }
+  return false;
+}
+
+/** The first playing video inside `el`, ignoring ad-named player wrappers. */
+function playingVideoIn(el: Element): Element | null {
+  let videos: Element[];
+  try {
+    videos = Array.from(el.querySelectorAll('video'));
+  } catch {
+    return null;
+  }
+  for (const video of videos) {
+    if (!isPlayingVideo(video)) continue;
+    if (hasStrongAdNamingUpTo(video, el)) continue;
+    return video;
+  }
+  return null;
+}
+
+/**
+ * Inline declarations hideElement writes, with the serializations the CSSOM may report for them.
+ *
+ * Length values are serialized with a unit (`0` → `0px`) and the shorthands expand, so both forms
+ * are listed. Recovery removes a declaration only when the value and the `!important` priority
+ * still match ours: anything the site wrote itself (a `display:block !important` counter-attack,
+ * its own `display:none`) is left untouched.
+ */
+const HIDE_STYLES: readonly { prop: string; values: readonly string[] }[] = [
+  { prop: 'display', values: ['none'] },
+  { prop: 'visibility', values: ['hidden'] },
+  { prop: 'pointer-events', values: ['none'] },
+  { prop: 'height', values: ['0', '0px'] },
+  { prop: 'margin', values: ['0', '0px'] },
+  { prop: 'padding', values: ['0', '0px'] },
+];
+
+/**
+ * Undo hideElement: drop our marker attributes and exactly our inline declarations, then mark the
+ * element as never-hide-again. Does not touch the site's own styles. Returns whether it was hidden.
+ */
+export function unhideElement(el: Element): boolean {
+  const style = (el as HTMLElement).style;
+  if (style) {
+    for (const { prop, values } of HIDE_STYLES) {
+      try {
+        if (
+          values.includes(style.getPropertyValue(prop)) &&
+          style.getPropertyPriority(prop) === 'important'
+        ) {
+          style.removeProperty(prop);
+        }
+      } catch {
+        // A hostile element must not stop the recovery of the rest.
+      }
+    }
+  }
+  const wasHidden = el.getAttribute(HIDDEN_ATTR) === '1';
+  el.removeAttribute(HIDDEN_ATTR);
+  el.removeAttribute(REASON_ATTR);
+  el.removeAttribute(WHY_ATTR);
+  el.removeAttribute(REFOUGHT_ATTR);
+  el.setAttribute(KEEP_ATTR, '1');
+  return wasHidden;
+}
+
+export type MediaRecovery = {
+  /** Hidden elements examined. */
+  checked: number;
+  /** Elements re-shown by this call (never re-counted: see the isKept guard). */
+  restored: number;
+  /** Selector digests added to the page-level keep set. */
+  selectors: string[];
+};
+
+/**
+ * Media recovery: undo a hide that a **playing video** later proved wrong.
+ *
+ * Why (real site, YouTube Shorts, 2026-10-29): the content area holds almost no text, so the
+ * content guards (hasSubstantiveText / looksLikeContentBlock) do not apply. At judging time the
+ * lazy-loaded `<video>` did not exist yet, so the empty block was scored as an ad slot and hidden;
+ * the video was then inserted into the **already hidden** container. `display:none` does not stop
+ * playback, so the symptom was "sound plays, no picture".
+ *
+ * The existing verifyHiding pass only re-hides what the site re-showed — there is no reverse
+ * direction. This is it, and the conditions are deliberately tight:
+ *   1. a playing video (frame decoded **and** not paused), see isPlayingVideo;
+ *   2. no strong ad naming on the block, nor on any wrapper between the video and the block;
+ *   3. the hide reason is one of our automatic judging tiers (MEDIA_RECOVERABLE_REASONS), never
+ *      a curated rule, a list hit, or a manual pick;
+ *   4. the element is not already in the keep set (idempotent: one recovery, one count).
+ *
+ * Each recovery removes our attributes and inline hides and puts the element into the page's
+ * keep set, so the next sweep cannot hide it again — otherwise the hide/recover passes would
+ * fight each other every upkeep round.
+ */
+export function recoverMediaBlocks(root: ParentNode, keep?: KeepState): MediaRecovery {
+  const result: MediaRecovery = { checked: 0, restored: 0, selectors: [] };
+
+  let hidden: Element[];
+  try {
+    hidden = Array.from(root.querySelectorAll(`[${HIDDEN_ATTR}]`));
+  } catch {
+    return result;
+  }
+
+  for (const el of hidden) {
+    result.checked += 1;
+    // Idempotence, and a guard against a keep-set member being touched twice.
+    if (isKept(el, keep)) continue;
+
+    const reason = el.getAttribute(REASON_ATTR);
+    if (!reason || !MEDIA_RECOVERABLE_REASONS.has(reason)) continue;
+
+    // Naming is deterministic evidence and outranks media: `.video-ads`-style blocks stay hidden.
+    if (namingSignal(el).strength >= NAMING_STRONG) continue;
+
+    if (playingVideoIn(el) === null) continue;
+
+    if (!unhideElement(el)) continue;
+    result.restored += 1;
+
+    // Same node → KEEP_ATTR. Re-rendered node → selector digest, but only when the digest is
+    // narrow: a broad class would make whole regions unhideable for the rest of the page's life.
+    const selector = generalizeSelector(el);
+    if (selector && isSelectorSafe(selector, root, KEEP_SELECTOR_MAX_MATCHES)) {
+      keep?.selectors.add(selector);
+      result.selectors.push(selector);
+    }
+  }
+
+  return result;
 }
 
 export const HIDDEN_ATTR = 'data-adblow-hidden';
@@ -850,7 +1104,9 @@ export function findLinkFarms(
     if (holdsRealContent(el)) continue;
     // Navigation (itself or inside) is not a link farm — users reported hidden navigation lists.
     // Ads disguised as navigation still get caught: when they carry strong ad naming of their own
-    // (`nav.ad-links`), that naming is explicit evidence and wins.
+    // (`nav.ad-links`), that naming is explicit evidence and wins. This exception applies to the
+    // semantic `<nav>` tag only: an ARIA landmark (`role="navigation"` etc.) is in CONTENT_MARKERS
+    // and was already rejected by holdsRealContent above, by design (2026-10-29).
     if (isNavigationLike(el) || isInsideNavigation(el)) {
       if (namingSignal(el).strength < NAMING_STRONG) continue;
     }
@@ -890,6 +1146,8 @@ export const GROWTH_BONUS = 4;
 export function judgeGrownElement(el: Element, options: JudgeOptions): Verdict | null {
   if (isPickerUi(el)) return null;
   if (isHidden(el)) return null;
+  // A recovered player grows when its video arrives; growth is not evidence against it.
+  if (isKept(el, options.keep)) return null;
   if (holdsRealContent(el)) return null;
 
   const naming = namingSignal(el).strength;
@@ -1167,6 +1425,8 @@ export type JudgeOptions = {
   budget?: HidingBudget;
   /** The site's own content CDN (see frequentMediaDomains). Omit to skip that exclusion. */
   contentCdnDomains?: Set<string>;
+  /** Page-level "do not hide again" set filled by media recovery (see recoverMediaBlocks). */
+  keep?: KeepState;
 };
 
 /**
@@ -1186,6 +1446,11 @@ export type JudgeOptions = {
 export function judgeElement(el: Element, options: JudgeOptions): Verdict | null {
   if (isPickerUi(el)) return null;
   if (isHidden(el)) return null;
+  // Recovered by media recovery (a video was playing inside): never hide it again on this page,
+  // or the upkeep sweeps would fight the recovery pass forever. Checked before every tier,
+  // learned selectors included — a learned selector recorded before the video loaded is exactly
+  // the path that would re-hide the player.
+  if (isKept(el, options.keep)) return null;
 
   const { threshold = SCORE_THRESHOLD } = options;
 
@@ -1255,10 +1520,11 @@ export function applyVerdict(
           ? 'learned'
           : 'heuristic';
   // Record **which evidence** fired: the most valuable information when triaging a misfire.
+  // Only after the hide actually happened, so a never-rendered element is not tagged.
+  if (!hideElement(el, reason)) return null;
   if (verdict.kind === 'heuristic' && verdict.hit.reasons.length) {
     el.setAttribute(WHY_ATTR, verdict.hit.reasons.join(','));
   }
-  hideElement(el, reason);
   budget?.commit(el);
   return verdict;
 }

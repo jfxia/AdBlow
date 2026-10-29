@@ -8,7 +8,7 @@
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
 [![Edge Add-ons](https://img.shields.io/badge/Edge_Add--ons-live-0f6cbd?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/omfepilfkagfdjejmdlkkphecllioion)
-[![Tests](https://img.shields.io/badge/tests-1247%20passing-brightgreen)](#testing--verification)
+[![Tests](https://img.shields.io/badge/tests-1274%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 [![CI](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
 [![auto-release](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
@@ -219,7 +219,7 @@ step is required. If they are unreachable altogether, the same lists are attache
 ## Build and package
 
 ```bash
-pnpm test           # 1247 unit and integration tests, run in-process
+pnpm test           # 1274 unit and integration tests, run in-process
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # build + tests
 pnpm icons          # regenerate icons (16/32/48/128 and the store icon)
@@ -317,7 +317,7 @@ tools/
   e2e/             24-category acceptance suite in a real browser; live-site end-to-end
   release/         audit, zip packaging, store screenshot generation
   diagnostics/     console snippets for locating the cause of a broken page
-tests/             1247 unit and integration tests (jsdom)
+tests/             1274 unit and integration tests (jsdom)
 public/            manifest, _locales, icons
 ```
 
@@ -342,7 +342,7 @@ positive that actually shipped:
 ## Testing & verification
 
 ```bash
-node tests/run-all.ts           # 1247 tests, 0 failures
+node tests/run-all.ts           # 1274 tests, 0 failures
 node tools/e2e/acceptance.mjs   # 24 ad categories, measured in a real browser
 ```
 

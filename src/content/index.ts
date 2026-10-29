@@ -7,12 +7,14 @@ import type { SitePack } from '../engine/rules.ts';
 import {
   applyVerdict,
   createHidingBudget,
+  createKeepState,
   cosmeticCss,
   findOverlayAds,
   findFakeCloseAds,
   findLinkFarms,
   hideElement,
   holdsRealContent,
+  isKept,
   isPickerUi,
   mustNotHide,
   judgeGrownElement,
@@ -20,6 +22,7 @@ import {
   makeInjectionTest,
   processAdded,
   recordableSelector,
+  recoverMediaBlocks,
   selectorsFrom,
   sweep,
   verifyHiding,
@@ -556,6 +559,15 @@ async function boot(): Promise<void> {
   const budget = createHidingBudget(document);
 
   /**
+   * Page-scoped "never hide again" set for media recovery (see recoverMediaBlocks).
+   *
+   * Must be handed to every judging path (`options.keep`) and checked by the standalone
+   * passes: a recovered player is visible but still carries no content marker, so without
+   * this the next sweep would hide it again and the two passes would loop.
+   */
+  const keepState = createKeepState();
+
+  /**
    * Recompute "the site's own content CDN".
    *
    * Cross-site media scores 3 each, so any script-rendered block with two CDN images
@@ -644,6 +656,7 @@ async function boot(): Promise<void> {
     viewportArea: innerWidth * innerHeight,
     selectors: selectorSet,
     budget,
+    keep: keepState,
   };
 
   let rule = 0;
@@ -652,18 +665,47 @@ async function boot(): Promise<void> {
   /** Geometry snapshots, used to spot ads that expand purely through CSS. */
   const tracker = createGrowthTracker();
 
+  /**
+   * Media recovery pass (see recoverMediaBlocks): undo a hide that a playing video later
+   * proved wrong. The reverse direction of `verifyHiding`, which only re-hides.
+   *
+   * Called from the upkeep rounds and, without any extra timer, when a `<video>` node is
+   * inserted: the insertion is exactly the event that turns a wrongly hidden empty shell into a
+   * playing player, and the existing observer already sees it. The upkeep-only route would miss
+   * a player mounted after the last scheduled round.
+   */
+  const mediaRecoveryPass = (): number => {
+    const result = recoverMediaBlocks(document, keepState);
+    if (result.restored) {
+      console.debug(
+        `[adblow] 媒体恢复：恢复 ${result.restored} 个含播放中视频的区块` +
+          (result.selectors.length ? `，加入不再隐藏 ${result.selectors.length} 条` : ''),
+      );
+    }
+    return result.restored;
+  };
+
   // One observer plus a mutable options object: the phase-two upgrade neither
   // rebuilds the observer nor reprocesses anything.
   new MutationObserver((records) => {
+    let videoAdded = false;
     for (const record of records) {
       for (const node of Array.from(record.addedNodes)) {
         if (node.nodeType !== 1) continue;
-        const added = processAdded(node as Element, options);
+        const addedNode = node as Element;
+        if (
+          !videoAdded &&
+          (addedNode.matches('video') || addedNode.querySelector('video') !== null)
+        ) {
+          videoAdded = true;
+        }
+        const added = processAdded(addedNode, options);
         rule += added.rule;
         heuristic += added.hits.length;
         learn(added.hits);
       }
     }
+    if (videoAdded) mediaRecoveryPass();
     // A late (or re-inserted) wall arrives as a node; the pass is debounced.
     scheduleWallPass();
   }).observe(document.documentElement, { childList: true, subtree: true });
@@ -692,8 +734,9 @@ async function boot(): Promise<void> {
     let n = 0;
     for (const el of grown) {
       const verdict = judgeGrownElement(el, options);
-      if (verdict) {
-        applyVerdict(el, verdict, budget);
+      // A verdict that could not actually be applied (inert element, no style surface) must not
+      // be counted: the console stats are the only triage signal for this pass.
+      if (verdict && applyVerdict(el, verdict, budget)) {
         heuristic += 1;
         n += 1;
       }
@@ -712,11 +755,20 @@ async function boot(): Promise<void> {
    */
   /** Budget-guarded hide, shared by the standalone passes. Returns whether it hid. */
   const hideGuarded = (el: Element, reason: string): boolean => {
+    // Absolute protection first: explicitly declared content/navigation/landmarks outrank every
+    // source (see mustNotHide). The per-element judge enforces it; the standalone passes did not,
+    // so an overlay-shaped `role="main"` container could blank the page.
+    if (mustNotHide(el)) return false;
+    // Media recovery re-showed this element on this page: hiding it again would start a loop.
+    if (isKept(el, keepState)) {
+      console.debug(`[adblow] 媒体恢复过的元素不再隐藏（${reason}）`);
+      return false;
+    }
     if (!budget.canHide(el)) {
       console.debug(`[adblow] 页级预算兜底：拒绝隐藏 ${reason}（会清空整页）`);
       return false;
     }
-    hideElement(el, reason);
+    if (!hideElement(el, reason)) return false;
     budget.commit(el);
     return true;
   };
@@ -766,10 +818,11 @@ async function boot(): Promise<void> {
     });
     let n = 0;
     for (const el of layers) {
+      if (isKept(el, keepState)) continue;
       // Click layers skip the budget fallback: leaving one in place costs far more
       // (the whole page becomes unclickable) than a misjudgement, and since it
       // renders nothing visible, hiding it removes no text or links.
-      hideElement(el, 'click-layer');
+      if (!hideElement(el, 'click-layer')) continue;
       heuristic += 1;
       n += 1;
     }
@@ -824,6 +877,9 @@ async function boot(): Promise<void> {
     const fakeClose = hideFakeClose();
     const layers = hideClickLayers();
     const overlays = hideOverlays();
+    // Media recovery: the reverse direction of the hiding passes. Runs before verification so a
+    // recovered block is not re-hidden in the same round (see mediaRecoveryPass).
+    const media = mediaRecoveryPass();
     // Re-check that what we hid is still hidden. Must come last: verifying a
     // just-hidden element is pointless, and sites typically restore display after
     // their own scripts ran (measured: a 1024cg overlay left links unclickable).
@@ -836,7 +892,7 @@ async function boot(): Promise<void> {
         `选择器=${selectorSet.curated.length}包+${selectorSet.learned.length}学 ` +
         `隐藏 rule=${rule} heuristic=${heuristic} overlay=${overlays} 点击层=${layers} ` +
         `假关闭=${fakeClose} 链接农场=${farms} ` +
-        `复核=${audit.checked}/重新隐藏=${audit.refought} ` +
+        `复核=${audit.checked}/重新隐藏=${audit.refought} 媒体恢复=${media} ` +
         `反过滤墙=检测${wallDetected ? '有' : '无'}/隐藏提示${wallHidden}/恢复正文${wallRestored} ` +
         `预算=文字${bs.text}/${bs.totalText} 链接${bs.links}/${bs.totalLinks} 兜底拒绝=${bs.suppressed}` +
         (audit.stubborn.length ? ` 顽固=[${audit.stubborn.slice(0, 3).join(' ')}]` : ''),
@@ -844,11 +900,12 @@ async function boot(): Promise<void> {
   };
 
   /**
-   * On-demand geometry pass: only after mouse-in / scroll, never a permanent poll.
+   * On-demand pass: only after mouse-in / scroll, never a permanent poll.
    *
    * Those are exactly the triggers for expanding ads, so checking afterwards is
    * enough and costs nothing in between. A permanent timer would also keep
-   * "run the build and observe" test processes from exiting.
+   * "run the build and observe" test processes from exiting. Media recovery rides along:
+   * interaction is also when a late-decoded video becomes visible.
    */
   let geometryTimer: ReturnType<typeof setTimeout> | null = null;
   const scheduleGeometryPass = (): void => {
@@ -858,6 +915,9 @@ async function boot(): Promise<void> {
       recheckGrown();
       hideFakeClose();
       hideLinkFarms();
+      // A video that only decoded its first frame after insertion is invisible to the mutation
+      // callback above; this interaction-driven pass covers that timing without a new timer.
+      mediaRecoveryPass();
     }, GEOMETRY_DEBOUNCE_MS);
   };
 

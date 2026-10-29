@@ -6,6 +6,21 @@
  * non-alphanumerics, so `download` / `header` / `add` do not match but `ad-card-0`
  * does. Tiers: SSP markers (decisive alone), strong ad terms, weak terms that are
  * common in normal UI and need corroboration.
+ *
+ * ❗**Naming evidence comes from the class, the id, and the values of a few label
+ * attributes — never from arbitrary attribute names** (2026-10-29, YouTube Shorts):
+ * the shadow-DOM-era player puts internal feature switches on the host element as
+ * boolean attributes, e.g. `<ytd-shorts … move-ads-overlay-to-shorts … role="main">`.
+ * Scanning every attribute name found `ads` inside `move-ads-overlay-to-shorts`,
+ * scored the whole page container as strong ad naming, and hid it — the page went
+ * blank while the video kept playing. An attribute *name* is the site's internal
+ * switch name, not a statement about the element's role; only human-readable
+ * labels (`aria-label`, `title`) and the standard ad-slot attribute carry that
+ * meaning, and only through their **values**.
+ *
+ * The one deliberate exception is the SSP forensics markers below: those are an
+ * exact allowlist recovered from the pilot site's ad SDK (attribute names like
+ * `data-ssp-container`), not a generic "the name contains an ad word" search.
  */
 
 /** 3 = site-forensics marker; 2 = strong naming; 1 = weak naming; 0 = no signal */
@@ -104,6 +119,15 @@ const NEGATIONS = new Set(['no', 'not', 'non', 'without']);
 
 const SPLIT = /[^a-z0-9]+/;
 
+/**
+ * Attributes whose **values** are naming evidence.
+ *
+ * `aria-label` / `title` are the accessible, human-visible labels a site writes on an ad slot;
+ * `data-ad-slot` is the standard AdSense slot marker. Nothing else is read — see the file header
+ * for the boolean-attribute incident that forced this restriction.
+ */
+const NAMING_VALUE_ATTRS = ['aria-label', 'title', 'data-ad-slot'] as const;
+
 export type NamingSignal = {
   strength: number;
   /** The matched word or marker, for debugging and stats */
@@ -111,18 +135,22 @@ export type NamingSignal = {
 };
 
 export function namingSignal(el: Element): NamingSignal {
-  const hay = [
-    el.getAttribute('class') ?? '',
-    el.getAttribute('id') ?? '',
+  const names = [el.getAttribute('class') ?? '', el.getAttribute('id') ?? ''].join(' ');
+  const values = NAMING_VALUE_ATTRS.map((name) => el.getAttribute(name) ?? '').join(' ');
+
+  // 1) Site-forensics markers (substring, pilot-site specific). The only path allowed to read
+  // attribute *names*: an exact list of SDK markers from reverse-engineering, see file header.
+  const forensicHay = [
+    names,
     Array.from(el.attributes)
       .map((a) => a.name)
       .join(' '),
   ].join(' ');
-
-  // 1) Site-forensics markers (substring, pilot-site specific)
   for (const marker of SSP_SUBSTRINGS) {
-    if (hay.includes(marker)) return { strength: NAMING_SSP, matched: [marker] };
+    if (forensicHay.includes(marker)) return { strength: NAMING_SSP, matched: [marker] };
   }
+
+  const hay = `${names} ${values}`;
 
   // 2) Concatenated strong forms (substring)
   for (const sub of STRONG_SUBSTRINGS) {
