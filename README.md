@@ -7,6 +7,7 @@
 **An ad blocker that judges elements by their behaviour at runtime, not only by matching filter lists.**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
+[![Edge Add-ons](https://img.shields.io/badge/Edge_Add--ons-live-0f6cbd?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/omfepilfkagfdjejmdlkkphecllioion)
 [![Tests](https://img.shields.io/badge/tests-1247%20passing-brightgreen)](#testing--verification)
 [![UI languages](https://img.shields.io/badge/UI%20languages-5-informational)](#user-interface)
 [![CI](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
@@ -205,7 +206,7 @@ Then enable Developer mode in `edge://extensions` (or `chrome://extensions`) and
 unpacked**, pointing at the `dist/` directory.
 
 The store package is produced by `pnpm package` (`release/adblow-1.0.7-edge.zip`); v1.0.0 is already
-listed on the Edge Add-ons store. A release is assembled by three commands — `pnpm version:bump`,
+listed on the [Edge Add-ons store](https://microsoftedge.microsoft.com/addons/detail/omfepilfkagfdjejmdlkkphecllioion). A release is assembled by three commands — `pnpm version:bump`,
 `pnpm package` and `pnpm release:github` (see [Build and package](#build-and-package)).
 
 The filter lists are fetched rather than committed, so a build needs to reach their upstream hosts.

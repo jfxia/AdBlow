@@ -7,6 +7,7 @@
 **在过滤列表匹配之外，依据页面运行时的元素行为判定并拦截广告。**
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
+[![Edge Add-ons](https://img.shields.io/badge/Edge_Add--ons-live-0f6cbd?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/omfepilfkagfdjejmdlkkphecllioion)
 [![测试](https://img.shields.io/badge/tests-1247%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与本地化)
 [![持续集成](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
@@ -135,7 +136,7 @@ pnpm build          # 产出 dist/
 
 随后在 `edge://extensions`（或 `chrome://extensions`）中启用开发者模式，选择「加载解压缩的扩展」，指向 `dist/` 目录。
 
-面向商店的发布包由 `pnpm package` 生成，当前版本为 `release/adblow-1.0.7-edge.zip`；v1.0.0 已在 Edge 加载项商店上架。一次发布由三条命令串起来：`pnpm version:bump`、`pnpm package` 与 `pnpm release:github`，详见「构建与打包」与「发布」两节。
+面向商店的发布包由 `pnpm package` 生成，当前版本为 `release/adblow-1.0.7-edge.zip`；已在 [Edge 加载项商店](https://microsoftedge.microsoft.com/addons/detail/omfepilfkagfdjejmdlkkphecllioion) 上架。一次发布由三条命令串起来：`pnpm version:bump`、`pnpm package` 与 `pnpm release:github`，详见「构建与打包」与「发布」两节。
 
 过滤列表在构建期抓取，不随仓库分发，因此构建时需要能访问它们的上游站点。若上游被屏蔽或过慢，取列表脚本会自动回退到镜像，并打印实际使用的来源：托管在 GitHub 的列表走 jsDelivr，EasyList 走 adblockplus.org。这个过程不需要手动干预。若上游完全不可达，同一批列表也作为附件放在[最新发布](https://github.com/jfxia/AdBlow/releases/latest)里：把压缩包解压到 `filters/` 目录，再执行 `pnpm rulesets && pnpm build` 即可，全程无需联网。
 
