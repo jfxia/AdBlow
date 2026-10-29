@@ -19,6 +19,7 @@ import {
   type CosmeticFilter,
 } from '../../src/engine/filterList/cosmetic.ts';
 import { isCosmeticExceptionRaw } from '../../src/engine/filterList/cosmeticExceptions.ts';
+import { isNetworkRuleException } from '../../src/engine/filterList/networkExceptions.ts';
 import {
   buildScriptletIndex,
   parseScriptletRule,
@@ -120,7 +121,16 @@ for (const entry of meta.lists) {
     skipReasons[key] = (skipReasons[key] ?? 0) + 1;
   }
   cosmeticTotal += parsed.cosmetic.length;
-  allFilters.push(...parsed.network);
+  // Known-bad network rules are dropped before compiling: the compiler cannot tell a wrong rule
+  // from a right one, and shipping them breaks whole sites (see networkExceptions.ts).
+  const network = parsed.network.filter((filter) => {
+    if (isNetworkRuleException(filter.pattern)) {
+      skipReasons['network-exception'] = (skipReasons['network-exception'] ?? 0) + 1;
+      return false;
+    }
+    return true;
+  });
+  allFilters.push(...network);
   allPopupFilters.push(...parsed.popup);
 
   for (const c of parsed.cosmetic) {
