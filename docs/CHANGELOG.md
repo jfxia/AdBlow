@@ -5,6 +5,28 @@
 
 ---
 
+## v1.0.10
+
+### 中文（简体）
+
+- 命名证据改为按词元整词匹配，且只取类名、id 与 aria-label／title／data-ad-slot 的取值。修掉两类误伤：属性名里的 "ads" 被当成广告标记（视频页面整页被隐藏），以及 "AdBlow" 因以 "Ad" 开头被当成广告词（扩展自己的商店条目被隐藏）。
+- `role="main"`、`role="navigation"`、`role="banner"`、`role="contentinfo"` 受到绝对保护，检查先于所有判定。
+- 新增媒体恢复：被隐藏的区块随后开始播放视频时恢复显示，并阻止本页再次隐藏它。
+- 新浪财经个股页的研报面板不再被列表规则隐藏。
+- Reddit 帖子页不再因两条网络规则中断加载。
+- 命名词库新增回归测试：普通词零证据，真实页面命中数不超过实测预算。
+
+### English
+
+- Naming evidence is now matched by whole token and read only from class values, id values and the values of aria-label, title and data-ad-slot. This fixes two false positives: "ads" inside an attribute name counted as an ad marker (whole video pages were hidden), and "AdBlow" scored as an ad word because it starts with "Ad" (the extension hid its own store listing).
+- role="main", role="navigation", role="banner" and role="contentinfo" are absolutely protected, checked before every judging rule.
+- Added media recovery: a hidden block that starts playing a video is restored, and is kept from being hidden again on that page.
+- The research panel on Sina Finance stock pages is no longer hidden by a list rule.
+- Reddit thread pages no longer stop loading because of two network rules.
+- The naming lexicon gained regression tests: ordinary words score nothing, and real pages stay inside a measured budget.
+
+---
+
 ## v1.0.9
 
 ### 中文（简体）
