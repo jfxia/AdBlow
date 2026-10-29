@@ -29,13 +29,14 @@ export type Hit = {
 /**
  * Filter hits down to selectors safe enough to persist.
  *
- * Four gates (2–4 added after the 2026-10-10 incident):
+ * Five gates (2–4 from the 2026-10-10 incident, 5 from the 2026-10-29 one):
  *   1. the generalizer already rejects bare tag names (returns null)
  *   2. not a forbidden selector — reuses the rule-pack guardrails; validateSitePack never sees the
  *      learning path (which once derived a content-card class, see SelectorSet)
  *   3. no matched element may contain real content
  *   4. matched elements may hold only few images (≤ maxImages): a real ad slot holds 1–2 creatives,
  *      whereas a site-wide link wrapper matched 43 elements with 22 images
+ *   5. the hit's naming may not rest on a label attribute alone (title / aria-label)
  *
  * Plus a width measurement: the match count must stay below maxMatches.
  *
@@ -66,6 +67,20 @@ export function recordableSelector(
     if (holdsRealContent(el)) return null;
     // Never learn an explicitly declared navigation element as hideable either.
     if (mustNotHide(el)) return null;
+    /**
+     * Gate 5: label-only naming must never become a rule.
+     *
+     * Why (2026-10-29, Partner Center): our own extension card is `<img title="AdBlow">` +
+     * `<a aria-label="AdBlow In the Store">`. A camelCase split turned the brand into the ad
+     * word `ad`, the card was hidden as "ad naming", and the hits were recorded: once promoted,
+     * the learned selectors kept hiding our own store entry on every later visit — a naming
+     * false positive that fixing the matcher alone could no longer undo. `title` / `aria-label`
+     * are written for humans (product names, button captions), so they are the weakest naming
+     * source we read: they may still hide the element, but never teach a rule. Behaviour does
+     * not lift the refusal either — "naming + behaviour" is precisely how this false positive
+     * got promoted, so a rule needs naming from the element's own class/id.
+     */
+    if (namingSignal(el).labelOnly) return null;
     images += el.matches(MEDIA_TAGS) ? 1 : 0;
     images += el.querySelectorAll('img,video,picture').length;
     if (images > maxImages) return null;

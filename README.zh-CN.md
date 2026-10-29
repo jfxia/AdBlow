@@ -8,7 +8,7 @@
 
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-blueviolet)](#)
 [![Edge Add-ons](https://img.shields.io/badge/Edge_Add--ons-live-0f6cbd?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/omfepilfkagfdjejmdlkkphecllioion)
-[![测试](https://img.shields.io/badge/tests-1274%20passing-brightgreen)](#测试与验收)
+[![测试](https://img.shields.io/badge/tests-1292%20passing-brightgreen)](#测试与验收)
 [![界面语言](https://img.shields.io/badge/UI%20languages-5-informational)](#界面与本地化)
 [![持续集成](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/ci.yml)
 [![自动发版](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml/badge.svg)](https://github.com/jfxia/AdBlow/actions/workflows/auto-release.yml)
@@ -143,7 +143,7 @@ pnpm build          # 产出 dist/
 ## 构建与打包
 
 ```bash
-pnpm test           # 1274 项单元与集成测试，单进程内执行
+pnpm test           # 1292 项单元与集成测试，单进程内执行
 pnpm typecheck      # tsc --noEmit
 pnpm verify         # 构建 + 测试
 pnpm icons          # 重新生成图标（16/32/48/128 与商店图标）
@@ -216,7 +216,7 @@ tools/
   e2e/             24 类真实浏览器验收；活站端到端
   release/         审计、zip 打包、商店截图生成
   diagnostics/     可在控制台直接执行的诊断脚本，用于定位站点异常
-tests/             1274 项单元与集成测试（jsdom）
+tests/             1292 项单元与集成测试（jsdom）
 public/            manifest、_locales、图标
 ```
 
@@ -234,7 +234,7 @@ public/            manifest、_locales、图标
 ## 测试与验收
 
 ```bash
-node tests/run-all.ts           # 1274 项测试，0 失败
+node tests/run-all.ts           # 1292 项测试，0 失败
 node tools/e2e/acceptance.mjs   # 24 类广告，在真实浏览器中实测
 ```
 

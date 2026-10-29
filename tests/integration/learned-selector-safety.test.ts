@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import {
+  createJudge,
   isHidden,
   judgeElement,
   recordableSelector,
@@ -37,7 +38,7 @@ function optionsWithLearned(_root: ParentNode, learned: string[]): JudgeOptions 
   };
 }
 
-describe('recordableSelector：自学习入库前的四道闸门', () => {
+describe('recordableSelector：自学习入库前的四道既有闸门（第五道见下一组）', () => {
   it('❗拒绝禁用选择器 .post-card（正文卡片类名）', () => {
     const doc = root('<div class="post-card"></div>');
     assert.equal(
@@ -146,6 +147,56 @@ describe('judgeElement：自学习选择器不授予「无条件隐藏」特权'
     const verdict = judgeElement(el, options);
     assert.ok(verdict, '规则包选择器应命中即隐藏（它含图片是预期的）');
     assert.equal(verdict!.kind, 'rule');
+  });
+});
+
+describe('recordableSelector 第五道闸门：仅凭标签属性命名不得入库（AdBlow 事故）', () => {
+  // 2026-10-29：微软 Partner Center 的扩展列表页把自己的条目渲染成
+  // `<img title="AdBlow">` + `<a aria-label="AdBlow In the Store">`。驼峰切词把品牌名拆成
+  // `ad` + `blow` 命中强命名，元素被隐藏，命中的选择器被记进自学习库，积累到阈值后晋级，
+  // 于是**命名修好之后**那条 learned 规则仍然永久隐藏自己的商店条目。
+  // 因此：标签属性（title / aria-label）可以作为隐藏依据，但不得单独教会一条规则。
+  const judge = createJudge(() => false, HOST, VIEWPORT);
+
+  it('❗aria-label 是唯一命名证据时：照样隐藏，但不学习', () => {
+    const doc = root(
+      '<div class="store-row" aria-label="advertisement">' +
+        '<a href="https://ads.example.com/x?click_id=1"><img src="/logo.png"></a></div>',
+    );
+    const box = doc.querySelector('.store-row')!;
+    const verdict = judge(box);
+    assert.ok(verdict, '标签属性是显式证据，仍然应当隐藏（可以隐藏，但不学）');
+    assert.equal(
+      recordableSelector(verdict!, doc),
+      null,
+      '仅凭 aria-label 的命中不得写入自学习库',
+    );
+  });
+
+  it('❗title 是唯一命名证据时同样不学习', () => {
+    const doc = root('<div class="listing-row" title="pre-roll ad"><img src="/logo.png"></div>');
+    const box = doc.querySelector('.listing-row')!;
+    const verdict = judge(box);
+    assert.ok(verdict, '前提：该元素确实被判为广告（否则这条用例证明不了闸门）');
+    assert.equal(recordableSelector(verdict!, doc), null);
+  });
+
+  it('对照：类名自带广告命名时仍然可以学习（闸门不误伤真信号）', () => {
+    const doc = root('<div class="ad-slot" aria-label="advertisement"><img src="/logo.png"></div>');
+    const box = doc.querySelector('.ad-slot')!;
+    const verdict = judge(box);
+    assert.ok(verdict);
+    assert.equal(recordableSelector(verdict!, doc), '.ad-slot');
+  });
+
+  it('对照：完全没有命名（纯行为）时学习通道不受影响', () => {
+    // labelOnly 只描述"命名证据全在标签值里"这一种情况；零命名属于行为层的判断。
+    // 若把零命名也拒掉，第二站点那种"服务端渲染、无命名"的广告将永远学不会。
+    const doc = root('<div class="wrapper"><a href="https://ads.example.com/x?click_id=1"></a></div>');
+    assert.equal(
+      recordableSelector({ selector: '.wrapper', score: 8, reasons: ['cross-site-link'] }, doc),
+      '.wrapper',
+    );
   });
 });
 

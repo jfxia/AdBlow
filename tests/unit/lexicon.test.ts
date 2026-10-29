@@ -63,7 +63,7 @@ describe('词库：强命名（广告专用术语）', () => {
     }
   });
 
-  it('连写形式（切不出整词）靠子串兜底', () => {
+  it('连写形式（没有分隔符可切）靠显式清单命中，而不是子串兜底', () => {
     assert.equal(strength('<ins class="adsbygoogle"></ins>'), NAMING_STRONG);
     assert.equal(strength('<div class="doubleclick-slot"></div>'), NAMING_STRONG);
   });
@@ -97,6 +97,102 @@ describe('词库：强命名（广告专用术语）', () => {
   });
 });
 
+describe('词库：词元边界（AdBlow 误伤回归，2026-10-29）', () => {
+  it('❗品牌名与碰巧以 ad 开头的普通词都不产生命名证据', () => {
+    for (const value of [
+      'AdBlow',
+      'adblow.com',
+      'adventure',
+      'adaptive',
+      'loading',
+      'badge',
+      'header',
+    ]) {
+      assert.equal(strength(`<div class="${value}"></div>`), NAMING_NONE, value);
+    }
+  });
+
+  it('❗事故现场原样：title="AdBlow" 与 aria-label="AdBlow In the Store"', () => {
+    // 微软 Partner Center 的扩展列表页把 AdBlow 自己的条目渲染成这两个元素，结果被自己的
+    // 扩展隐藏（data-adblow-why="ad-naming"）。
+    assert.equal(strength('<img src="/store/logoicon" title="AdBlow">'), NAMING_NONE);
+    assert.equal(strength('<a href="/store" aria-label="AdBlow In the Store"></a>'), NAMING_NONE);
+    assert.equal(strength('<div title="adblow.com"></div>'), NAMING_NONE, '域名里的点也是分隔符');
+  });
+
+  it('按分隔符切词：- _ 空白与其它非字母数字字符', () => {
+    assert.equal(strength('<div class="ad-slot"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div class="ad_slot"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div class="video-ads"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div class="ytp-ad-overlay"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div class="Ads/Sponsored"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div aria-label="advertisement"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div title="pre-roll ad"></div>'), NAMING_STRONG);
+  });
+
+  it('紧凑拼写靠显式清单命中，而不是把匹配放宽成前缀', () => {
+    for (const cls of [
+      'adslot',
+      'adblk',
+      'adbox',
+      'adunit',
+      'adframe',
+      'adwrap',
+      'adsbygoogle',
+    ]) {
+      assert.equal(strength(`<div class="${cls}"></div>`), NAMING_STRONG, cls);
+    }
+    // 前缀相同但不在清单里、又没有分隔符的写法，故意不命中：放宽成前缀正是本次事故的成因。
+    assert.equal(strength('<div class="adblow"></div>'), NAMING_NONE);
+    assert.equal(strength('<div class="adrest"></div>'), NAMING_NONE);
+  });
+
+  it('数字后缀按词干判定：ad1 / ad300x250 / ad_300 / banner2', () => {
+    assert.equal(strength('<div class="ad1"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div class="ad300x250"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div class="ad_300"></div>'), NAMING_STRONG);
+    assert.equal(strength('<div class="banner2"></div>'), NAMING_WEAK);
+    // 数字后缀不能把普通词变成广告词
+    assert.equal(strength('<div class="header2"></div>'), NAMING_NONE);
+    assert.equal(strength('<div class="loading3"></div>'), NAMING_NONE);
+  });
+
+  it('ssp 只认连写的**后缀**：tjssp 命中，passport 不命中', () => {
+    assert.equal(strength('<div class="tjssp"></div>'), NAMING_STRONG);
+    assert.equal(
+      strength('<div class="passport"></div>'),
+      NAMING_NONE,
+      'passport 里的字母 ssp 不是缩写（子串匹配的老毛病）',
+    );
+  });
+});
+
+describe('词库：labelOnly —— 学习闸门的判据', () => {
+  it('只有属性值命名 → labelOnly', () => {
+    assert.equal(namingSignal(el('<div aria-label="advertisement"></div>')).labelOnly, true);
+    assert.equal(namingSignal(el('<div title="pre-roll ad"></div>')).labelOnly, true);
+    assert.equal(namingSignal(el('<div data-ad-slot="adslot-1"></div>')).labelOnly, true);
+  });
+
+  it('类名 / id 自带广告命名 → 不是 labelOnly（属性值只是补充）', () => {
+    assert.equal(namingSignal(el('<div class="ad-slot"></div>')).labelOnly, false);
+    assert.equal(
+      namingSignal(el('<div class="ad-slot" title="advertisement"></div>')).labelOnly,
+      false,
+    );
+    assert.equal(
+      namingSignal(el('<div data-ssp-slot-root></div>')).labelOnly,
+      false,
+      '取证标记读的是属性名，不是标签值',
+    );
+  });
+
+  it('完全没有命名 → 不是 labelOnly（纯行为学习不受这条限制）', () => {
+    assert.equal(namingSignal(el('<div class="plain-box"></div>')).labelOnly, false);
+    assert.equal(namingSignal(el('<div class="store-card" title="AdBlow"></div>')).labelOnly, false);
+  });
+});
+
 describe('词库：弱命名（需要旁证，单独不足以判定）', () => {
   it('banner / popup / sponsor / float / promo 属于弱档', () => {
     for (const cls of ['banner', 'popup', 'pop', 'sponsor', 'sponsored', 'float', 'promo', 'gg']) {
@@ -108,13 +204,25 @@ describe('词库：弱命名（需要旁证，单独不足以判定）', () => {
     assert.equal(strength('<div class="horizontal-banner"></div>'), NAMING_WEAK);
   });
 
-  it('❗驼峰连写必须切词（实测漏拦：站点把横幅广告叫 .topBanner）', () => {
-    // 2026-10-13: after the player/rail false positives were fixed, users reported ads were
-    // still not blocked. The banner sits in `.topBanner`, and `topbanner` is not the word
-    // `banner`, so the old implementation could never match a vocabulary entry.
-    assert.equal(strength('<div class="topBanner"></div>'), NAMING_WEAK, 'topBanner 应命中 banner');
-    assert.equal(strength('<div id="globalBannerTop"></div>'), NAMING_WEAK);
-    assert.equal(strength('<div class="adCard0"></div>'), NAMING_STRONG, 'adCard0 → ad card 0');
+  it('❗不再按驼峰切词 —— AdBlow 事故后的收紧，代价是驼峰写法漏判', () => {
+    // 2026-10-29: Microsoft Partner Center hid AdBlow's own store entry. `title="AdBlow"` used
+    // to be split into `ad` + `blow` by the camelCase rule and matched the ad word `ad`, so the
+    // brand name itself became ad evidence. CamelCase is therefore no longer a word boundary.
+    //
+    // Known, deliberate cost of the tightening (this is the old assertion, kept visible instead
+    // of deleted): a site that writes `.topBanner` / `#globalBannerTop` / `directAd_*` in
+    // camelCase now yields **no** naming evidence — `topbanner` is not the token `banner`.
+    // Such ad slots are only caught through behaviour, or by a site pack.
+    assert.equal(strength('<div class="topBanner"></div>'), NAMING_NONE, 'topBanner 不再切出 banner');
+    assert.equal(strength('<div id="globalBannerTop"></div>'), NAMING_NONE);
+
+    // Compact spellings still match, but through the explicit COMPACT_TOKENS list — not
+    // because any camelCase split happened.
+    assert.equal(
+      strength('<div class="adCard0"></div>'),
+      NAMING_STRONG,
+      'adCard0 → adcard（紧凑清单）+ 数字后缀',
+    );
   });
 
   it('❗streamer 是弱档（站点广告轮播容器 .streamer-box2）', () => {
@@ -122,8 +230,9 @@ describe('词库：弱命名（需要旁证，单独不足以判定）', () => {
     assert.equal(strength('<div class="streamer-container2"></div>'), NAMING_WEAK);
   });
 
-  it('❗驼峰切词不得制造新的误伤', () => {
-    // Still must not match after splitting: none of these words holds an ad term.
+  it('❗驼峰写法不得制造误伤（`topBar` 等普通 UI 词保持零信号）', () => {
+    // None of these holds an ad word, and with camelCase gone each is a single token
+    // (`topbar`, `sidebar`, …) that no word list contains.
     for (const cls of ['topBar', 'sideBar', 'progressBar', 'toolBar', 'scrollBar']) {
       assert.equal(strength(`<div class="${cls}"></div>`), NAMING_NONE, cls);
     }
