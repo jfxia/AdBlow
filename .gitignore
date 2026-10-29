@@ -27,3 +27,4 @@ _probe/
 
 # Automatic release decision file (written next to the checkout, kept out of git)
 adblow-auto-release.json
+store/raw/
