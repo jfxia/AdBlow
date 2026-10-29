@@ -5,6 +5,24 @@
 
 ---
 
+## v1.0.9
+
+### 中文（简体）
+
+- 修正视频页面整块内容被隐藏的问题：页面容器上的功能开关属性名含 "ads"，被当成广告命名。命名证据现在只取类名、id 与 aria-label、title、data-ad-slot 的取值，属性名不再参与判定。
+- `role="main"`、`role="navigation"`、`role="banner"`、`role="contentinfo"` 的元素受到绝对保护，检查先于所有判定规则。
+- 新增媒体恢复：被隐藏的区块若随后开始播放视频（画面已解码且未暂停），且到视频之间没有强广告命名，则恢复并阻止本页再次隐藏。
+- 修正新浪财经个股页正文被隐藏的问题：列表里针对新浪财经的一条隐藏规则在个股页命中了「投资研报」「大V观点」面板，现已在构建期排除。
+
+### English
+
+- Fixed whole content areas being hidden on video pages: a feature-flag attribute on the page container had "ads" in its name and scored as ad naming. Naming evidence now reads class values, id values and the values of aria-label, title and data-ad-slot; attribute names no longer score.
+- Elements carrying role="main", role="navigation", role="banner" or role="contentinfo" are absolutely protected; the check runs before every judging rule.
+- Added media recovery: a hidden block that starts playing a video (picture decoded, not paused) is restored when nothing between the video and the block is ad-named, and is kept from being hidden again on that page.
+- Fixed editorial content hidden on Sina Finance stock pages: a list rule for Sina Finance matched the research/opinion panel on quote pages and is now excluded at build time.
+
+---
+
 ## v1.0.8
 
 ### 中文（简体）
