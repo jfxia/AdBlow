@@ -18,6 +18,7 @@ import {
   shardIndex,
   type CosmeticFilter,
 } from '../../src/engine/filterList/cosmetic.ts';
+import { isCosmeticExceptionRaw } from '../../src/engine/filterList/cosmeticExceptions.ts';
 import {
   buildScriptletIndex,
   parseScriptletRule,
@@ -123,6 +124,12 @@ for (const entry of meta.lists) {
   allPopupFilters.push(...parsed.popup);
 
   for (const c of parsed.cosmetic) {
+    // Known-bad list rules are dropped here rather than in the engine: the engine cannot tell a
+    // wrong rule from a right one, and this keeps the shipped shards free of them.
+    if (isCosmeticExceptionRaw(c.raw)) {
+      skipReasons['cosmetic-exception'] = (skipReasons['cosmetic-exception'] ?? 0) + 1;
+      continue;
+    }
     const f = parseCosmeticLine(c.raw);
     if (f) allCosmetic.push(f);
     // Scriptlet rules come through the same cosmetic channel
