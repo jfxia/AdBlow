@@ -1,7 +1,33 @@
-# 更新日志（v1.0.0 → v1.0.4）
+# 更新日志（v1.0.0 → v1.0.8）
 
 供应用商店发布使用：每个版本下面分中英两段，可直接粘贴到对应版本的「新版说明」字段。
 数字均为该版本发布时的值。
+
+---
+
+## v1.0.8
+
+### 中文（简体）
+
+- 修正新浪财经个股页正文被隐藏的问题：过滤列表里一条针对新浪财经的隐藏规则（隐藏选项卡栏后的区块）在个股页上命中了「投资研报」「大V观点」面板。本版在构建期排除该规则，列表上游修正后自然失效。
+- 顺带统计了同类风险：20,321 条外观规则中有 3,035 条含兄弟或通用组合符（`+`、`~`），这类规则依赖页面结构，是同一类误杀的共同来源；本次只排除有确认证据的一条。
+
+### English
+
+- Fixed editorial content being hidden on Sina Finance stock pages: a list rule for Sina Finance (hide the block after a tab bar) matched the research/opinion panel on quote pages. The rule is now excluded at build time and stops applying once the list fixes it upstream.
+- Measured the same class of risk: of 20,321 hiding rules, 3,035 use sibling or general combinators (`+`、`~`), which depend on page structure and are the common source of this kind of false positive; only the one with confirmed evidence is excluded here.
+
+---
+
+## v1.0.7
+
+### 中文（简体）
+
+- 定时任务自动发布的补丁版本：过滤列表已刷新，规则集随之重建；除列表数据与版本号外没有代码改动。
+
+### English
+
+- Patch release published by the scheduled task: the filter lists were refreshed and the rulesets rebuilt; nothing changed except list data and the version number.
 
 ---
 
