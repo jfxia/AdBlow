@@ -19,6 +19,11 @@
 
 ---
 
+**[Install AdBlow from the Edge Add-ons store →](https://microsoftedge.microsoft.com/addons/detail/omfepilfkagfdjejmdlkkphecllioion)**
+
+It works out of the box, with nothing to configure. False positives and missed ads are welcome as
+issues with the page address attached.
+
 ## What it is
 
 Most ad blockers have the same shape: a rule list that someone maintains, plus an engine that applies it.

@@ -19,6 +19,10 @@
 
 ---
 
+**[在 Edge 加载项商店安装 AdBlow →](https://microsoftedge.microsoft.com/addons/detail/omfepilfkagfdjejmdlkkphecllioion)**
+
+装好之后在页面上直接用即可，不需要配置。遇到误杀或漏挡，欢迎在 Issues 里附上页面地址。
+
 ## 项目定位
 
 大多数广告过滤器的结构是一样的：一张不断维护的规则表，加一个执行它的引擎。请求地址命中表里的条目就被拦下，页面元素匹配上某个选择器就被隐藏。这套办法有效，但有一个天生的盲区：广告只要换一副面孔，就不再在表里。
