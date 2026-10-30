@@ -1,17 +1,14 @@
 flowchart TD
-  start["document_start"] --> a["MAIN world: guards installed, scriptlets applied"]
-  a --> b["Isolated world: pristine snapshot of the document"]
-  b --> c["Requests matched against the static DNR rulesets"]
-  c --> d["Scan: site packs, list hiding rules, behaviour scoring"]
-  d --> e{"Judged ad-like?"}
-  e -->|"yes"| f["Hide with display, visibility and pointer-events; record the reason"]
-  e -->|"no"| g["Leave untouched"]
-  f --> h["Verification pass re-hides what the site restores"]
-  h --> i["Hits recorded; 3 accumulated hits promote a rule scoped to this site"]
-  i --> j["Rule manager: review, revoke, export"]
-  d --> k["Wall detection (read-only, never modifies the page)"]
-  k --> l{"Wall found?"}
-  l -->|"yes"| m["Popup reports it; the page stays exactly as it is"]
-  m --> n{"Confirmed for this site?"}
-  n -->|"yes"| o["Hide the gate, restore the content it hid; ad blocking stays on"]
-  n -->|"no"| m
+  start["document_start"] --> a["MAIN world: install guards, apply scriptlets, receive domain lists"]
+  a --> b["isolated world: take a pristine snapshot of the document"]
+  b --> c["requests match the static DNR rulesets"]
+  c --> d["scan: site packs, list hiding rules, behaviour scoring"]
+  d --> e{"judged an ad?"}
+  e -->|"no"| g["leave it alone"]
+  e -->|"yes"| f["hide via display, visibility, pointer-events and record the reason"]
+  f --> h["verify: re-hide after the site restores it"]
+  h --> i["record the hit; after 3 hits promote to a rule for this site only"]
+  i --> j["rule manager: inspect, revoke one, export"]
+  f --> r{"did a playing video appear inside it?"}
+  r -->|"yes, and nothing above it is ad-named"| r2["restore it and stop hiding it on this page"]
+  r -->|"no"| r3["keep it hidden"]

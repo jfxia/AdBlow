@@ -1,6 +1,6 @@
 flowchart TB
   lists["过滤列表<br/>（构建期抓取）"]
-  compile["编译与校验"]
+  compile["编译与校验<br/>（含网络规则 / 外观规则例外表）"]
   lists --> compile
 
   subgraph sw["service worker"]
@@ -8,6 +8,7 @@ flowchart TB
     rules["静态规则集 x6"]
     dynamic["动态规则<br/>（自学习域名）"]
     shards["隐藏分片 x256"]
+    domains["域名清单 x2<br/>恶意站点 / 禁止开窗"]
   end
 
   subgraph iso["隔离世界"]
@@ -15,13 +16,17 @@ flowchart TB
     snapshot["原始快照"]
     score["相似度打分"]
     hiding["隐藏 + 复核"]
+    recover["媒体恢复"]
     learn["自学习"]
+    consent["cookie 提示"]
     wall["反过滤墙检测"]
+    picker["元素选取器<br/>（手动规则）"]
   end
 
   subgraph mw["MAIN world"]
     direction TB
-    guards["防护<br/>（open、点击、存储）"]
+    guards["防护<br/>（点击、存储、弹窗状态）"]
+    popup["开窗判定<br/>（禁开名单 + 白名单 + 本站开关）"]
     scriptlets["脚本注入 x13"]
   end
 
@@ -30,14 +35,20 @@ flowchart TB
   compile --> rules
   compile --> shards
   compile --> scriptlets
+  compile --> domains
   shards --> hiding
+  domains --> popup
   snapshot --> score
   score --> hiding
+  hiding --> recover
   hiding --> learn
+  consent --> hiding
+  picker --> learn
   learn --> dynamic
   wall -. "用户确认后" .-> hiding
-  hiding ~~~ guards
+  hiding ~~~ popup
   rules --> page
   dynamic --> page
   guards --> page
+  popup --> page
   scriptlets --> page

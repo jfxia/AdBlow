@@ -1,43 +1,54 @@
 flowchart TB
   lists["Filter lists<br/>(fetched at build time)"]
-  compile["Compile + validate"]
+  compile["Compile and validate<br/>(with network / cosmetic exception tables)"]
   lists --> compile
 
-  subgraph sw["Service worker"]
+  subgraph sw["service worker"]
     direction TB
-    rules["Static rulesets x6"]
-    dynamic["Dynamic rules<br/>(learned domains)"]
-    shards["Hiding shards x256"]
+    rules["static rulesets x6"]
+    dynamic["dynamic rules<br/>(learned domains)"]
+    shards["hiding shards x256"]
+    domains["domain lists x2<br/>badware / popup-blocked"]
   end
 
-  subgraph iso["Isolated world"]
+  subgraph iso["isolated world"]
     direction TB
-    snapshot["Pristine snapshot"]
-    score["Ad-likeness scoring"]
-    hiding["Hiding + verification"]
-    learn["Self-learning"]
-    wall["Wall detection"]
+    snapshot["pristine snapshot"]
+    score["likeness scoring"]
+    hiding["hide + verify"]
+    recover["media recovery"]
+    learn["self-learning"]
+    consent["cookie prompts"]
+    wall["anti-adblock wall detection"]
+    picker["element picker<br/>(manual rules)"]
   end
 
   subgraph mw["MAIN world"]
     direction TB
-    guards["Guards<br/>(open, click, storage)"]
-    scriptlets["Scriptlets x13"]
+    guards["guards<br/>(clicks, storage, popup state)"]
+    popup["window.open decision<br/>(deny list + allowlist + site switch)"]
+    scriptlets["scriptlets x13"]
   end
 
-  page["Page"]
+  page["page"]
 
   compile --> rules
   compile --> shards
   compile --> scriptlets
+  compile --> domains
   shards --> hiding
+  domains --> popup
   snapshot --> score
   score --> hiding
+  hiding --> recover
   hiding --> learn
+  consent --> hiding
+  picker --> learn
   learn --> dynamic
-  wall -. "on user confirmation" .-> hiding
-  hiding ~~~ guards
+  wall -. "after user confirmation" .-> hiding
+  hiding ~~~ popup
   rules --> page
   dynamic --> page
   guards --> page
+  popup --> page
   scriptlets --> page

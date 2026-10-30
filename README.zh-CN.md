@@ -49,7 +49,9 @@ AdBlow 换了一个判定依据：不看广告长什么样，看它在页面里�
 
 ## 处理流程
 
-<img src="docs/diagrams/flow-zh.png" width="780" alt="AdBlow 处理流程，含反过滤墙等待用户确认的环节">
+<img src="docs/diagrams/flow-zh.png" width="700" alt="AdBlow 主处理流程：快照、打分、隐藏、复核、学习，以及隐藏后长出视频时的恢复">
+
+<img src="docs/diagrams/flow-branches-zh.png" width="700" alt="AdBlow 的三条并行分支：开窗判定、cookie 提示处理、反过滤墙（等待用户确认）">
 
 ## 与其他过滤器的对比
 

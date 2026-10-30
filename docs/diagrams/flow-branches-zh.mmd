@@ -1,0 +1,22 @@
+flowchart TD
+  click["页面上的点击"] --> w{"开窗目标<br/>跨站？"}
+  w -->|"否"| allow["放行"]
+  w -->|"是"| decode["解码查询参数里的<br/>跳板地址"]
+  decode --> deny{"命中<br/>禁开名单？"}
+  deny -->|"是"| refuse["拒绝，并记录<br/>站点与目标域名"]
+  deny -->|"否"| white{"在放行白名单内，<br/>或点击的就是<br/>指向它的链接？"}
+  white -->|"是"| allow
+  white -->|"否"| site{"本站允许<br/>弹窗？"}
+  site -->|"是"| allow
+  site -->|"否"| refuse
+
+  page["页面加载"] --> banner{"识别到<br/>cookie 横幅？"}
+  banner -->|"否"| nothing["不做处理"]
+  banner -->|"是"| pick["点击接受；有拒绝<br/>全部则优先拒绝"]
+
+  page --> wall{"检测到<br/>反过滤墙？"}
+  wall -->|"否"| nothing
+  wall -->|"是"| tell["弹窗告知；<br/>页面保持原样"]
+  tell --> confirmed{"用户已确认<br/>处理本站点？"}
+  confirmed -->|"否"| tell
+  confirmed -->|"是"| fix["隐藏遮罩、恢复正文；<br/>广告拦截不变"]

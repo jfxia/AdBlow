@@ -1,0 +1,22 @@
+flowchart TD
+  click["a click<br/>on the page"] --> w{"cross-site<br/>target?"}
+  w -->|"no"| allow["allow"]
+  w -->|"yes"| decode["decode a hop address<br/>in a query parameter"]
+  decode --> deny{"on the<br/>deny list?"}
+  deny -->|"yes"| refuse["refuse and record<br/>site and target"]
+  deny -->|"no"| white{"allowlisted, or the<br/>click was a link<br/>to that target?"}
+  white -->|"yes"| allow
+  white -->|"no"| site{"popups allowed<br/>on this site?"}
+  site -->|"yes"| allow
+  site -->|"no"| refuse
+
+  page["page load"] --> banner{"cookie banner<br/>recognised?"}
+  banner -->|"no"| nothing["leave it alone"]
+  banner -->|"yes"| pick["click accept, or<br/>reject when offered"]
+
+  page --> wall{"anti-adblock<br/>wall detected?"}
+  wall -->|"no"| nothing
+  wall -->|"yes"| tell["tell the user;<br/>page stays as it is"]
+  tell --> confirmed{"user confirmed<br/>a fix?"}
+  confirmed -->|"no"| tell
+  confirmed -->|"yes"| fix["hide the gate,<br/>restore the content"]

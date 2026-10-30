@@ -70,7 +70,9 @@ exemption is no longer judging only by whether something looks like an ad.
 
 ## Request and judgement flow
 
-<img src="docs/diagrams/flow-en.png" width="780" alt="AdBlow request and judgement flow, including the point where an anti-adblock wall waits for the user to confirm">
+<img src="docs/diagrams/flow-en.png" width="700" alt="AdBlow main flow: snapshot, scoring, hiding, verification, learning, and media recovery">
+
+<img src="docs/diagrams/flow-branches-en.png" width="700" alt="AdBlow's three parallel branches: window.open decisions, cookie prompts, and the anti-adblock wall that waits for user confirmation">
 
 ## How it compares
 
