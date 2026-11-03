@@ -20,6 +20,26 @@ function freshWindow(): Record<string, unknown> {
   return dom.window as unknown as Record<string, unknown>;
 }
 
+/**
+ * Apply one `json-prune` rule and return the patched parser.
+ *
+ * A throwaway `{ JSON: { parse } }` holder rather than a jsdom window: in Node,
+ * `dom.window.JSON === JSON` (measured), so patching a jsdom window would leave every later
+ * `JSON.parse` in this process wrapped by the pruner. This still goes through the same
+ * `runScriptlets` code path.
+ */
+function jsonPruner(paths: string): (text: string, reviver?: unknown) => unknown {
+  const holder = {
+    parse: (text: string, reviver?: unknown): unknown =>
+      (JSON.parse as unknown as (t: string, r?: unknown) => unknown)(text, reviver),
+  };
+  runScriptlets(
+    [{ canonical: 'json-prune', args: [paths] }],
+    { JSON: holder } as unknown as Record<string, unknown>,
+  );
+  return holder.parse;
+}
+
 describe('makeMatcher', () => {
   it('空 needle 匹配一切', () => {
     assert.equal(makeMatcher('')('anything'), true);
@@ -265,9 +285,9 @@ describe('runScriptlets：行为断言', () => {
   });
 
   it('❗json-prune：删掉指定路径', () => {
-    const win = freshWindow();
-    runScriptlets([{ canonical: 'json-prune', args: ['ads.banner'] }], win);
-    const parsed = (win.JSON as { parse: (s: string) => unknown }).parse(
+    // Isolated target, not a jsdom window: `dom.window.JSON === JSON` in Node (measured),
+    // so patching a jsdom window leaks into every later JSON.parse in this process.
+    const parsed = jsonPruner('ads.banner')(
       '{"ads":{"banner":"x","keep":1},"other":2}',
     ) as { ads: Record<string, unknown>; other: number };
     assert.equal('banner' in parsed.ads, false, '目标键应被删除');
@@ -369,6 +389,195 @@ describe('runScriptlets：行为断言', () => {
     const inv = [{ canonical: 'set-constant', args: ['x', 'false'] }];
     runScriptlets(inv, win);
     assert.doesNotThrow(() => runScriptlets(inv, win));
+  });
+});
+
+/**
+ * json-prune 的路径段语义。
+ *
+ * 为什么不起一个 jsdom 窗口来测：Node 里 `dom.window.JSON === JSON`（实测），给 jsdom 窗口
+ * 打补丁会改到**整个进程**的原生 JSON.parse，后续用例全都穿过这层包装。这里用一个独立的
+ * `{ JSON: { parse } }` 作为注入目标，走的是 runScriptlets 的同一条代码路径，互不污染。
+ *
+ * 语义对齐 uBO：`[]` 遍历数组元素（不删元素本身），`*` 遍历自有属性（末段则删光），每一步都
+ * 要求自有属性。Reddit 的规则 `data.*.elements.edges.[].node.outboundLink` 此前因为 `[]` 被
+ * 当成字面键 `"[]"` 而完全空转 —— 这组用例守住的就是"它到底删了什么、没删什么"。
+ */
+describe('json-prune：路径段语义（[] / * / 自有属性）', () => {
+  /** shreddit GraphQL 回复的形状：3 个 edge，只有 #0、#2 的 node 带 outboundLink。 */
+  const REDDIT_REPLY = JSON.stringify({
+    data: {
+      posts: {
+        elements: {
+          edges: [
+            {
+              cursor: 't3_aaa',
+              node: {
+                __typename: 'Post',
+                id: 't3_aaa',
+                title: 'First post',
+                permalink: '/r/test/comments/aaa/first/',
+                outboundLink: 'https://example.com/landing?utm=1',
+                score: 42,
+                media: { __typename: 'ImageMedia', url: 'https://i.redd.it/a.jpg' },
+                children: [],
+              },
+            },
+            {
+              cursor: 't3_bbb',
+              node: {
+                __typename: 'Post',
+                id: 't3_bbb',
+                title: 'Second post',
+                permalink: '/r/test/comments/bbb/second/',
+                score: 7,
+                media: null,
+                children: [],
+              },
+            },
+            {
+              cursor: 't3_ccc',
+              node: {
+                __typename: 'Post',
+                id: 't3_ccc',
+                title: 'Third post',
+                outboundLink: 'https://example.org/other',
+                media: { __typename: 'VideoMedia' },
+                children: [{ id: 'c1' }, { id: 'c2' }],
+              },
+            },
+          ],
+          pageInfo: { hasNextPage: true, endCursor: 't3_ccc' },
+        },
+      },
+    },
+  });
+
+  it('❗Reddit 规则：只删 edges[].node.outboundLink，其它字段与数组长度都不变', () => {
+    const parse = jsonPruner('data.*.elements.edges.[].node.outboundLink');
+    const out = parse(REDDIT_REPLY) as Record<string, any>;
+
+    const expected = JSON.parse(REDDIT_REPLY) as Record<string, any>;
+    for (const edge of expected['data'].posts.elements.edges) delete edge.node.outboundLink;
+
+    assert.deepEqual(out, expected, '除 outboundLink 外必须逐字段相同');
+    assert.equal(Array.isArray(out['data'].posts.elements.edges), true, 'edges 必须还是数组');
+    assert.equal(out['data'].posts.elements.edges.length, 3, '数组长度不变');
+    assert.equal(out['data'].posts.elements.edges[1].node.id, 't3_bbb', '没有 outboundLink 的那条原样保留');
+    assert.deepEqual(
+      out['data'].posts.elements.edges.map((e: any) => e.cursor),
+      ['t3_aaa', 't3_bbb', 't3_ccc'],
+      '元素顺序不变、元素没被删',
+    );
+    assert.equal(out['data'].posts.elements.pageInfo.hasNextPage, true, '无关字段不动');
+  });
+
+  it('❗`[]` 只遍历数组元素，不把元素本身删掉', () => {
+    const out = jsonPruner('a.[].b')('{"a":[{"b":1,"c":2},{"b":3,"d":4}]}') as Record<string, any>;
+    assert.deepEqual(out, { a: [{ c: 2 }, { d: 4 }] });
+    assert.equal(out['a'].length, 2, '数组长度不变');
+  });
+
+  it('`[]` 用在非数组上不匹配任何东西', () => {
+    assert.deepEqual(jsonPruner('a.[].b')('{"a":{"b":1}}'), { a: { b: 1 } });
+    assert.deepEqual(jsonPruner('a.[].b')('{"a":"x"}'), { a: 'x' });
+    assert.deepEqual(jsonPruner('a.[].b')('{"a":null}'), { a: null });
+    // uBO 在非数组上把 `[]` 退化成普通键名，因此只有真存在字面 "[]" 键时才会命中
+    assert.deepEqual(jsonPruner('a.[].b')('{"a":{"[]":{"b":1,"c":2}}}'), { a: { '[]': { c: 2 } } });
+  });
+
+  it('`*`：中间段遍历每个自有属性，末段删光所有键（uBO 的 `json-prune, *`）', () => {
+    assert.deepEqual(jsonPruner('x.*.ad')('{"x":{"p":{"ad":1,"k":2},"q":{"ad":3}}}'), {
+      x: { p: { k: 2 }, q: {} },
+    });
+    assert.deepEqual(jsonPruner('*')('{"a":1,"b":2}'), {});
+  });
+
+  it('数值段就是普通键，只影响该下标的元素', () => {
+    const out = jsonPruner('a.0.b')('{"a":[{"b":1},{"b":2}]}') as Record<string, any>;
+    assert.deepEqual(out, { a: [{}, { b: 2 }] });
+    assert.equal(out['a'].length, 2);
+  });
+
+  it('❗路径不存在 / 数组为空 / 元素不是对象 / 标量根：不抛异常也不误删', () => {
+    assert.doesNotThrow(() => jsonPruner('a.b.c.d')('{"x":1}'));
+    assert.deepEqual(jsonPruner('a.b.c.d')('{"x":1}'), { x: 1 });
+    assert.deepEqual(jsonPruner('a.[].b')('{"a":[]}'), { a: [] });
+    assert.deepEqual(jsonPruner('a.[].b')('{"a":[1,"x",null]}'), { a: [1, 'x', null] });
+    assert.deepEqual(jsonPruner('a.[].b')('{"a":"nope"}'), { a: 'nope' });
+    assert.equal(jsonPruner('a.b')('null'), null);
+    assert.equal(jsonPruner('a.b')('42'), 42);
+    assert.equal(jsonPruner('a.b')('"hi"'), 'hi');
+  });
+
+  it('JSON 本身就是数组时，`[]` 从根上遍历元素', () => {
+    const out = jsonPruner('[].outboundLink')(
+      '[{"outboundLink":1,"k":2},{"outboundLink":3}]',
+    ) as Record<string, unknown>[];
+    assert.deepEqual(out, [{ k: 2 }, {}]);
+    assert.equal(out.length, 2);
+  });
+
+  it('❗输入不是 JSON：仍抛原生 SyntaxError，不被吞掉', () => {
+    const parse = jsonPruner('a.b');
+    assert.throws(() => parse('<html>'), (err: unknown) => err instanceof SyntaxError);
+  });
+
+  it('❗不碰继承属性：路径里的 __proto__ / constructor 改不到页面原型上', () => {
+    const proto = Object.prototype as unknown as Record<string, unknown>;
+    proto.adblowProbe = 1;
+    try {
+      // With an own-property guard both paths stop at the payload (`__proto__` is not an own
+      // key of a JSON.parse result unless the response really contains it). Without the
+      // guard the first one walks into Object.prototype and deletes the key realm-wide.
+      assert.deepEqual(jsonPruner('__proto__.adblowProbe')('{"a":1}'), { a: 1 });
+      assert.equal(proto['adblowProbe'], 1, '__proto__ 路径不能删到 Object.prototype 上');
+      assert.deepEqual(jsonPruner('constructor.prototype.adblowProbe')('{"a":1}'), { a: 1 });
+      assert.equal(proto['adblowProbe'], 1, 'constructor.prototype 路径同样不能');
+    } finally {
+      delete proto['adblowProbe'];
+    }
+  });
+
+  it('reviver 仍然生效，prune 作用在 reviver 的结果上', () => {
+    const out = jsonPruner('a.b')('{"a":{"b":1,"c":2}}', (k: string, v: unknown) =>
+      k === 'c' ? 9 : v,
+    );
+    assert.deepEqual(out, { a: { c: 9 } });
+  });
+
+  it('❗返回值就是原生 parse 产出的那个对象：身份、原型、数组性都不变', () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+      url: 'https://www.reddit.com/',
+    });
+    const win = dom.window as unknown as Record<string, unknown>;
+    const json = win.JSON as { parse: (text: string, reviver?: unknown) => unknown };
+    const native = json.parse;
+    try {
+      const produced: unknown[] = [];
+      json.parse = (text: string, reviver?: unknown) => {
+        const value = native(text, reviver);
+        produced.push(value);
+        return value;
+      };
+      runScriptlets([{ canonical: 'json-prune', args: ['data.posts.elements.edges.[].node.outboundLink'] }], win);
+      const out = json.parse(REDDIT_REPLY);
+      assert.equal(out, produced[0], '必须是同一个对象（不是重新序列化出来的副本）');
+      assert.equal(Object.getPrototypeOf(out), (win.Object as any).prototype, '原型必须是本 realm 的 Object.prototype');
+      assert.equal(out instanceof (win.Object as any), true);
+      const edges = (out as Record<string, any>)['data'].posts.elements.edges;
+      assert.equal(Array.isArray(edges), true, '数组仍然是真数组');
+    } finally {
+      json.parse = native;
+    }
+  });
+
+  it('补丁后的 JSON.parse 仍像原生函数（name / length / toString）', () => {
+    const patched = jsonPruner('a.b');
+    assert.equal(patched.name, 'parse');
+    assert.equal(patched.length, 2);
+    assert.match(Function.prototype.toString.call(patched), /\[native code\]/);
+    assert.deepEqual(patched('{"a":1}'), { a: 1 });
   });
 });
 

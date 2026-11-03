@@ -236,14 +236,22 @@ export function shouldAllowOpen(request: OpenRequest): boolean {
  * reporting at unload to compensate for requests we blocked. Source-text heuristics only,
  * so it stays deliberately conservative: block only on clear reporting keywords, to avoid
  * killing a site's legitimate cleanup logic.
+ *
+ * Never throws: reading a listener's source can fail (a Proxy, a replaced `toString`, a
+ * throwing `handleEvent` getter) and the native `addEventListener` reads none of it, so an
+ * unreadable listener is "not a beacon" rather than an error the page never expected.
  */
 export function looksLikeTrackingListener(listener: unknown): boolean {
-  const source =
-    typeof listener === 'function'
-      ? listener.toString()
-      : typeof (listener as { handleEvent?: unknown })?.handleEvent === 'function'
-        ? String((listener as { handleEvent: () => unknown }).handleEvent)
-        : '';
-  if (!source) return false;
-  return /beacon|navigator\.sendBeacon|report\.json|eventTracking|ab-test|pending/i.test(source);
+  try {
+    const source =
+      typeof listener === 'function'
+        ? listener.toString()
+        : typeof (listener as { handleEvent?: unknown })?.handleEvent === 'function'
+          ? String((listener as { handleEvent: () => unknown }).handleEvent)
+          : '';
+    if (!source) return false;
+    return /beacon|navigator\.sendBeacon|report\.json|eventTracking|ab-test|pending/i.test(source);
+  } catch {
+    return false;
+  }
 }

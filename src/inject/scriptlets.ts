@@ -520,29 +520,79 @@ function applyOne(inv: Invocation, win: Record<string, unknown>): boolean {
         .split(/\s+/)
         .map((p) => p.trim())
         .filter(Boolean);
+
+      const hasOwn = (owner: object, key: string): boolean =>
+        Object.prototype.hasOwnProperty.call(owner, key);
+
+      /**
+       * uBO's path walker (semantics taken from uBO master `object-prune.js`, 2026-11-02):
+       *
+       *   `*`  — every own property of an object. As the LAST segment it deletes them all
+       *          (uBO does the same for `json-prune, *`); in the middle it recurses into
+       *          each value.
+       *   `[]` — every element of an array. The element itself is never removed: only the
+       *          rest of the path is applied to each one. On a non-array it is an ordinary
+       *          property name, exactly as in uBO (which falls through to
+       *          `Object.hasOwn(owner, '[]')` and therefore matches nothing in practice).
+       *   other — an own property name (numeric indices of arrays included).
+       *
+       * `[]` used to be read as a LITERAL key `"[]"`, which exists in no response, so every
+       * rule carrying it silently pruned nothing. Measured on the rule
+       * `www.reddit.com##+js(json-prune, data.*.elements.edges.[].node.outboundLink)`:
+       * before the fix the payload came back byte-identical, after it only `outboundLink`
+       * goes away (see tests/integration/scriptlets.test.ts).
+       *
+       * Every step requires an OWN property: descending into an inherited one would let a
+       * path like `constructor.prototype.x` delete from a page-global prototype instead of
+       * from the payload. uBO guards this the same way (`safe.Object_hasOwn`).
+       *
+       * Deliberately NOT implemented: `[-]` (uBO: drop the array element whose subtree
+       * matches) and `{}` (uBO alias of `*`). Both remove *elements*, a different risk
+       * class from "delete this key"; rules using them stay inert, as before.
+       */
       const prune = (node: unknown, path: string[]): void => {
         if (node === null || typeof node !== 'object') return;
         const [head, ...tail] = path;
         if (!head) return;
+        const obj = node as Record<string, unknown>;
+
+        if (head === '[]' && Array.isArray(node)) {
+          for (const key of Object.keys(obj)) prune(obj[key], tail);
+          return;
+        }
+
         if (head === '*') {
-          for (const key of Object.keys(node as Record<string, unknown>)) prune(node, [key, ...tail]);
+          if (tail.length === 0) {
+            for (const key of Object.keys(obj)) delete obj[key];
+            return;
+          }
+          for (const key of Object.keys(obj)) prune(obj[key], tail);
           return;
         }
+
+        if (!hasOwn(obj, head)) return;
         if (tail.length === 0) {
-          delete (node as Record<string, unknown>)[head];
+          delete obj[head];
           return;
         }
-        prune((node as Record<string, unknown>)[head], tail);
+        prune(obj[head], tail);
       };
-      json.parse = function patched(this: unknown, ...a: unknown[]): unknown {
-        const result = (original as (...x: unknown[]) => unknown).apply(this, a);
-        try {
-          for (const p of prunePaths) prune(result, p.split('.'));
-        } catch {
-          /* ignore */
-        }
-        return result;
-      };
+
+      // A Proxy rather than a plain function: `JSON.parse` then keeps its native `name`,
+      // `length` and `toString`, so a page that fingerprints the built-in sees the built-in.
+      // The RETURN VALUE is untouched either way -- it is the very object the original
+      // parser produced, same identity, same prototype (measured).
+      json.parse = new Proxy(original as (...x: unknown[]) => unknown, {
+        apply(target, thisArg, callArgs: unknown[]): unknown {
+          const result = Reflect.apply(target, thisArg, callArgs);
+          try {
+            for (const p of prunePaths) prune(result, p.split('.'));
+          } catch {
+            /* never let pruning errors escape to the page */
+          }
+          return result;
+        },
+      });
       return true;
     }
 

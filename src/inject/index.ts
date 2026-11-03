@@ -7,11 +7,29 @@ import {
 import { keysToScrub, scrubWindowName } from '../engine/scrub.ts';
 import {
   NAVIGATION_EVENT_TYPES,
+  classifyPageWideListener,
   isNavigationSource,
   looksLikeNavigationHijack,
   shouldBlockClick,
 } from './clickGuard.ts';
-import { decideOpen, looksLikeTrackingListener, unwrapOpenTarget } from './guards.ts';
+import { decideOpen, unwrapOpenTarget } from './guards.ts';
+import {
+  guardAddEventListener,
+  guardPropertySetter,
+  guardWindowOpen,
+  makeFailureReporter,
+  safeVerdict,
+} from './safePatches.ts';
+
+/**
+ * Failures inside a guard degrade to the native behaviour and are reported once per site.
+ *
+ * Every patch below stands in front of a built-in the page also calls, so a guard must never be
+ * the reason a page throws. `safePatches.ts` turns every internal error into "do what the browser
+ * would have done"; this reporter is the only trace we keep.
+ */
+const reportFailure = makeFailureReporter();
+
 
 /**
  * MAIN world injection.
@@ -73,42 +91,50 @@ const popupDeny = createPopupDenyGate(document);
 Object.defineProperty(window, 'open', {
   configurable: false,
   writable: false,
-  value: (url?: string | URL, target?: string, features?: string): Window | null => {
-    const href = String(url ?? '');
-    // A same-site wrapper (`/pop?url=<encoded ad>`) hides the real destination from the
-    // `$popup` list: the list is keyed by the host the window lands on. Check it against the
-    // unwrapped target as well, otherwise a wrapper defeats the denylist entirely.
-    const unwrappedHref = unwrapOpenTarget(href, location.hostname);
-    const decision = decideOpen({
-      url: href,
-      pageHost: location.hostname,
-      hadUserGesture,
-      gestureAnchorHref,
-      // Passing location.href as the base resolves relative targets, so `//host/x` and
-      // `/x` are judged by their real host instead of being skipped.
-      popupDenied:
-        popupDeny.isDenied(href, location.href) ||
-        (unwrappedHref !== null && popupDeny.isDenied(unwrappedHref)),
-      // Read every call (it is one attribute lookup): the switch can be toggled while the
-      // page is open, and caching it would keep the old answer until reload.
-      siteAllowsPopups: readPopupAllowance(document),
-    });
-    if (!decision.allow) {
-      // The record and the log name the *real* destination: for a wrapper page the wrapper's
-      // host is the same site the user is already on, which says nothing about the block.
-      const realTarget = decision.targetUrl ?? href;
-      if (decision.reason === 'popup-list') {
-        console.debug('[adblow] 已拦截 popup 弹窗', realTarget);
-      } else {
-        console.debug('[adblow] 已拦截 window.open', href, target, decision.reason, realTarget);
-      }
-      // Leave a record the isolated world forwards to the worker (per-site count + last
-      // target), so a site broken by the new default is diagnosable from the rule manager.
-      if (href) announcePopupBlock(document, realTarget);
-      return null;
-    }
-    return rawOpen(url as string, target, features);
-  },
+  // Wrapped so a failing decision opens the window exactly as the browser would have opened it
+  // (see safePatches.ts); a refusal we actually reached still wins.
+  value: guardWindowOpen(
+    rawOpen as unknown as (this: unknown, ...args: unknown[]) => unknown,
+    (url, target) => {
+      const href = String(url ?? '');
+      // A same-site wrapper (`/pop?url=<encoded ad>`) hides the real destination from the
+      // `$popup` list: the list is keyed by the host the window lands on. Check it against the
+      // unwrapped target as well, otherwise a wrapper defeats the denylist entirely.
+      const unwrappedHref = unwrapOpenTarget(href, location.hostname);
+      const decision = decideOpen({
+        url: href,
+        pageHost: location.hostname,
+        hadUserGesture,
+        gestureAnchorHref,
+        // Passing location.href as the base resolves relative targets, so `//host/x` and
+        // `/x` are judged by their real host instead of being skipped.
+        popupDenied:
+          popupDeny.isDenied(href, location.href) ||
+          (unwrappedHref !== null && popupDeny.isDenied(unwrappedHref)),
+        // Read every call (it is one attribute lookup): the switch can be toggled while the
+        // page is open, and caching it would keep the old answer until reload.
+        siteAllowsPopups: readPopupAllowance(document),
+      });
+      if (decision.allow) return { allow: true };
+      return {
+        allow: false,
+        onBlock: () => {
+          // The record and the log name the *real* destination: for a wrapper page the wrapper's
+          // host is the same site the user is already on, which says nothing about the block.
+          const realTarget = decision.targetUrl ?? href;
+          if (decision.reason === 'popup-list') {
+            console.debug('[adblow] 已拦截 popup 弹窗', realTarget);
+          } else {
+            console.debug('[adblow] 已拦截 window.open', href, target, decision.reason, realTarget);
+          }
+          // Leave a record the isolated world forwards to the worker (per-site count + last
+          // target), so a site broken by the new default is diagnosable from the rule manager.
+          if (href) announcePopupBlock(document, realTarget);
+        },
+      };
+    },
+    reportFailure,
+  ) as typeof window.open,
 });
 
 // Click-hijack interception.
@@ -143,7 +169,21 @@ function linkInfo(el: Element | null): { href: string | null; invisible: boolean
   return { href: anchor.getAttribute('href'), invisible };
 }
 
+/**
+ * Click-hijack listener. Our own listener must never become the page's uncaught error: the APIs it
+ * reads are not guaranteed everywhere (`document.elementFromPoint` is missing in some embedded
+ * contexts, and jsdom proves one), and an exception here is reported as a page error. A click we
+ * cannot judge behaves as if we were not there — the page's own listeners still run.
+ */
 function clickGuard(ev: Event): void {
+  try {
+    judgeClick(ev);
+  } catch {
+    reportFailure('clickGuard');
+  }
+}
+
+function judgeClick(ev: Event): void {
   const target = ev.target instanceof Element ? ev.target : null;
   const point = pointOf(ev);
   const topmost = point ? document.elementFromPoint(point.x, point.y) : null;
@@ -208,35 +248,32 @@ setInterval(scrub, 2000);
 // target is normal content, so the event layer cannot block it, and assigning
 // `location.href` cannot be intercepted either. See looksLikeNavigationHijack in
 // clickGuard.ts. Element-level listeners are untouched, so buttons/links keep working.
+//
+// Only handlers whose whole body is a single navigation statement are refused; a normal
+// delegated handler that merely contains a `window.open(…)` fallback or a `location.href = …`
+// branch next to its own work is KEPT. That trade is deliberate: dropping a working handler
+// leaves the page rendering but unresponsive, which is worse than letting one redirect through —
+// and a cross-site window is still refused at call time by the `window.open` guard.
 const rawAddEventListener = EventTarget.prototype.addEventListener;
 
-/** Targets whose handlers are page-wide: a listener here can redirect any click. */
-function isPageWideTarget(target: EventTarget | null): boolean {
-  if (!target) return false;
-  if (target === window || target === document) return true;
-  // Handlers attached to <body>/<html> are just as page-wide, and this is the shape
-  // `document.body.addEventListener('click', …)` uses to hijack every click.
-  return target === document.body || target === document.documentElement;
-}
-
-EventTarget.prototype.addEventListener = function patched(
-  this: EventTarget,
-  type: string,
-  listener: EventListenerOrEventListenerObject,
-  options?: boolean | AddEventListenerOptions,
-): void {
-  if (isPageWideTarget(this)) {
-    if ((type === 'pagehide' || type === 'beforeunload') && looksLikeTrackingListener(listener)) {
+EventTarget.prototype.addEventListener = guardAddEventListener(
+  rawAddEventListener as unknown as (
+    this: unknown,
+    type: unknown,
+    listener: unknown,
+    options?: unknown,
+  ) => unknown,
+  (target, type, listener) =>
+    classifyPageWideListener({ target, type, listener, win: window, doc: document }),
+  (reason, type) => {
+    if (reason === 'unload-beacon') {
       console.debug('[adblow] 已拦截卸载期上报监听器', type);
       return;
     }
-    if (NAVIGATION_EVENT_TYPES.has(type) && looksLikeNavigationHijack(listener)) {
-      console.debug('[adblow] 已拦截文档级跳转处理函数', type);
-      return;
-    }
-  }
-  return rawAddEventListener.call(this, type, listener, options);
-};
+    console.debug('[adblow] 已拦截文档级跳转处理函数', type);
+  },
+  reportFailure,
+) as unknown as typeof EventTarget.prototype.addEventListener;
 
 /**
  * The same check for handlers installed as **IDL properties** (`document.onclick = fn`) or as
@@ -247,7 +284,9 @@ EventTarget.prototype.addEventListener = function patched(
  * `document.onclick = () => { location.href = ad }` kept working.
  *
  * Only the navigation-shaped functions are refused; any other handler installs as usual, so
- * ordinary `onclick` handlers keep working.
+ * ordinary `onclick` handlers keep working. A failing verdict installs the handler exactly as the
+ * platform would (see guardPropertySetter), so a pathological value can never make the assignment
+ * throw where the native setter would have accepted it.
  */
 const patchedHandlerOwners = new WeakSet<object>();
 
@@ -271,13 +310,12 @@ function patchEventHandlerProperties(target: object): void {
         configurable: descriptor?.configurable ?? true,
         enumerable: descriptor?.enumerable ?? true,
         get: getter,
-        set(this: object, value: unknown) {
-          if (looksLikeNavigationHijack(value)) {
-            console.debug('[adblow] 已拦截文档级跳转处理函数', prop);
-            return;
-          }
-          return setter.call(this, value);
-        },
+        set: guardPropertySetter(
+          setter as unknown as (this: object, value: unknown) => unknown,
+          (value) => looksLikeNavigationHijack(value),
+          () => console.debug('[adblow] 已拦截文档级跳转处理函数', prop),
+          reportFailure,
+        ),
       });
       patchedHandlerOwners.add(owner);
     } catch {
@@ -306,8 +344,10 @@ function stripPageWideInlineHandlers(): void {
     for (const attr of INLINE_HANDLER_ATTRS) {
       const value = el.getAttribute(attr);
       if (!value) continue;
-      // Inline handler bodies are source text, not functions: use the text-shaped test.
-      if (!isNavigationSource(value)) continue;
+      // Inline handler bodies are source text, not functions: the same "whole body is one
+      // navigation statement" test applies, so a handler with branches is left alone. A throw
+      // here means "keep the attribute" — removing a working handler is the worse failure.
+      if (!safeVerdict(() => isNavigationSource(value), reportFailure, '行内处理器判定')) continue;
       el.removeAttribute(attr);
       console.debug('[adblow] 已移除页面级行内跳转处理器', attr);
     }
