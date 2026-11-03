@@ -1,4 +1,4 @@
-# 商店提交字段（v1.0.6）
+# 商店提交字段（v1.0.12）
 
 复制粘贴用。每个字段标题后面的数字是字符数，方便对照表单长度限制。
 名称与简述取自扩展自身的 `_locales`，与包内声明一致，不要单独改。
@@ -89,7 +89,7 @@ Known limits
 - popup blocking allows by hostname, so a sign-in or payment button that is not on the allowlist may be refused; the per-site switch in the popup panel resolves that.
 ```
 
-## 新版说明 v1.0.6（中文） · 251 字符
+## 新版说明 v1.0.12（中文） · 251 字符
 
 ```
 - 拦截「点一下弹出广告窗口」：默认拒绝跨站开窗，只在有明确依据时放行（同站地址、指向同一地点的链接、登录/分享/支付这类固定基础设施），约 2,700 个域名的名单作为附加的一层。被拦截的开窗按站点记录，可在规则管理页查看。
@@ -98,7 +98,7 @@ Known limits
 - 元素选取器支持右键菜单入口；cookie 同意提示自动处理；过滤规则增加约 205 条。
 ```
 
-## Release notes v1.0.6 (English) · 731 字符
+## Release notes v1.0.12 (English) · 731 字符
 
 ```
 - Blocks click-triggered ad windows: a cross-site window is refused by default and allowed only with a reason (same-site address, a link pointing at the same place, or sign-in/share/checkout infrastructure), with a list of about 2,700 domains as a second layer. Blocked windows are recorded per site in the rule manager.
@@ -137,8 +137,8 @@ host_permissions (all sites): hiding rules and the main-world guard have to be i
 
 ## 提交前清单
 
-- [ ] 包：`release/adblow-1.0.6-edge.zip`（不要用同名旧文件）
-- [ ] 包内 `manifest.json` 的 `version` 为 1.0.6（`node tools/release/verify-package.mjs` 会解包核对）
+- [ ] 包：`release/adblow-1.0.12-edge.zip`（不要用同名旧文件）
+- [ ] 包内 `manifest.json` 的 `version` 为 1.0.12（`node tools/release/verify-package.mjs` 会解包核对）
 - [ ] 1.0.4 的审核已结束（同一扩展不能有两个待审版本）
 - [ ] 权限清单：`declarativeNetRequest`、`storage`、`activeTab`、`contextMenus`、所有站点；逐项说明见上
 - [ ] 截图与图标：`store/` 下已有 1280×800 截图；截图里需能看出元素选取器与弹窗面板

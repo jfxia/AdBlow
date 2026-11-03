@@ -5,6 +5,22 @@
 
 ---
 
+## v1.0.12
+
+### 中文（简体）
+
+- 修正 Reddit 帖子页只加载一半就停住的问题：一条规则拦掉了应用启动时等待的懒加载脚本分块（`||redditstatic.com/shreddit/sentry-`），请求被拦后既不完成也不报错，评论区永远不出现。该规则现在在构建期排除。
+- 主世界守卫加固：守卫内部异常退化为原生行为，不再抛回页面；只有"整个函数体就是一次跳转"的监听器才会被丢弃。
+- 修正 `json-prune` 的数组路径语义：`[]` 此前被当成字面键名导致规则空转，现按 uBO 语义遍历数组元素。
+
+### English
+
+- Fixed Reddit thread pages stopping halfway: a rule blocked a lazy-loaded chunk the app awaits at boot (`||redditstatic.com/shreddit/sentry-`), and the blocked request neither resolved nor threw, so the thread stopped at its server-rendered content and never showed comments. The rule is now excluded at build time.
+- Hardened the main-world guards: an internal failure now falls back to native behaviour instead of throwing into the page, and a listener is dropped only when its whole body is a single navigation statement.
+- Fixed `json-prune` array-path semantics: `[]` used to be treated as a literal key, so the rule silently did nothing; it now walks array elements the way uBO does.
+
+---
+
 ## v1.0.10
 
 ### 中文（简体）
