@@ -89,7 +89,7 @@ export function inspectRuleSet(rules: readonly DnrLikeRule[], ruleSet: string, s
         domain: hit.join(','),
         ruleId: rule.id,
         ruleSet,
-        match: String(rule.condition?.urlFilter ?? rule.condition?.regexFilter ?? (rule.condition?.requestDomains ?? []).join(',')).slice(0, 100),
+        match: String(rule.condition?.urlFilter ?? rule.condition?.regexFilter ?? (rule.condition?.requestDomains ?? []).join(',')),
         types: (rule.condition?.resourceTypes ?? []).join(',') || '(all)',
       });
     }
@@ -99,7 +99,10 @@ export function inspectRuleSet(rules: readonly DnrLikeRule[], ruleSet: string, s
 
 /** Key used to compare against the reviewed baseline. */
 export function findingKey(finding: OwnDomainFinding): string {
-  return `${finding.site}|${finding.ruleSet}|${finding.ruleId}|${finding.match}`;
+  // Content, not position: a list refresh renumbers every rule id, and an id-based key turned one
+  // refresh into a page of "new" findings. What matters is which match the site is blocked on, and
+  // whether the blocked types can stall it.
+  return `${finding.site}|${finding.types}|${finding.match}`;
 }
 
 /** Findings that are not in the baseline — each of them needs a human decision. */
