@@ -8,18 +8,32 @@ import {
   hostMatchesDomain,
   inspectRuleSet,
   newFindings,
+  type DnrLikeRule,
 } from '../../src/engine/filterList/ownDomainRisk.ts';
 
-const rule = (over) => ({ id: 1, action: { type: 'block' }, condition: {}, ...over });
+/** A block rule with the fields under test filled in. */
+const rule = (over: Partial<DnrLikeRule> = {}): DnrLikeRule => ({
+  id: 1,
+  action: { type: 'block' },
+  condition: {},
+  ...over,
+});
+
+/** The single finding a test expects, with a clear failure message when it is missing. */
+const only = <T>(items: readonly T[]): T => {
+  assert.equal(items.length, 1, `期望 1 条，实际 ${items.length} 条`);
+  assert.ok(items[0] !== undefined);
+  return items[0];
+};
 
 test('Reddit sentry 规则会被高亮（这次的根因形态）', () => {
   const findings = inspectRuleSet(
     [rule({ id: 15753, condition: { urlFilter: '||redditstatic.com/shreddit/sentry-', resourceTypes: ['script'] } })],
     'list-4.json',
   );
-  assert.equal(findings.length, 1);
-  assert.equal(findings[0].site, 'reddit');
-  assert.equal(findings[0].types, 'script');
+  const found = only(findings);
+  assert.equal(found.site, 'reddit');
+  assert.equal(found.types, 'script');
 });
 
 test('只拦图片不算停住风险', () => {
@@ -50,8 +64,11 @@ test('无关域名不产生命中', () => {
 });
 
 test('新条目与基线比较：已有条目不算新', () => {
-  const findings = inspectRuleSet([rule({ id: 7, condition: { urlFilter: '||reddit.com/a', resourceTypes: ['script'] } })], 'list-1.json');
-  const key = findingKey(findings[0]);
+  const findings = inspectRuleSet(
+    [rule({ id: 7, condition: { urlFilter: '||reddit.com/a', resourceTypes: ['script'] } })],
+    'list-1.json',
+  );
+  const key = findingKey(only(findings));
   assert.equal(newFindings(findings, [key]).length, 0);
   assert.equal(newFindings(findings, []).length, 1);
 });
