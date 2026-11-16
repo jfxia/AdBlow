@@ -1,22 +1,22 @@
 {
   "schema": 1,
-  "recordedAt": "2026-11-11T01:19:36.641Z",
-  "packageVersion": "1.0.13",
-  "digest": "b97ebfd3f8dcab3b038d5d23a2f031b3548b52be489a4db0c33db42a9efc18ad",
+  "recordedAt": "2026-11-16T11:43:11.651Z",
+  "packageVersion": "1.0.14",
+  "digest": "8c27bde2e81b6a4a44d48c4bb4eb05687c8e78905ec0b0d49a92a669e6c2f94e",
   "lists": {
-    "easylist": "dc1139af56bd8b82fc8dc0c5bf821f3459f0fd7f114bb2f0feb16ca51f5ecfac",
-    "easylist-china": "648ad5b36550e74453c45990c914a747a285e871ccea3caaeeef8f7b3d5f8fe9",
-    "easyprivacy": "9abafc10a8a0230cd4a1de2267b5d058648ba237279352cb0964ef3caaee97a1",
-    "ublock-badware": "1a737cffced0647248313dc0d49ed756ac40ab4852d4402fe80bc040c4e2a737",
+    "easylist": "cddb035df528bd95b2a0eed3ad5243b72896380df7a051e50c5bc94fcd6346ce",
+    "easylist-china": "ef2fa060347dee53af3a417514ba68ccf9167625ed4433ae63086caee698d5aa",
+    "easyprivacy": "52fe9c0098dd963c34782f752252bbaa0b1ed9ce0d34e8f64f51b94bba539e97",
+    "ublock-badware": "e2077a6e45842afce402d284f2d68174b3a74cb3b282a720e01530790a59e36e",
     "ublock-filters": "2dc619394f56d6e942031fe7940120f1a7a53b13ded071d881ad72b38ce25b55",
-    "ublock-privacy": "b6a965a1accc94b827e718d3ed7f8e3494af079cc83c6738096dcf751ead3054"
+    "ublock-privacy": "fbf0c85afdcab82ed07bcfab89aeea10c02e28ab9e035dce6ef9de1083c069f0"
   },
   "counts": {
     "budget": 29500,
-    "compiled": 21066,
+    "compiled": 21096,
     "exceptions": 2358,
-    "input": 122928,
-    "packedDomains": 101356,
+    "input": 123227,
+    "packedDomains": 101633,
     "packedRules": 113,
     "rulesetCount": 6
   }
